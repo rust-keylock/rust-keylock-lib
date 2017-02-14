@@ -1,0 +1,3 @@
+[target.arm-linux-androideabi.dependencies.std]
+features = ["jemalloc"]
+

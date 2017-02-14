@@ -1,0 +1,24 @@
+[package]
+name = "rust_keylock"
+version = "0.1.0"
+authors = ["aston <astonbitecode@gmail.com>"]
+
+[lib]
+name = "rust_keylock"
+crate-type = ["rlib", "dylib"]
+
+[dependencies]
+rust-crypto = { git = "https://github.com/astonbitecode/rust-crypto" }
+toml = "0.2"
+rustc-serialize = "0.3"
+rand = "0.3"
+log = "0.3"
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+
+[profile.test]
+panic = "abort"
