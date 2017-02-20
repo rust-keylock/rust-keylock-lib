@@ -1,3 +1,5 @@
+![Build Status](https://travis-ci.org/rust-keylock/rust-keylock-lib.svg?branch=master)
+
 ___rust-keylock___ is a password manager. The main logic is written in [Rust](https://www.rust-lang.org), but the presentation/User interaction parts are written in different languages.
 
 Our goals are that _rust-keylock_ must be:
