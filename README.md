@@ -2,7 +2,7 @@
 
 ___rust-keylock___ is a password manager. The main logic is written in [Rust](https://www.rust-lang.org), but the presentation/User interaction parts are written in different languages.
 
-Our goals are that _rust-keylock_ must be:
+Goals are that _rust-keylock_ must be:
 
 * Secure
 * Simple to use
@@ -11,6 +11,6 @@ Our goals are that _rust-keylock_ must be:
 
 # The _rust-keylock_ library
 
-This library executes the logic of the _rust-keylock_.
+This library is the executor of the _rust-keylock_ logic. The interaction with the _rust-keylock_ users is done via other libraries, that have presentation responsibilities (aka [Editors](https://github.com/rust-keylock/rust-keylock-lib/blob/master/src/lib.rs)).
 
-It can be viewed as the executor of the _rust-keylock_ logic. `Editor` references are used to interact with the _rust-keylock_ users.
+Currently, there are Editors and executables for [Android](https://github.com/rust-keylock/rust-keylock-android) and [Terminal](https://github.com/rust-keylock/rust-keylock-shell).
