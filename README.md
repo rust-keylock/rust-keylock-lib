@@ -11,6 +11,8 @@ Goals are that _rust-keylock_ must be:
 
 # The _rust-keylock_ library
 
-This library is the executor of the _rust-keylock_ logic. The interaction with the _rust-keylock_ users is done via other libraries, that have presentation responsibilities (aka [Editors](https://github.com/rust-keylock/rust-keylock-lib/blob/master/src/lib.rs)).
+This library is the executor of the _rust-keylock_ logic. The interaction with the _rust-keylock_ users is done via other libraries, that have presentation responsibilities (aka [Editors](https://rust-keylock.github.io/rust-keylock-lib/rust_keylock/trait.Editor.html)).
+
+The documentation of the library can be found [here](https://rust-keylock.github.io/rust-keylock-lib/rust_keylock/).
 
 Currently, there are Editors and executables for [Android](https://github.com/rust-keylock/rust-keylock-android) and [Terminal](https://github.com/rust-keylock/rust-keylock-shell).
