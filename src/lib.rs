@@ -90,41 +90,33 @@ pub fn execute<T: Editor>(editor: &T) {
 		Err(error) => panic!("Could not load properties: {}", error.description()),
 	};
 
-	let mut entries;
+	let mut entries = Vec::new();
 	let mut contents_changed = false;
 
+	// Create a Cryptor
 	let mut cryptor = {
+		// First time run?
 		let provided_password = if file_handler::is_first_run(filename) {
 			editor.show_change_password()
 		}
 		else {
 			editor.show_password_enter()
 		};
-		match provided_password {
-			UserSelection::ProvidedPassword(pwd, salt_pos) => {
-				let cr = file_handler::create_bcryptor(filename, pwd, salt_pos, false, true);
-				let retrieved_entries = match file_handler::load(filename, &cr, true) {
-					Ok(ents) => {
-						user_selection = UserSelection::GoTo(Menu::Main);
-						ents
-					},
-					Err(error) => {
-						debug!("{}", error.description());
-						user_selection = UserSelection::GoTo(Menu::TryFileRecovery);
-						Vec::new()
-					},
-				};
-				entries = retrieved_entries;
-				debug!("Retrieved entries. Returning {:?} with {} entries ", &user_selection, &entries.len());
-				cr
-			},
-			_ => panic!("Wrong initialization sequence... The editor.show_password_enter must always return a UserSelection::ProvidedPassword. Please, consider opening a bug to the developers."),
-		}
+
+		// Take the provided password and do the initialization
+		let(us, cr) = handle_provided_password_for_init(provided_password, filename, &mut entries, editor);
+		user_selection = us;
+		cr
 	};
 
 	loop {
 		editor.sort_entries(&mut entries);
 		user_selection = match user_selection {
+			UserSelection::GoTo(Menu::TryPass) => {
+				let(user_selection, cr) = handle_provided_password_for_init(editor.show_password_enter(), filename, &mut entries, editor);
+				cryptor = cr;
+				user_selection
+			}
 			UserSelection::GoTo(Menu::Main) => {
 				debug!("UserSelection::GoTo(Menu::Main)");
 				let m = editor.show_menu(&Menu::Main, &entries);
@@ -205,8 +197,9 @@ pub fn execute<T: Editor>(editor: &T) {
 			UserSelection::GoTo(Menu::TryFileRecovery) => {
 				debug!("UserSelection::GoTo(Menu::TryFileRecovery)");
 				let _ = editor.show_message("The password entries are corrupted.\n\nPress Enter to attempt recovery...");
-				entries = file_handler::recover(filename, &cryptor).unwrap();
-				let message = r#"
+				entries = match file_handler::recover(filename, &cryptor) {
+					Ok(recovered_entries) => {
+						let message = r#"
 Recovery succeeded...
 
 Note the errors that caused the recovery. You may see some useful information about possible values that could not be recovered.
@@ -214,8 +207,18 @@ Press Enter to show the Recovered Entries and if you are ok with it, save them.
 
 Warning: Saving will discard all the entries that could not be recovered.
 "#;
-				let _ = editor.show_message(message);
-				contents_changed = true;
+						let _ = editor.show_message(message);
+						contents_changed = true;
+						recovered_entries
+					}
+					Err(error) => {
+						let message = format!("Recovery failed... Reason {:?}", error);
+						error!("{}", &message);
+						let _ = editor.show_message("Recovery failed...");
+						entries
+					}
+				};
+
 				UserSelection::GoTo(Menu::EntriesList)
 			},
 			UserSelection::GoTo(Menu::ExportEntries) => {
@@ -264,6 +267,46 @@ Warning: Saving will discard all the entries that could not be recovered.
 		}
 	}
 	info!("Exiting rust-keylock...");
+}
+
+fn handle_provided_password_for_init(provided_password: UserSelection, filename: &str, entries: &mut Vec<Entry>, editor: &Editor) -> (UserSelection, datacrypt::BcryptAes) {
+	let user_selection: UserSelection;
+	match provided_password {
+		UserSelection::ProvidedPassword(pwd, salt_pos) => {
+			// New Cryptor here
+			let cr = file_handler::create_bcryptor(filename, pwd, salt_pos, false, true);
+			// Try to decrypt and load the Entries
+			let retrieved_entries = match file_handler::load(filename, &cr, true) {
+				// Success, go th the Main menu
+				Ok(ents) => {
+					user_selection = UserSelection::GoTo(Menu::Main);
+					ents
+				},
+				// Failure cases
+				Err(error) => {
+					match error {
+						// If Parse error, try recovery
+						errors::RustKeylockError::ParseError(desc) => {
+							warn!("{}", desc);
+							user_selection = UserSelection::GoTo(Menu::TryFileRecovery);
+							Vec::new()
+						},
+						// In all the other cases, notify the User and retry
+						_ => {
+							error!("{}", error.description());
+							let _ = editor.show_message("Wrong password or number");
+							user_selection = UserSelection::GoTo(Menu::TryPass);
+							Vec::new()
+						}
+					}
+				},
+			};
+			*entries = retrieved_entries;
+			debug!("Retrieved entries. Returning {:?} with {} entries ", &user_selection, &entries.len());
+			(user_selection, cr)
+		},
+		_ => panic!("Wrong initialization sequence... The editor.show_password_enter must always return a UserSelection::ProvidedPassword. Please, consider opening a bug to the developers."),
+	}
 }
 
 /// Merges the main Entries Vector with an incoming one, by appending the incoming elements that are not the same with some existing one in the main

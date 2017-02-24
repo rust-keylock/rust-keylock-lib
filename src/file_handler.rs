@@ -1,8 +1,7 @@
 use super::{ Entry, Props };
 use super::datacrypt::{ Cryptor, BcryptAes };
-use super::errors::RustKeylockError;
+use super::errors::{self, RustKeylockError};
 use std::io::prelude::*;
-use std::io;
 #[cfg(not(target_os = "android"))]
 use std::env;
 use std::fs::{ self, File };
@@ -38,7 +37,7 @@ pub fn create_bcryptor(filename: &str, password: String, salt_position: usize, r
 	    		// The actual salt position is the one selected by the user, plus 16 bytes because the first 16 bytes is the iv
 	        	let actual_salt_position = salt_position + 16;
 	        	// If the bytes are not more than 32 (iv+salt) it means that there is no data for entries
-			    let salt = if bytes.len() > 32 && !reinitialize_randoms {
+			    let salt = if bytes.len() > 32 && !reinitialize_randoms && bytes.len() >= actual_salt_position {
 			    	bytes.iter().skip(actual_salt_position).take(16).map(|b_res| {
 	        			match b_res {
 	        				&Ok(b) => b.clone(),
@@ -80,7 +79,7 @@ pub fn load(filename: &str, cryptor: &Cryptor, use_default_location: bool) -> Re
 		toml_path(filename)
 	};
 	debug!("Full Path to load: {:?}", full_path);
-    let toml = load_existing_file(&full_path, Some(cryptor));
+    let toml = try!(load_existing_file(&full_path, Some(cryptor)));
 
     let mut parser = Parser::new(toml.as_str());
     match parser.parse() {
@@ -95,7 +94,7 @@ pub fn load_properties(filename: &str) -> Result<Props, RustKeylockError> {
 	debug!("Loading Properties from {}", filename);
 	let full_path = default_toml_path(filename);
 	debug!("Full Path to load properties from: {:?}", full_path);
-    let toml = load_existing_file(&full_path, None);
+    let toml = try!(load_existing_file(&full_path, None));
 
 	if toml.len() == 0 {
 		Ok(Props::empty())
@@ -113,7 +112,7 @@ pub fn recover(filename: &str, cryptor: &Cryptor) -> Result<Vec<Entry>, RustKeyl
 	info!("Trying to recover {}", filename);
 	let full_path = default_toml_path(filename);
 	info!("Full path of file to recover {:?}", full_path);
-    let toml = load_existing_file(&full_path, Some(cryptor));
+    let toml = try!(load_existing_file(&full_path, Some(cryptor)));
 
     let mut parser = Parser::new(toml.as_str());
     match parser.parse() {
@@ -186,7 +185,7 @@ fn transform_to_dtos(table: Table, recover: bool) -> Result<Vec<Entry>, RustKeyl
 	    				if recover {
 	    					Ok(vec.into_iter().filter(|opt| opt.is_some()).map(|opt| opt.unwrap()).collect())
 	    				} else {
-		    				Err(RustKeylockError::GeneralError("Failed because of previous errors (during mapping)"))
+		    				Err(RustKeylockError::GeneralError("Failed because of previous errors (during mapping)".to_string()))
 	    				}
 	    			}
 	    			else {
@@ -201,14 +200,17 @@ fn transform_to_dtos(table: Table, recover: bool) -> Result<Vec<Entry>, RustKeyl
 }
 
 /// Loads a file that contains a toml String and returns this String
-fn load_existing_file<'a>(file_path: &PathBuf, cryptor_opt: Option<&Cryptor>) -> String {
+fn load_existing_file<'a>(file_path: &PathBuf, cryptor_opt: Option<&Cryptor>) -> Result<String, RustKeylockError> {
 	let bytes = {
 		match File::open(file_path) {
 			Ok(file) => {
 				file.bytes().map(|b_res| {
 					match b_res {
 						Ok(b) => b.clone(),
-						Err(error) => panic!("Could not read from File while loading {:?}", error),
+						Err(error) => {
+							error!("Could not read from File while loading {:?}", error);
+							panic!("Could not read from File while loading {:?}", error)
+						},
 					}
 				}).collect()
 				
@@ -226,31 +228,24 @@ fn load_existing_file<'a>(file_path: &PathBuf, cryptor_opt: Option<&Cryptor>) ->
 		Some(cryptor) => {
 			if bytes.len() > 0 {
 				debug!("Decrypting passwords file...");
-				match cryptor.decrypt(&bytes) {
-					Ok(dbytes) => String::from_utf8(dbytes).unwrap(),
-					Err(error) => {
-						let message = format!("Error during decryption: {:?}", error);
-						error!("{}", message);
-						panic!(message)
-					}
-				}
+				let dbytes = try!(cryptor.decrypt(&bytes));
+				Ok(try!(String::from_utf8(dbytes)))
 			} else {
-				"".to_string()
+				Ok("".to_string())
 			}
 		},
-		None => String::from_utf8(bytes).unwrap(),
+		None => Ok(try!(String::from_utf8(bytes))),
 	}
 }
 
 /// Saves the specified entries to a toml file with the specified name
-pub fn save(entries: &Vec<Entry>, filename: &str, cryptor: &Cryptor, use_default_location: bool) -> io::Result<()> {
+pub fn save(entries: &Vec<Entry>, filename: &str, cryptor: &Cryptor, use_default_location: bool) -> errors::Result<()> {
 	info!("Saving Entries in {}", filename);
 	let path_buf = if use_default_location {
 		default_toml_path(filename)
 	} else {
 		toml_path(filename)
 	};
-	let path = path_buf.to_str().unwrap();
 	let tables_vec = entries.iter().map(|entry| {
 		toml::Value::Table(entry.to_table())
 	}).collect();
@@ -261,37 +256,25 @@ pub fn save(entries: &Vec<Entry>, filename: &str, cryptor: &Cryptor, use_default
     } else {
     	"".to_string()
     };
-    // TODO: Handle the errors from the cryptor
-    let ebytes = cryptor.encrypt(toml_string.as_bytes()).unwrap();
+
+    let ebytes = try!(cryptor.encrypt(toml_string.as_bytes()));
     debug!("Encrypted entries");
-    match File::create(path) {
-        Ok(mut file) => {
-            try!(file.write_all(&ebytes));
-            info!("Entries saved in {}. Syncing...", filename);
-            file.sync_all()
-        }
-        Err(error) => {
-        	error!("Could not create file {}: {:?}", path, error);
-        	panic!("Could not create file {}: {:?}", path, error)
-        },
-    }
+    let mut file = try!(File::create(path_buf));
+    try!(file.write_all(&ebytes));
+    info!("Entries saved in {}. Syncing...", filename);
+    Ok(try!(file.sync_all()))
 }
 
 /// Saves the specified Props to a toml file with the specified name
-pub fn save_props(props: &Props, filename: &str) -> io::Result<()> {
+pub fn save_props(props: &Props, filename: &str) -> errors::Result<()> {
 	info!("Saving Properties in {}", filename);
 	let path_buf = default_toml_path(filename);
-	let path = path_buf.to_str().unwrap();
-    match File::create(path) {
-        Ok(mut file) => {
-        	let table = props.to_table();
-            let toml_string = toml::encode_str(&table);
-            try!(file.write_all(toml_string.as_bytes()));
-            info!("Properties saved in {}. Syncing...", filename);
-            file.sync_all()
-        }
-        Err(error) => panic!("Could not create properties file {}: {:?}", path, error),
-    }
+	let mut file = try!(File::create(path_buf));
+	let table = props.to_table();
+    let toml_string = toml::encode_str(&table);
+    try!(file.write_all(toml_string.as_bytes()));
+    info!("Properties saved in {}. Syncing...", filename);
+    Ok(try!(file.sync_all()))
 }
 
 #[cfg(test)]

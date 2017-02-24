@@ -2,17 +2,18 @@
 use rand::{ Rng, OsRng };
 use std::iter::repeat;
 use crypto::bcrypt::bcrypt;
-use crypto::{ symmetriccipher, buffer, aes };
+use crypto::{ buffer, aes };
 use crypto::buffer::{ ReadBuffer, WriteBuffer, BufferResult };
 use crypto::symmetriccipher::{ Encryptor, Decryptor };
+use super::errors::RustKeylockError;
 
 const NUMBER_OF_SALT_KEY_PAIRS: usize = 10;
 
 pub trait Cryptor {
 	///Decrypts a given array of bytes
-	fn decrypt(&self, input: &[u8]) -> Result<Vec<u8>, symmetriccipher::SymmetricCipherError>;
+	fn decrypt(&self, input: &[u8]) -> Result<Vec<u8>, RustKeylockError>;
 	///Encrypts a given array of bytes
-	fn encrypt(&self, input: &[u8]) -> Result<Vec<u8>, symmetriccipher::SymmetricCipherError>;
+	fn encrypt(&self, input: &[u8]) -> Result<Vec<u8>, RustKeylockError>;
 }
 
 ///Encrypts and Decrypts using bcrypt-created password
@@ -71,7 +72,7 @@ impl BcryptAes {
 }
 
 impl Cryptor for BcryptAes {
-	fn decrypt(&self, input: &[u8]) -> Result<Vec<u8>, symmetriccipher::SymmetricCipherError> {
+	fn decrypt(&self, input: &[u8]) -> Result<Vec<u8>, RustKeylockError> {
 		let bytes_to_decrypt = extract_bytes_to_decrypt(input, self.salt_position);
 
 	    // Code taken from the rust-crypto example
@@ -98,7 +99,7 @@ impl Cryptor for BcryptAes {
 	    Ok(final_result)
 	}
 
-	fn encrypt(&self, input: &[u8]) -> Result<Vec<u8>, symmetriccipher::SymmetricCipherError> {
+	fn encrypt(&self, input: &[u8]) -> Result<Vec<u8>, RustKeylockError> {
 		// Create a new iv
 		let iv = create_random(16);
 		// Choose randomly one of the salt-key pairs
@@ -153,11 +154,11 @@ impl NoCryptor {
 }
 
 impl Cryptor for NoCryptor {
-	fn decrypt(&self, input: &[u8]) -> Result<Vec<u8>, symmetriccipher::SymmetricCipherError> {
+	fn decrypt(&self, input: &[u8]) -> Result<Vec<u8>, RustKeylockError> {
 		Ok(Vec::from(input))
 	}
 	
-	fn encrypt(&self, input: &[u8]) -> Result<Vec<u8>, symmetriccipher::SymmetricCipherError> {
+	fn encrypt(&self, input: &[u8]) -> Result<Vec<u8>, RustKeylockError> {
 		Ok(Vec::from(input))
 	}
 }
