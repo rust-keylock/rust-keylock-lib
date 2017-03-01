@@ -90,7 +90,7 @@ pub fn execute<T: Editor>(editor: &T) {
 		Err(error) => panic!("Could not load properties: {}", error.description()),
 	};
 
-	let mut entries = Vec::new();
+	let mut safe = Safe::new();
 	let mut contents_changed = false;
 
 	// Create a Cryptor
@@ -104,22 +104,22 @@ pub fn execute<T: Editor>(editor: &T) {
 		};
 
 		// Take the provided password and do the initialization
-		let(us, cr) = handle_provided_password_for_init(provided_password, filename, &mut entries, editor);
+		let(us, cr) = handle_provided_password_for_init(provided_password, filename, &mut safe, editor);
 		user_selection = us;
 		cr
 	};
 
 	loop {
-		editor.sort_entries(&mut entries);
+		editor.sort_entries(&mut safe.entries);
 		user_selection = match user_selection {
 			UserSelection::GoTo(Menu::TryPass) => {
-				let(user_selection, cr) = handle_provided_password_for_init(editor.show_password_enter(), filename, &mut entries, editor);
+				let(user_selection, cr) = handle_provided_password_for_init(editor.show_password_enter(), filename, &mut safe, editor);
 				cryptor = cr;
 				user_selection
 			}
 			UserSelection::GoTo(Menu::Main) => {
 				debug!("UserSelection::GoTo(Menu::Main)");
-				let m = editor.show_menu(&Menu::Main, &entries);
+				let m = editor.show_menu(&Menu::Main, &safe);
 				debug!("UserSelection::GoTo(Menu::Main) returns {:?}", &m);
 				m
 			},
@@ -135,27 +135,27 @@ pub fn execute<T: Editor>(editor: &T) {
 			},
 			UserSelection::GoTo(Menu::EntriesList) => {
 				debug!("UserSelection::GoTo(Menu::EntriesList)");
-				editor.show_menu(&Menu::EntriesList, &entries)
+				editor.show_menu(&Menu::EntriesList, &safe)
 			},
 			UserSelection::GoTo(Menu::NewEntry) => {
 				debug!("UserSelection::GoTo(Menu::NewEntry)");
-				editor.show_menu(&Menu::NewEntry, &entries)
+				editor.show_menu(&Menu::NewEntry, &safe)
 			},
 			UserSelection::GoTo(Menu::ShowEntry(index)) => {
 				debug!("UserSelection::GoTo(Menu::ShowEntry(index))");
-				editor.show_menu(&Menu::ShowEntry(index), &entries)
+				editor.show_menu(&Menu::ShowEntry(index), &safe)
 			},
 			UserSelection::GoTo(Menu::EditEntry(index)) => {
 				debug!("UserSelection::GoTo(Menu::EditEntry(index))");
-				editor.show_menu(&Menu::EditEntry(index), &entries)
+				editor.show_menu(&Menu::EditEntry(index), &safe)
 			},
 			UserSelection::GoTo(Menu::DeleteEntry(index)) => {
 				debug!("UserSelection::GoTo(Menu::DeleteEntry(index))");
-				editor.show_menu(&Menu::DeleteEntry(index), &entries)
+				editor.show_menu(&Menu::DeleteEntry(index), &safe)
 			},
 			UserSelection::GoTo(Menu::Save) => {
 				debug!("UserSelection::GoTo(Menu::Save)");
-				match file_handler::save(&entries, filename, &cryptor, true) {
+				match file_handler::save(&safe.get_entries_decrypted(), filename, &cryptor, true) {
 					Ok(_) => {
 						contents_changed = false;
 						let _ = editor.show_message("Encrypted and saved successfully!");
@@ -177,27 +177,26 @@ pub fn execute<T: Editor>(editor: &T) {
 			},
 			UserSelection::NewEntry(entry) => {
 				debug!("UserSelection::NewEntry(entry)");
-				entries.push(entry);
+				safe.add_entry(entry);
 				contents_changed = true;
 				UserSelection::GoTo(Menu::EntriesList)
 			},
 			UserSelection::ReplaceEntry(index, entry) => {
 				debug!("UserSelection::ReplaceEntry(index, entry)");
-				entries.push(entry);
 				contents_changed = true;
-				entries.swap_remove(index);
+				safe.replace_entry(index, entry);
 				UserSelection::GoTo(Menu::EntriesList)
 			},
 			UserSelection::DeleteEntry(index) => {
 				debug!("UserSelection::DeleteEntry(index)");
-				entries.remove(index);
+				safe.remove_entry(index);
 				contents_changed = true;
 				UserSelection::GoTo(Menu::EntriesList)
 			},
 			UserSelection::GoTo(Menu::TryFileRecovery) => {
 				debug!("UserSelection::GoTo(Menu::TryFileRecovery)");
 				let _ = editor.show_message("The password entries are corrupted.\n\nPress Enter to attempt recovery...");
-				entries = match file_handler::recover(filename, &cryptor) {
+				let mut rec_entries = match file_handler::recover(filename, &cryptor) {
 					Ok(recovered_entries) => {
 						let message = r#"
 Recovery succeeded...
@@ -209,25 +208,27 @@ Warning: Saving will discard all the entries that could not be recovered.
 "#;
 						let _ = editor.show_message(message);
 						contents_changed = true;
+						safe.entries.clear();
 						recovered_entries
 					}
 					Err(error) => {
 						let message = format!("Recovery failed... Reason {:?}", error);
 						error!("{}", &message);
 						let _ = editor.show_message("Recovery failed...");
-						entries
+						safe.entries.clone()
 					}
 				};
+				safe.entries.append(&mut rec_entries);
 
 				UserSelection::GoTo(Menu::EntriesList)
 			},
 			UserSelection::GoTo(Menu::ExportEntries) => {
 				debug!("UserSelection::GoTo(Menu::ExportEntries)");
-				editor.show_menu(&Menu::ExportEntries, &entries)
+				editor.show_menu(&Menu::ExportEntries, &safe)
 			}
 			UserSelection::ExportTo(path) => {
 				debug!("UserSelection::ExportTo(path)");
-				match file_handler::save(&entries, &path, &cryptor, false) {
+				match file_handler::save(&safe.get_entries_decrypted(), &path, &cryptor, false) {
 					Ok(_) => {
 						let _ = editor.show_message("Export completed successfully!");
 					},
@@ -240,16 +241,16 @@ Warning: Saving will discard all the entries that could not be recovered.
 			}
 			UserSelection::GoTo(Menu::ImportEntries) => {
 				debug!("UserSelection::GoTo(Menu::ImportEntries)");
-				editor.show_menu(&Menu::ImportEntries, &entries)
+				editor.show_menu(&Menu::ImportEntries, &safe)
 			}
 			UserSelection::ImportFrom(path, pwd, salt_pos) => {
 				let cr = file_handler::create_bcryptor(&path, pwd, salt_pos, false, false);
 				debug!("UserSelection::ImportFrom(path, pwd, salt_pos)");
 				match file_handler::load(&path, &cr, false) {
 					Ok(ents) => {
-						debug!("Imported {} entries ", &ents.len());
+						debug!("Imported {} entries", &ents.len());
 						contents_changed = true;
-						merge(&mut entries, ents);
+						safe.merge(ents);
 						let _ = editor.show_message("Passwords were successfully imported!");
 					},
 					Err(error) => {
@@ -269,7 +270,7 @@ Warning: Saving will discard all the entries that could not be recovered.
 	info!("Exiting rust-keylock...");
 }
 
-fn handle_provided_password_for_init(provided_password: UserSelection, filename: &str, entries: &mut Vec<Entry>, editor: &Editor) -> (UserSelection, datacrypt::BcryptAes) {
+fn handle_provided_password_for_init(provided_password: UserSelection, filename: &str, safe: &mut Safe, editor: &Editor) -> (UserSelection, datacrypt::BcryptAes) {
 	let user_selection: UserSelection;
 	match provided_password {
 		UserSelection::ProvidedPassword(pwd, salt_pos) => {
@@ -301,28 +302,12 @@ fn handle_provided_password_for_init(provided_password: UserSelection, filename:
 					}
 				},
 			};
-			*entries = retrieved_entries;
-			debug!("Retrieved entries. Returning {:?} with {} entries ", &user_selection, &entries.len());
+			safe.add_all(retrieved_entries);
+			debug!("Retrieved entries. Returning {:?} with {} entries ", &user_selection, safe.entries.len());
 			(user_selection, cr)
 		},
 		_ => panic!("Wrong initialization sequence... The editor.show_password_enter must always return a UserSelection::ProvidedPassword. Please, consider opening a bug to the developers."),
 	}
-}
-
-/// Merges the main Entries Vector with an incoming one, by appending the incoming elements that are not the same with some existing one in the main
-fn merge(main: &mut Vec<Entry>, incoming: Vec<Entry>) {
-	let mut to_add = {
-		incoming.into_iter().filter(|entry| {
-			let mut main_iter = main.clone().into_iter();
-			let opt = main_iter.find(|main_entry| {
-					main_entry == entry
-			});
-
-			opt.is_none()
-		}).collect()
-	};
-
-	main.append(&mut to_add);
 }
 
 /// Struct that defines a password entry.
@@ -338,6 +323,8 @@ pub struct Entry {
     pub pass: String,
     ///A description of the `Entry`
     pub desc: String,
+    ///Whether the Entry has encrypted elements (like password)
+    pub encrypted: bool,
 }
 
 impl Entry {
@@ -348,6 +335,7 @@ impl Entry {
             user: user,
             pass: pass,
             desc: desc,
+            encrypted: false,
         }
     }
 
@@ -358,6 +346,7 @@ impl Entry {
             user: "".to_string(),
             pass: "".to_string(),
             desc: "".to_string(),
+            encrypted: false,
         }
     }
 
@@ -399,6 +388,131 @@ impl Entry {
 		table.insert("desc".to_string(), toml::Value::String(self.desc.clone()));
 
 		table
+	}
+
+	fn encrypted(&self, cryptor: &datacrypt::EntryPasswordCryptor) -> Entry {
+		let (encrypted_password, encryption_succeeded) = match cryptor.encrypt_str(&self.pass) {
+			Ok(encrypted) => (encrypted, true),
+			Err(_) => {
+				error!("Could not encrypt password for {}. Defaulting in keeping it in plain...", &self.name);
+				(self.pass.clone(), false)
+			},
+		};
+		Entry {
+			name: self.name.clone(),
+            user: self.user.clone(),
+            pass: encrypted_password,
+            desc: self.desc.clone(),
+            encrypted: encryption_succeeded,
+		}
+	}
+
+	pub fn decrypted(&self, cryptor: &datacrypt::EntryPasswordCryptor) -> Entry {
+		let decrypted_password = if self.encrypted {
+			match cryptor.decrypt_str(&self.pass) {
+				Ok(decrypted) => decrypted,
+				Err(_) => {
+					self.pass.clone()
+				},
+			}
+		} else {
+			self.pass.clone()
+		};
+		Entry::new(self.name.clone(), self.user.clone(), decrypted_password, self.desc.clone())
+	}
+}
+
+///Holds the data that should be safe and secret.
+///
+///This includes the password entries and a Cryptor that is used to encrypt the passwords of the entries when they are stored in memory
+///and decrypt them when needed (to be presented to the User)
+pub struct Safe {
+	entries: Vec<Entry>,
+	password_cryptor: datacrypt::EntryPasswordCryptor,
+}
+
+impl Default  for Safe {
+    fn default() -> Self {
+    	Safe {
+			entries: Vec::new(),
+			password_cryptor: datacrypt::EntryPasswordCryptor::new(),
+		}
+    }
+} 
+
+impl Safe {
+	pub fn new() -> Safe {
+		Safe {
+			entries: Vec::new(),
+			password_cryptor: datacrypt::EntryPasswordCryptor::new(),
+		}
+	}
+
+	///Adds an Entry to the Safe, with the Entry password encrypted
+	fn add_entry(&mut self, new_entry: Entry) {
+		self.entries.push(new_entry.encrypted(&self.password_cryptor));
+	}
+
+	///Replaces an Entry in the Safe, with a new Entry that has the password encrypted
+	fn replace_entry(&mut self, index: usize, entry: Entry) {
+		self.entries.push(entry.encrypted(&self.password_cryptor));
+		self.entries.swap_remove(index);
+	}
+
+	///Removes an Entry from the Safe
+	fn remove_entry(&mut self, index: usize) {
+		self.entries.remove(index);
+	}
+
+	///Merges the Entries, by appending the incoming elements that are not the same with some existing one in Safe
+	fn merge(&mut self, incoming: Vec<Entry>) {
+		let mut to_add = {
+			incoming.into_iter().filter(|entry| {
+				let mut main_iter = self.entries.clone().into_iter();
+				let opt = main_iter.find(|main_entry| {
+						main_entry == entry
+				});
+	
+				opt.is_none()
+			})
+			.map(|entry| entry.encrypted(&self.password_cryptor))
+			.collect()
+		};
+	
+		self.entries.append(&mut to_add);
+	}
+
+	///Adds the Entrie in the Safe
+	fn add_all(&mut self, incoming: Vec<Entry>) {
+		let mut to_add = {
+			incoming.into_iter()
+			.map(|entry| entry.encrypted(&self.password_cryptor))
+			.collect()
+		};
+
+		self.entries.append(&mut to_add);
+	}
+
+	///Retrieves an Entry at a given index
+	pub fn get_entry(&self, index: usize) -> &Entry {
+		&self.entries[index]
+	}
+
+	///Retrieves an Entry at a given index with the password decrypted
+	pub fn get_entry_decrypted(&self, index: usize) -> Entry {
+		self.get_entry(index).decrypted(&self.password_cryptor)
+	}
+
+	///Retrieves an Entry at a given index
+	pub fn get_entries(&self) -> &[Entry] {
+		&self.entries
+	}
+
+	///Retrieves all Entries with the passwords decrypted
+	fn get_entries_decrypted(&self) -> Vec<Entry> {
+		self.get_entries().into_iter()
+			.map(|entry| entry.decrypted(&self.password_cryptor))
+			.collect()
 	}
 }
 
@@ -568,7 +682,7 @@ pub trait Editor {
 	///Shows the interface for changing a Password and/or a Number.
 	fn show_change_password(&self) -> UserSelection;
 	///Shows the specified `Menu` to the User.
-	fn show_menu(&self, menu: &Menu, entries: &[Entry]) -> UserSelection;
+	fn show_menu(&self, menu: &Menu, safe: &Safe) -> UserSelection;
 	///Shows the Exit `Menu` to the User.
 	fn exit(&self, contents_changed: bool) -> UserSelection;
 	///Shows a message to the User.
@@ -584,6 +698,7 @@ pub trait Editor {
 mod unit_tests {
     use toml;
     use super::{Menu, Entry};
+    use super::datacrypt::EntryPasswordCryptor;
 
     #[test]
     fn entry_from_table_success() {
@@ -650,6 +765,27 @@ mod unit_tests {
     }
 
 	#[test]
+    fn entry_to_encrypted() {
+    	let cryptor = EntryPasswordCryptor::new();
+        let entry = super::Entry::new("name".to_string(), "user".to_string(), "pass".to_string(), "desc".to_string());
+        let enc_entry = entry.encrypted(&cryptor);
+        assert!(enc_entry.name == entry.name);
+        assert!(enc_entry.user == entry.user);
+        assert!(enc_entry.pass != entry.pass);
+        assert!(enc_entry.desc == entry.desc);
+        let dec_entry = enc_entry.decrypted(&cryptor);
+        assert!(dec_entry.pass == entry.pass);
+    }
+
+	#[test]
+    fn entry_to_encrypted_encryption_may_fail() {
+    	let cryptor = EntryPasswordCryptor::new();
+        let entry = super::Entry::new("name".to_string(), "user".to_string(), "pass".to_string(), "desc".to_string());
+        let dec_entry = entry.decrypted(&cryptor);
+        assert!(dec_entry.pass == entry.pass);
+    }
+
+	#[test]
     fn props_from_table_success() {
         let toml = r#"salt = "alas""#;
 
@@ -712,24 +848,143 @@ mod unit_tests {
 
 	#[test]
 	fn merge_entries() {
-		let mut all = vec![
+		let mut safe = super::Safe::new();
+		assert!(safe.entries.len() == 0);
+
+		// Add some initial Entries
+		let all = vec![
 			Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "1".to_string()),
 			Entry::new("2".to_string(), "2".to_string(), "2".to_string(), "2".to_string()),
 		];
+		safe.entries = all;
 
 		// This one should be added
 		let first = vec![Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string())];
-		super::merge(&mut all, first);
-		assert!(all.len() == 3);
+		safe.merge(first);
+		assert!(safe.entries.len() == 3);
 
 		// This one should not be added
 		let second = vec![Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "1".to_string())];
-		super::merge(&mut all, second);
-		assert!(all.len() == 3);
+		safe.merge(second);
+		assert!(safe.entries.len() == 3);
 
 		// This one should not be added either (the description is not the same with any of the existing ones
 		let third = vec![Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "3".to_string())];
-		super::merge(&mut all, third);
-		assert!(all.len() == 4);
+		safe.merge(third);
+		assert!(safe.entries.len() == 4);
+	}
+
+	#[test]
+	fn add_entry() {
+		let mut safe = super::Safe::new();
+		let entry = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
+		safe.add_entry(entry.clone());
+		assert!(safe.entries.len() == 1);
+		assert!(safe.entries[0].name == entry.name);
+		assert!(safe.entries[0].user == entry.user);
+		assert!(safe.entries[0].pass != entry.pass);
+		assert!(safe.entries[0].desc == entry.desc);
+	}
+
+	#[test]
+	fn replace_entry() {
+		let mut safe = super::Safe::new();
+		let entry = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
+		safe.add_entry(entry.clone());
+		let new_entry = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string());
+		safe.replace_entry(1, new_entry.clone());
+
+		assert!(safe.entries.len() == 1);
+		assert!(safe.entries[0].name != new_entry.name);
+		assert!(safe.entries[0].user != new_entry.user);
+		assert!(safe.entries[0].pass != new_entry.pass);
+		assert!(safe.entries[0].desc != new_entry.desc);
+	}
+
+	#[test]
+	fn remove_entry() {
+		let mut safe = super::Safe::new();
+		let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
+		let entry2 = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string());
+		safe.add_entry(entry1.clone());
+		safe.add_entry(entry2.clone());
+
+		safe.remove_entry(1);
+
+		assert!(safe.entries.len() == 1);
+		assert!(safe.entries[0].name == entry1.name);
+		assert!(safe.entries[0].user == entry1.user);
+		assert!(safe.entries[0].pass != entry1.pass);
+		assert!(safe.entries[0].desc == entry1.desc);
+	}
+
+	#[test]
+	fn add_all() {
+		let mut safe = super::Safe::new();
+		let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
+		let entry2 = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string());
+		let entries = vec![entry1.clone(), entry2.clone()];
+
+		safe.add_all(entries);
+
+		assert!(safe.entries.len() == 2);
+		assert!(safe.entries[0].pass != entry1.pass && safe.entries[0].pass != entry2.pass);
+		assert!(safe.entries[1].pass != entry1.pass && safe.entries[0].pass != entry2.pass);
+	}
+
+	#[test]
+	fn get_entry() {
+		let mut safe = super::Safe::new();
+		let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
+		let entry2 = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string());
+		let entries = vec![entry1.clone(), entry2.clone()];
+		safe.add_all(entries);
+
+		let got_entry = safe.get_entry(1);
+		assert!(got_entry.name == entry2.name);
+		assert!(got_entry.user == entry2.user);
+		assert!(got_entry.pass != entry2.pass);
+		assert!(got_entry.desc == entry2.desc);
+	}
+
+	#[test]
+	fn get_entry_decrypted() {
+		let mut safe = super::Safe::new();
+		let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
+		let entry2 = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string());
+		let entries = vec![entry1.clone(), entry2.clone()];
+		safe.add_all(entries);
+
+		let got_entry = safe.get_entry_decrypted(1);
+		assert!(got_entry.name == entry2.name);
+		assert!(got_entry.user == entry2.user);
+		assert!(got_entry.pass == entry2.pass);
+		assert!(got_entry.desc == entry2.desc);
+	}
+
+	#[test]
+	fn get_entries() {
+		let mut safe = super::Safe::new();
+		let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
+		let entry2 = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string());
+		let entries = vec![entry1.clone(), entry2.clone()];
+		safe.add_all(entries);
+
+		let got_entries = safe.get_entries();
+		assert!(got_entries.len() == 2);
+	}
+
+	#[test]
+	fn get_entries_decrypted() {
+		let mut safe = super::Safe::new();
+		let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
+		let entry2 = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string());
+		let entries = vec![entry1.clone(), entry2.clone()];
+		safe.add_all(entries);
+
+		let got_entries = safe.get_entries_decrypted();
+		assert!(got_entries.len() == 2);
+		assert!(got_entries[0].pass == entry1.pass);
+		assert!(got_entries[1].pass == entry2.pass);
 	}
 }

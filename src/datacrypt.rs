@@ -6,6 +6,7 @@ use crypto::{ buffer, aes };
 use crypto::buffer::{ ReadBuffer, WriteBuffer, BufferResult };
 use crypto::symmetriccipher::{ Encryptor, Decryptor };
 use super::errors::RustKeylockError;
+use rustc_serialize::base64::{FromBase64, ToBase64, STANDARD};
 
 const NUMBER_OF_SALT_KEY_PAIRS: usize = 10;
 
@@ -142,7 +143,104 @@ impl Cryptor for BcryptAes {
 	}
 }
 
-/// No encryption implementation
+///Encrypts and decrypts passwords of Entries in order not to be kept in the memory in plain.
+pub struct EntryPasswordCryptor {
+	///The encryption/decryption key
+	key: Vec<u8>,
+	///The initialization vector for the AES.
+	iv: Vec<u8>,
+}
+
+impl EntryPasswordCryptor {
+	///Creates a new EntryPasswordCryptor.
+	pub fn new() -> EntryPasswordCryptor {
+		// Create a random password
+		let password = create_random(24);
+		// Create an iv
+		let iv = create_random(16);
+		// Create a salt
+		let salt = create_random(16);
+		// Generate a key
+		let mut key: Vec<u8> = repeat(0u8).take(24).collect();
+	    bcrypt(3, &salt, &password, &mut key);
+	    // Create and return the EntryPasswordCryptor
+	    EntryPasswordCryptor {
+	    	key: key,
+	    	iv: iv,
+	    }
+	}
+
+	///Gets a String input and returns it encrypted and Base64-encoded
+	pub fn encrypt_str(&self, input: &str) -> Result<String, RustKeylockError> {
+		let encrypted = try!(self.encrypt(input.as_bytes()));
+		Ok(encrypted.to_base64(STANDARD))
+	}
+
+	///Gets a Base64-encoded String input and returns it decrypted
+	pub fn decrypt_str(&self, input: &str) -> Result<String, RustKeylockError> {
+		let encrypted = try!(input.from_base64());
+		let decrypted_bytes = try!(self.decrypt(&encrypted));
+		Ok(try!(String::from_utf8(decrypted_bytes)))
+	}
+}
+
+impl Cryptor for EntryPasswordCryptor {
+	fn decrypt(&self, input: &[u8]) -> Result<Vec<u8>, RustKeylockError> {
+	    // Code taken from the rust-crypto example
+	    let mut final_result = Vec::<u8>::new();
+	    {
+		    let mut decryptor = aes::ctr(
+	            aes::KeySize::KeySize256,
+	            &self.key,
+	            &self.iv);
+
+		    let mut read_buffer = buffer::RefReadBuffer::new(input);
+		    let mut buffer = [0; 4096];
+		    let mut write_buffer = buffer::RefWriteBuffer::new(&mut buffer);
+		
+		    loop {
+		        let result = try!(decryptor.decrypt(&mut read_buffer, &mut write_buffer, true));
+		        final_result.extend(write_buffer.take_read_buffer().take_remaining().iter().cloned());
+		        match result {
+		            BufferResult::BufferUnderflow => break,
+		            BufferResult::BufferOverflow => { }
+		        }
+		    }
+	    }
+	    Ok(final_result)
+	}
+
+	fn encrypt(&self, input: &[u8]) -> Result<Vec<u8>, RustKeylockError> {
+		// Create an encryptor instance of the best performing
+	    // type available for the platform.
+	    // Code taken from the rust-crypto example
+		let mut encryptor = aes::ctr(
+            aes::KeySize::KeySize256,
+            &self.key,
+            &self.iv);
+
+		let mut encryption_result = Vec::<u8>::new();
+	    let mut read_buffer = buffer::RefReadBuffer::new(input);
+
+	    let mut buffer = [0; 4096];
+	    let mut write_buffer = buffer::RefWriteBuffer::new(&mut buffer);
+
+		loop {
+	        let result = try!(encryptor.encrypt(&mut read_buffer, &mut write_buffer, true));
+
+	        encryption_result.extend(write_buffer.take_read_buffer().take_remaining().iter().cloned());
+
+	        match result {
+	            BufferResult::BufferUnderflow => break,
+	            BufferResult::BufferOverflow => { }
+	        }
+	    }
+
+	    Ok(encryption_result)
+	}
+}
+
+///No encryption implementation
 #[allow(dead_code)]
 pub struct NoCryptor;
 
@@ -239,6 +337,7 @@ fn compose_bytes_to_save(data: &[u8], salt_position: usize, salt: &[u8], iv: &[u
 
 #[cfg(test)]
 mod test_crypt {
+	use super::Cryptor;
 
 	#[test]
 	fn create_random() {
@@ -535,5 +634,29 @@ mod test_crypt {
 
 		let vec = super::extract_bytes_to_decrypt(&bytes, salt_position);
 		assert!(vec == data);
+	}
+
+	#[test]
+	fn password_encryption() {
+		let password_cryptor = super::EntryPasswordCryptor::new();
+		let password = "hello".as_bytes();
+		let encrypted_password = password_cryptor.encrypt(password);
+		assert!(encrypted_password.is_ok());
+		assert!(encrypted_password.as_ref().unwrap() != &password);
+		let decrypted_password = password_cryptor.decrypt(&encrypted_password.unwrap());
+		assert!(decrypted_password.is_ok());
+		assert!(decrypted_password.unwrap() == password);
+	}
+
+	#[test]
+	fn password_string_encryption() {
+		let password_cryptor = super::EntryPasswordCryptor::new();
+		let password = "hello";
+		let encrypted_password = password_cryptor.encrypt_str(&password);
+		assert!(encrypted_password.is_ok());
+		assert!(encrypted_password.as_ref().unwrap() != &password);
+		let decrypted_password = password_cryptor.decrypt_str(&encrypted_password.unwrap());
+		assert!(decrypted_password.is_ok());
+		assert!(decrypted_password.unwrap() == password);
 	}
 }
