@@ -13,6 +13,7 @@ toml = "0.2"
 rustc-serialize = "0.3"
 rand = "0.3"
 log = "0.3"
+secstr = "0.2"
 
 [profile.dev]
 panic = "abort"

@@ -7,6 +7,8 @@ use crypto::buffer::{ ReadBuffer, WriteBuffer, BufferResult };
 use crypto::symmetriccipher::{ Encryptor, Decryptor };
 use super::errors::RustKeylockError;
 use rustc_serialize::base64::{FromBase64, ToBase64, STANDARD};
+use secstr::SecStr;
+use std::borrow::Borrow;
 
 const NUMBER_OF_SALT_KEY_PAIRS: usize = 10;
 
@@ -23,7 +25,7 @@ pub struct BcryptAes {
 	///The key to use for decryption. This is created using bcrypt during the initialization.
 	///
 	///This key is retrieved by parsing the passwords file, during the application startup.
-	key: Vec<u8>,
+	key: SecStr,
 	///The initialization vector for the AES.
 	///
 	///This iv is retrieved by parsing the passwords file, during the application startup.
@@ -34,7 +36,7 @@ pub struct BcryptAes {
 	///
 	///Each encryption process includes the creation of a new pseudo-random iv and the usage of one of the provided salt-key pairs.
 	///With these, the data is encrypted and the encrypted bytes are returned.
-	salt_key_pairs: Vec<(Vec<u8>, Vec<u8>)>,
+	salt_key_pairs: Vec<(Vec<u8>, SecStr)>,
 }
 
 impl BcryptAes {
@@ -60,11 +62,11 @@ impl BcryptAes {
 		for _ in 0..NUMBER_OF_SALT_KEY_PAIRS {
 			let s = create_random(16);
 			let k = BcryptAes::create_new_bcrypt_key(&password, &s, cost);
-			salt_key_pairs.push((s, k));
+			salt_key_pairs.push((s, SecStr::from(k)));
 		}
 
 		BcryptAes {
-			key: key,
+			key: SecStr::from(key),
 			iv: iv,
 			salt_position: salt_position,
 			salt_key_pairs: salt_key_pairs,
@@ -81,7 +83,7 @@ impl Cryptor for BcryptAes {
 	    {
 		    let mut decryptor = aes::ctr(
 	            aes::KeySize::KeySize256,
-	            &self.key,
+	            &self.key.borrow(),
 	            &self.iv);
 
 		    let mut read_buffer = buffer::RefReadBuffer::new(&bytes_to_decrypt);
@@ -116,7 +118,7 @@ impl Cryptor for BcryptAes {
 		    // Code taken from the rust-crypto example
 			let mut encryptor = aes::ctr(
 	            aes::KeySize::KeySize256,
-	            &salt_key_pair.1,
+	            &salt_key_pair.1.borrow(),
 	            &iv);
 
 			let mut encryption_result = Vec::<u8>::new();
@@ -146,7 +148,7 @@ impl Cryptor for BcryptAes {
 ///Encrypts and decrypts passwords of Entries in order not to be kept in the memory in plain.
 pub struct EntryPasswordCryptor {
 	///The encryption/decryption key
-	key: Vec<u8>,
+	key: SecStr,
 	///The initialization vector for the AES.
 	iv: Vec<u8>,
 }
@@ -155,7 +157,7 @@ impl EntryPasswordCryptor {
 	///Creates a new EntryPasswordCryptor.
 	pub fn new() -> EntryPasswordCryptor {
 		// Create a random password
-		let password = create_random(24);
+		let password = create_random(32);
 		// Create an iv
 		let iv = create_random(16);
 		// Create a salt
@@ -165,7 +167,7 @@ impl EntryPasswordCryptor {
 	    bcrypt(3, &salt, &password, &mut key);
 	    // Create and return the EntryPasswordCryptor
 	    EntryPasswordCryptor {
-	    	key: key,
+	    	key: SecStr::from(key),
 	    	iv: iv,
 	    }
 	}
@@ -191,7 +193,7 @@ impl Cryptor for EntryPasswordCryptor {
 	    {
 		    let mut decryptor = aes::ctr(
 	            aes::KeySize::KeySize256,
-	            &self.key,
+	            &self.key.borrow(),
 	            &self.iv);
 
 		    let mut read_buffer = buffer::RefReadBuffer::new(input);
@@ -216,7 +218,7 @@ impl Cryptor for EntryPasswordCryptor {
 	    // Code taken from the rust-crypto example
 		let mut encryptor = aes::ctr(
             aes::KeySize::KeySize256,
-            &self.key,
+            &self.key.borrow(),
             &self.iv);
 
 		let mut encryption_result = Vec::<u8>::new();

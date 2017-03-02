@@ -60,6 +60,7 @@ extern crate toml;
 extern crate crypto;
 extern crate rustc_serialize;
 extern crate rand;
+extern crate secstr;
 
 use toml::Table;
 use std::error::Error;
