@@ -9,7 +9,6 @@
 
     <title>datacrypt.rs.html -- source</title>
 
-    <link rel="stylesheet" type="text/css" href="../../normalize.css">
     <link rel="stylesheet" type="text/css" href="../../rustdoc.css">
     <link rel="stylesheet" type="text/css" href="../../main.css">
     
@@ -581,22 +580,152 @@
 <span id="536">536</span>
 <span id="537">537</span>
 <span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
+<span id="568">568</span>
+<span id="569">569</span>
+<span id="570">570</span>
+<span id="571">571</span>
+<span id="572">572</span>
+<span id="573">573</span>
+<span id="574">574</span>
+<span id="575">575</span>
+<span id="576">576</span>
+<span id="577">577</span>
+<span id="578">578</span>
+<span id="579">579</span>
+<span id="580">580</span>
+<span id="581">581</span>
+<span id="582">582</span>
+<span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+<span id="631">631</span>
+<span id="632">632</span>
+<span id="633">633</span>
+<span id="634">634</span>
+<span id="635">635</span>
+<span id="636">636</span>
+<span id="637">637</span>
+<span id="638">638</span>
+<span id="639">639</span>
+<span id="640">640</span>
+<span id="641">641</span>
+<span id="642">642</span>
+<span id="643">643</span>
+<span id="644">644</span>
+<span id="645">645</span>
+<span id="646">646</span>
+<span id="647">647</span>
+<span id="648">648</span>
+<span id="649">649</span>
+<span id="650">650</span>
+<span id="651">651</span>
+<span id="652">652</span>
+<span id="653">653</span>
+<span id="654">654</span>
+<span id="655">655</span>
+<span id="656">656</span>
+<span id="657">657</span>
+<span id="658">658</span>
+<span id="659">659</span>
+<span id="660">660</span>
+<span id="661">661</span>
+<span id="662">662</span>
+<span id="663">663</span>
+<span id="664">664</span>
 </pre><pre class='rust '>
 <span class='doccomment'>//!Defines the `Cryptor` trait and implements the encryption and decryption for the _rust-keylock_</span>
 <span class='kw'>use</span> <span class='ident'>rand</span>::{ <span class='ident'>Rng</span>, <span class='ident'>OsRng</span> };
 <span class='kw'>use</span> <span class='ident'>std</span>::<span class='ident'>iter</span>::<span class='ident'>repeat</span>;
 <span class='kw'>use</span> <span class='ident'>crypto</span>::<span class='ident'>bcrypt</span>::<span class='ident'>bcrypt</span>;
-<span class='kw'>use</span> <span class='ident'>crypto</span>::{ <span class='ident'>symmetriccipher</span>, <span class='ident'>buffer</span>, <span class='ident'>aes</span> };
+<span class='kw'>use</span> <span class='ident'>crypto</span>::{ <span class='ident'>buffer</span>, <span class='ident'>aes</span> };
 <span class='kw'>use</span> <span class='ident'>crypto</span>::<span class='ident'>buffer</span>::{ <span class='ident'>ReadBuffer</span>, <span class='ident'>WriteBuffer</span>, <span class='ident'>BufferResult</span> };
 <span class='kw'>use</span> <span class='ident'>crypto</span>::<span class='ident'>symmetriccipher</span>::{ <span class='ident'>Encryptor</span>, <span class='ident'>Decryptor</span> };
+<span class='kw'>use</span> <span class='kw'>super</span>::<span class='ident'>errors</span>::<span class='ident'>RustKeylockError</span>;
+<span class='kw'>use</span> <span class='ident'>rustc_serialize</span>::<span class='ident'>base64</span>::{<span class='ident'>FromBase64</span>, <span class='ident'>ToBase64</span>, <span class='ident'>STANDARD</span>};
+<span class='kw'>use</span> <span class='ident'>secstr</span>::<span class='ident'>SecStr</span>;
+<span class='kw'>use</span> <span class='ident'>std</span>::<span class='ident'>borrow</span>::<span class='ident'>Borrow</span>;
 
 <span class='kw'>const</span> <span class='ident'>NUMBER_OF_SALT_KEY_PAIRS</span>: <span class='ident'>usize</span> <span class='op'>=</span> <span class='number'>10</span>;
 
 <span class='kw'>pub</span> <span class='kw'>trait</span> <span class='ident'>Cryptor</span> {
 	<span class='doccomment'>///Decrypts a given array of bytes</span>
-	<span class='kw'>fn</span> <span class='ident'>decrypt</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>, <span class='ident'>input</span>: <span class='kw-2'>&amp;</span>[<span class='ident'>u8</span>]) <span class='op'>-&gt;</span> <span class='prelude-ty'>Result</span><span class='op'>&lt;</span><span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>u8</span><span class='op'>&gt;</span>, <span class='ident'>symmetriccipher</span>::<span class='ident'>SymmetricCipherError</span><span class='op'>&gt;</span>;
+	<span class='kw'>fn</span> <span class='ident'>decrypt</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>, <span class='ident'>input</span>: <span class='kw-2'>&amp;</span>[<span class='ident'>u8</span>]) <span class='op'>-&gt;</span> <span class='prelude-ty'>Result</span><span class='op'>&lt;</span><span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>u8</span><span class='op'>&gt;</span>, <span class='ident'>RustKeylockError</span><span class='op'>&gt;</span>;
 	<span class='doccomment'>///Encrypts a given array of bytes</span>
-	<span class='kw'>fn</span> <span class='ident'>encrypt</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>, <span class='ident'>input</span>: <span class='kw-2'>&amp;</span>[<span class='ident'>u8</span>]) <span class='op'>-&gt;</span> <span class='prelude-ty'>Result</span><span class='op'>&lt;</span><span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>u8</span><span class='op'>&gt;</span>, <span class='ident'>symmetriccipher</span>::<span class='ident'>SymmetricCipherError</span><span class='op'>&gt;</span>;
+	<span class='kw'>fn</span> <span class='ident'>encrypt</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>, <span class='ident'>input</span>: <span class='kw-2'>&amp;</span>[<span class='ident'>u8</span>]) <span class='op'>-&gt;</span> <span class='prelude-ty'>Result</span><span class='op'>&lt;</span><span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>u8</span><span class='op'>&gt;</span>, <span class='ident'>RustKeylockError</span><span class='op'>&gt;</span>;
 }
 
 <span class='doccomment'>///Encrypts and Decrypts using bcrypt-created password</span>
@@ -605,7 +734,7 @@
 	<span class='doccomment'>///The key to use for decryption. This is created using bcrypt during the initialization.</span>
 	<span class='doccomment'>///</span>
 	<span class='doccomment'>///This key is retrieved by parsing the passwords file, during the application startup.</span>
-	<span class='ident'>key</span>: <span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>u8</span><span class='op'>&gt;</span>,
+	<span class='ident'>key</span>: <span class='ident'>SecStr</span>,
 	<span class='doccomment'>///The initialization vector for the AES.</span>
 	<span class='doccomment'>///</span>
 	<span class='doccomment'>///This iv is retrieved by parsing the passwords file, during the application startup.</span>
@@ -616,7 +745,7 @@
 	<span class='doccomment'>///</span>
 	<span class='doccomment'>///Each encryption process includes the creation of a new pseudo-random iv and the usage of one of the provided salt-key pairs.</span>
 	<span class='doccomment'>///With these, the data is encrypted and the encrypted bytes are returned.</span>
-	<span class='ident'>salt_key_pairs</span>: <span class='ident'>Vec</span><span class='op'>&lt;</span>(<span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>u8</span><span class='op'>&gt;</span>, <span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>u8</span><span class='op'>&gt;</span>)<span class='op'>&gt;</span>,
+	<span class='ident'>salt_key_pairs</span>: <span class='ident'>Vec</span><span class='op'>&lt;</span>(<span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>u8</span><span class='op'>&gt;</span>, <span class='ident'>SecStr</span>)<span class='op'>&gt;</span>,
 }
 
 <span class='kw'>impl</span> <span class='ident'>BcryptAes</span> {
@@ -642,11 +771,11 @@
 		<span class='kw'>for</span> _ <span class='kw'>in</span> <span class='number'>0</span>..<span class='ident'>NUMBER_OF_SALT_KEY_PAIRS</span> {
 			<span class='kw'>let</span> <span class='ident'>s</span> <span class='op'>=</span> <span class='ident'>create_random</span>(<span class='number'>16</span>);
 			<span class='kw'>let</span> <span class='ident'>k</span> <span class='op'>=</span> <span class='ident'>BcryptAes</span>::<span class='ident'>create_new_bcrypt_key</span>(<span class='kw-2'>&amp;</span><span class='ident'>password</span>, <span class='kw-2'>&amp;</span><span class='ident'>s</span>, <span class='ident'>cost</span>);
-			<span class='ident'>salt_key_pairs</span>.<span class='ident'>push</span>((<span class='ident'>s</span>, <span class='ident'>k</span>));
+			<span class='ident'>salt_key_pairs</span>.<span class='ident'>push</span>((<span class='ident'>s</span>, <span class='ident'>SecStr</span>::<span class='ident'>from</span>(<span class='ident'>k</span>)));
 		}
 
 		<span class='ident'>BcryptAes</span> {
-			<span class='ident'>key</span>: <span class='ident'>key</span>,
+			<span class='ident'>key</span>: <span class='ident'>SecStr</span>::<span class='ident'>from</span>(<span class='ident'>key</span>),
 			<span class='ident'>iv</span>: <span class='ident'>iv</span>,
 			<span class='ident'>salt_position</span>: <span class='ident'>salt_position</span>,
 			<span class='ident'>salt_key_pairs</span>: <span class='ident'>salt_key_pairs</span>,
@@ -655,7 +784,7 @@
 }
 
 <span class='kw'>impl</span> <span class='ident'>Cryptor</span> <span class='kw'>for</span> <span class='ident'>BcryptAes</span> {
-	<span class='kw'>fn</span> <span class='ident'>decrypt</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>, <span class='ident'>input</span>: <span class='kw-2'>&amp;</span>[<span class='ident'>u8</span>]) <span class='op'>-&gt;</span> <span class='prelude-ty'>Result</span><span class='op'>&lt;</span><span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>u8</span><span class='op'>&gt;</span>, <span class='ident'>symmetriccipher</span>::<span class='ident'>SymmetricCipherError</span><span class='op'>&gt;</span> {
+	<span class='kw'>fn</span> <span class='ident'>decrypt</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>, <span class='ident'>input</span>: <span class='kw-2'>&amp;</span>[<span class='ident'>u8</span>]) <span class='op'>-&gt;</span> <span class='prelude-ty'>Result</span><span class='op'>&lt;</span><span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>u8</span><span class='op'>&gt;</span>, <span class='ident'>RustKeylockError</span><span class='op'>&gt;</span> {
 		<span class='kw'>let</span> <span class='ident'>bytes_to_decrypt</span> <span class='op'>=</span> <span class='ident'>extract_bytes_to_decrypt</span>(<span class='ident'>input</span>, <span class='self'>self</span>.<span class='ident'>salt_position</span>);
 
 	    <span class='comment'>// Code taken from the rust-crypto example</span>
@@ -663,7 +792,7 @@
 	    {
 		    <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>decryptor</span> <span class='op'>=</span> <span class='ident'>aes</span>::<span class='ident'>ctr</span>(
 	            <span class='ident'>aes</span>::<span class='ident'>KeySize</span>::<span class='ident'>KeySize256</span>,
-	            <span class='kw-2'>&amp;</span><span class='self'>self</span>.<span class='ident'>key</span>,
+	            <span class='kw-2'>&amp;</span><span class='self'>self</span>.<span class='ident'>key</span>.<span class='ident'>borrow</span>(),
 	            <span class='kw-2'>&amp;</span><span class='self'>self</span>.<span class='ident'>iv</span>);
 
 		    <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>read_buffer</span> <span class='op'>=</span> <span class='ident'>buffer</span>::<span class='ident'>RefReadBuffer</span>::<span class='ident'>new</span>(<span class='kw-2'>&amp;</span><span class='ident'>bytes_to_decrypt</span>);
@@ -682,7 +811,7 @@
 	    <span class='prelude-val'>Ok</span>(<span class='ident'>final_result</span>)
 	}
 
-	<span class='kw'>fn</span> <span class='ident'>encrypt</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>, <span class='ident'>input</span>: <span class='kw-2'>&amp;</span>[<span class='ident'>u8</span>]) <span class='op'>-&gt;</span> <span class='prelude-ty'>Result</span><span class='op'>&lt;</span><span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>u8</span><span class='op'>&gt;</span>, <span class='ident'>symmetriccipher</span>::<span class='ident'>SymmetricCipherError</span><span class='op'>&gt;</span> {
+	<span class='kw'>fn</span> <span class='ident'>encrypt</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>, <span class='ident'>input</span>: <span class='kw-2'>&amp;</span>[<span class='ident'>u8</span>]) <span class='op'>-&gt;</span> <span class='prelude-ty'>Result</span><span class='op'>&lt;</span><span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>u8</span><span class='op'>&gt;</span>, <span class='ident'>RustKeylockError</span><span class='op'>&gt;</span> {
 		<span class='comment'>// Create a new iv</span>
 		<span class='kw'>let</span> <span class='ident'>iv</span> <span class='op'>=</span> <span class='ident'>create_random</span>(<span class='number'>16</span>);
 		<span class='comment'>// Choose randomly one of the salt-key pairs</span>
@@ -698,7 +827,7 @@
 		    <span class='comment'>// Code taken from the rust-crypto example</span>
 			<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>encryptor</span> <span class='op'>=</span> <span class='ident'>aes</span>::<span class='ident'>ctr</span>(
 	            <span class='ident'>aes</span>::<span class='ident'>KeySize</span>::<span class='ident'>KeySize256</span>,
-	            <span class='kw-2'>&amp;</span><span class='ident'>salt_key_pair</span>.<span class='number'>1</span>,
+	            <span class='kw-2'>&amp;</span><span class='ident'>salt_key_pair</span>.<span class='number'>1</span>.<span class='ident'>borrow</span>(),
 	            <span class='kw-2'>&amp;</span><span class='ident'>iv</span>);
 
 			<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>encryption_result</span> <span class='op'>=</span> <span class='ident'>Vec</span>::<span class='op'>&lt;</span><span class='ident'>u8</span><span class='op'>&gt;</span>::<span class='ident'>new</span>();
@@ -725,7 +854,104 @@
 	}
 }
 
-<span class='doccomment'>/// No encryption implementation</span>
+<span class='doccomment'>///Encrypts and decrypts passwords of Entries in order not to be kept in the memory in plain.</span>
+<span class='kw'>pub</span> <span class='kw'>struct</span> <span class='ident'>EntryPasswordCryptor</span> {
+	<span class='doccomment'>///The encryption/decryption key</span>
+	<span class='ident'>key</span>: <span class='ident'>SecStr</span>,
+	<span class='doccomment'>///The initialization vector for the AES.</span>
+	<span class='ident'>iv</span>: <span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>u8</span><span class='op'>&gt;</span>,
+}
+
+<span class='kw'>impl</span> <span class='ident'>EntryPasswordCryptor</span> {
+	<span class='doccomment'>///Creates a new EntryPasswordCryptor.</span>
+	<span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>new</span>() <span class='op'>-&gt;</span> <span class='ident'>EntryPasswordCryptor</span> {
+		<span class='comment'>// Create a random password</span>
+		<span class='kw'>let</span> <span class='ident'>password</span> <span class='op'>=</span> <span class='ident'>create_random</span>(<span class='number'>32</span>);
+		<span class='comment'>// Create an iv</span>
+		<span class='kw'>let</span> <span class='ident'>iv</span> <span class='op'>=</span> <span class='ident'>create_random</span>(<span class='number'>16</span>);
+		<span class='comment'>// Create a salt</span>
+		<span class='kw'>let</span> <span class='ident'>salt</span> <span class='op'>=</span> <span class='ident'>create_random</span>(<span class='number'>16</span>);
+		<span class='comment'>// Generate a key</span>
+		<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>key</span>: <span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>u8</span><span class='op'>&gt;</span> <span class='op'>=</span> <span class='ident'>repeat</span>(<span class='number'>0u8</span>).<span class='ident'>take</span>(<span class='number'>24</span>).<span class='ident'>collect</span>();
+	    <span class='ident'>bcrypt</span>(<span class='number'>3</span>, <span class='kw-2'>&amp;</span><span class='ident'>salt</span>, <span class='kw-2'>&amp;</span><span class='ident'>password</span>, <span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>key</span>);
+	    <span class='comment'>// Create and return the EntryPasswordCryptor</span>
+	    <span class='ident'>EntryPasswordCryptor</span> {
+	    	<span class='ident'>key</span>: <span class='ident'>SecStr</span>::<span class='ident'>from</span>(<span class='ident'>key</span>),
+	    	<span class='ident'>iv</span>: <span class='ident'>iv</span>,
+	    }
+	}
+
+	<span class='doccomment'>///Gets a String input and returns it encrypted and Base64-encoded</span>
+	<span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>encrypt_str</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>, <span class='ident'>input</span>: <span class='kw-2'>&amp;</span><span class='ident'>str</span>) <span class='op'>-&gt;</span> <span class='prelude-ty'>Result</span><span class='op'>&lt;</span><span class='ident'>String</span>, <span class='ident'>RustKeylockError</span><span class='op'>&gt;</span> {
+		<span class='kw'>let</span> <span class='ident'>encrypted</span> <span class='op'>=</span> <span class='macro'>try</span><span class='macro'>!</span>(<span class='self'>self</span>.<span class='ident'>encrypt</span>(<span class='ident'>input</span>.<span class='ident'>as_bytes</span>()));
+		<span class='prelude-val'>Ok</span>(<span class='ident'>encrypted</span>.<span class='ident'>to_base64</span>(<span class='ident'>STANDARD</span>))
+	}
+
+	<span class='doccomment'>///Gets a Base64-encoded String input and returns it decrypted</span>
+	<span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>decrypt_str</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>, <span class='ident'>input</span>: <span class='kw-2'>&amp;</span><span class='ident'>str</span>) <span class='op'>-&gt;</span> <span class='prelude-ty'>Result</span><span class='op'>&lt;</span><span class='ident'>String</span>, <span class='ident'>RustKeylockError</span><span class='op'>&gt;</span> {
+		<span class='kw'>let</span> <span class='ident'>encrypted</span> <span class='op'>=</span> <span class='macro'>try</span><span class='macro'>!</span>(<span class='ident'>input</span>.<span class='ident'>from_base64</span>());
+		<span class='kw'>let</span> <span class='ident'>decrypted_bytes</span> <span class='op'>=</span> <span class='macro'>try</span><span class='macro'>!</span>(<span class='self'>self</span>.<span class='ident'>decrypt</span>(<span class='kw-2'>&amp;</span><span class='ident'>encrypted</span>));
+		<span class='prelude-val'>Ok</span>(<span class='macro'>try</span><span class='macro'>!</span>(<span class='ident'>String</span>::<span class='ident'>from_utf8</span>(<span class='ident'>decrypted_bytes</span>)))
+	}
+}
+
+<span class='kw'>impl</span> <span class='ident'>Cryptor</span> <span class='kw'>for</span> <span class='ident'>EntryPasswordCryptor</span> {
+	<span class='kw'>fn</span> <span class='ident'>decrypt</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>, <span class='ident'>input</span>: <span class='kw-2'>&amp;</span>[<span class='ident'>u8</span>]) <span class='op'>-&gt;</span> <span class='prelude-ty'>Result</span><span class='op'>&lt;</span><span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>u8</span><span class='op'>&gt;</span>, <span class='ident'>RustKeylockError</span><span class='op'>&gt;</span> {
+	    <span class='comment'>// Code taken from the rust-crypto example</span>
+	    <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>final_result</span> <span class='op'>=</span> <span class='ident'>Vec</span>::<span class='op'>&lt;</span><span class='ident'>u8</span><span class='op'>&gt;</span>::<span class='ident'>new</span>();
+	    {
+		    <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>decryptor</span> <span class='op'>=</span> <span class='ident'>aes</span>::<span class='ident'>ctr</span>(
+	            <span class='ident'>aes</span>::<span class='ident'>KeySize</span>::<span class='ident'>KeySize256</span>,
+	            <span class='kw-2'>&amp;</span><span class='self'>self</span>.<span class='ident'>key</span>.<span class='ident'>borrow</span>(),
+	            <span class='kw-2'>&amp;</span><span class='self'>self</span>.<span class='ident'>iv</span>);
+
+		    <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>read_buffer</span> <span class='op'>=</span> <span class='ident'>buffer</span>::<span class='ident'>RefReadBuffer</span>::<span class='ident'>new</span>(<span class='ident'>input</span>);
+		    <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>buffer</span> <span class='op'>=</span> [<span class='number'>0</span>; <span class='number'>4096</span>];
+		    <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>write_buffer</span> <span class='op'>=</span> <span class='ident'>buffer</span>::<span class='ident'>RefWriteBuffer</span>::<span class='ident'>new</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>buffer</span>);
+		
+		    <span class='kw'>loop</span> {
+		        <span class='kw'>let</span> <span class='ident'>result</span> <span class='op'>=</span> <span class='macro'>try</span><span class='macro'>!</span>(<span class='ident'>decryptor</span>.<span class='ident'>decrypt</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>read_buffer</span>, <span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>write_buffer</span>, <span class='bool-val'>true</span>));
+		        <span class='ident'>final_result</span>.<span class='ident'>extend</span>(<span class='ident'>write_buffer</span>.<span class='ident'>take_read_buffer</span>().<span class='ident'>take_remaining</span>().<span class='ident'>iter</span>().<span class='ident'>cloned</span>());
+		        <span class='kw'>match</span> <span class='ident'>result</span> {
+		            <span class='ident'>BufferResult</span>::<span class='ident'>BufferUnderflow</span> <span class='op'>=&gt;</span> <span class='kw'>break</span>,
+		            <span class='ident'>BufferResult</span>::<span class='ident'>BufferOverflow</span> <span class='op'>=&gt;</span> { }
+		        }
+		    }
+	    }
+	    <span class='prelude-val'>Ok</span>(<span class='ident'>final_result</span>)
+	}
+
+	<span class='kw'>fn</span> <span class='ident'>encrypt</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>, <span class='ident'>input</span>: <span class='kw-2'>&amp;</span>[<span class='ident'>u8</span>]) <span class='op'>-&gt;</span> <span class='prelude-ty'>Result</span><span class='op'>&lt;</span><span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>u8</span><span class='op'>&gt;</span>, <span class='ident'>RustKeylockError</span><span class='op'>&gt;</span> {
+		<span class='comment'>// Create an encryptor instance of the best performing</span>
+	    <span class='comment'>// type available for the platform.</span>
+	    <span class='comment'>// Code taken from the rust-crypto example</span>
+		<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>encryptor</span> <span class='op'>=</span> <span class='ident'>aes</span>::<span class='ident'>ctr</span>(
+            <span class='ident'>aes</span>::<span class='ident'>KeySize</span>::<span class='ident'>KeySize256</span>,
+            <span class='kw-2'>&amp;</span><span class='self'>self</span>.<span class='ident'>key</span>.<span class='ident'>borrow</span>(),
+            <span class='kw-2'>&amp;</span><span class='self'>self</span>.<span class='ident'>iv</span>);
+
+		<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>encryption_result</span> <span class='op'>=</span> <span class='ident'>Vec</span>::<span class='op'>&lt;</span><span class='ident'>u8</span><span class='op'>&gt;</span>::<span class='ident'>new</span>();
+	    <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>read_buffer</span> <span class='op'>=</span> <span class='ident'>buffer</span>::<span class='ident'>RefReadBuffer</span>::<span class='ident'>new</span>(<span class='ident'>input</span>);
+
+	    <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>buffer</span> <span class='op'>=</span> [<span class='number'>0</span>; <span class='number'>4096</span>];
+	    <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>write_buffer</span> <span class='op'>=</span> <span class='ident'>buffer</span>::<span class='ident'>RefWriteBuffer</span>::<span class='ident'>new</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>buffer</span>);
+
+		<span class='kw'>loop</span> {
+	        <span class='kw'>let</span> <span class='ident'>result</span> <span class='op'>=</span> <span class='macro'>try</span><span class='macro'>!</span>(<span class='ident'>encryptor</span>.<span class='ident'>encrypt</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>read_buffer</span>, <span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>write_buffer</span>, <span class='bool-val'>true</span>));
+
+	        <span class='ident'>encryption_result</span>.<span class='ident'>extend</span>(<span class='ident'>write_buffer</span>.<span class='ident'>take_read_buffer</span>().<span class='ident'>take_remaining</span>().<span class='ident'>iter</span>().<span class='ident'>cloned</span>());
+
+	        <span class='kw'>match</span> <span class='ident'>result</span> {
+	            <span class='ident'>BufferResult</span>::<span class='ident'>BufferUnderflow</span> <span class='op'>=&gt;</span> <span class='kw'>break</span>,
+	            <span class='ident'>BufferResult</span>::<span class='ident'>BufferOverflow</span> <span class='op'>=&gt;</span> { }
+	        }
+	    }
+
+	    <span class='prelude-val'>Ok</span>(<span class='ident'>encryption_result</span>)
+	}
+}
+
+<span class='doccomment'>///No encryption implementation</span>
 <span class='attribute'>#[<span class='ident'>allow</span>(<span class='ident'>dead_code</span>)]</span>
 <span class='kw'>pub</span> <span class='kw'>struct</span> <span class='ident'>NoCryptor</span>;
 
@@ -737,11 +963,11 @@
 }
 
 <span class='kw'>impl</span> <span class='ident'>Cryptor</span> <span class='kw'>for</span> <span class='ident'>NoCryptor</span> {
-	<span class='kw'>fn</span> <span class='ident'>decrypt</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>, <span class='ident'>input</span>: <span class='kw-2'>&amp;</span>[<span class='ident'>u8</span>]) <span class='op'>-&gt;</span> <span class='prelude-ty'>Result</span><span class='op'>&lt;</span><span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>u8</span><span class='op'>&gt;</span>, <span class='ident'>symmetriccipher</span>::<span class='ident'>SymmetricCipherError</span><span class='op'>&gt;</span> {
+	<span class='kw'>fn</span> <span class='ident'>decrypt</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>, <span class='ident'>input</span>: <span class='kw-2'>&amp;</span>[<span class='ident'>u8</span>]) <span class='op'>-&gt;</span> <span class='prelude-ty'>Result</span><span class='op'>&lt;</span><span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>u8</span><span class='op'>&gt;</span>, <span class='ident'>RustKeylockError</span><span class='op'>&gt;</span> {
 		<span class='prelude-val'>Ok</span>(<span class='ident'>Vec</span>::<span class='ident'>from</span>(<span class='ident'>input</span>))
 	}
 	
-	<span class='kw'>fn</span> <span class='ident'>encrypt</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>, <span class='ident'>input</span>: <span class='kw-2'>&amp;</span>[<span class='ident'>u8</span>]) <span class='op'>-&gt;</span> <span class='prelude-ty'>Result</span><span class='op'>&lt;</span><span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>u8</span><span class='op'>&gt;</span>, <span class='ident'>symmetriccipher</span>::<span class='ident'>SymmetricCipherError</span><span class='op'>&gt;</span> {
+	<span class='kw'>fn</span> <span class='ident'>encrypt</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>, <span class='ident'>input</span>: <span class='kw-2'>&amp;</span>[<span class='ident'>u8</span>]) <span class='op'>-&gt;</span> <span class='prelude-ty'>Result</span><span class='op'>&lt;</span><span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>u8</span><span class='op'>&gt;</span>, <span class='ident'>RustKeylockError</span><span class='op'>&gt;</span> {
 		<span class='prelude-val'>Ok</span>(<span class='ident'>Vec</span>::<span class='ident'>from</span>(<span class='ident'>input</span>))
 	}
 }
@@ -822,6 +1048,7 @@
 
 <span class='attribute'>#[<span class='ident'>cfg</span>(<span class='ident'>test</span>)]</span>
 <span class='kw'>mod</span> <span class='ident'>test_crypt</span> {
+	<span class='kw'>use</span> <span class='kw'>super</span>::<span class='ident'>Cryptor</span>;
 
 	<span class='attribute'>#[<span class='ident'>test</span>]</span>
 	<span class='kw'>fn</span> <span class='ident'>create_random</span>() {
@@ -1118,6 +1345,30 @@
 
 		<span class='kw'>let</span> <span class='ident'>vec</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>extract_bytes_to_decrypt</span>(<span class='kw-2'>&amp;</span><span class='ident'>bytes</span>, <span class='ident'>salt_position</span>);
 		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>vec</span> <span class='op'>==</span> <span class='ident'>data</span>);
+	}
+
+	<span class='attribute'>#[<span class='ident'>test</span>]</span>
+	<span class='kw'>fn</span> <span class='ident'>password_encryption</span>() {
+		<span class='kw'>let</span> <span class='ident'>password_cryptor</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>EntryPasswordCryptor</span>::<span class='ident'>new</span>();
+		<span class='kw'>let</span> <span class='ident'>password</span> <span class='op'>=</span> <span class='string'>&quot;hello&quot;</span>.<span class='ident'>as_bytes</span>();
+		<span class='kw'>let</span> <span class='ident'>encrypted_password</span> <span class='op'>=</span> <span class='ident'>password_cryptor</span>.<span class='ident'>encrypt</span>(<span class='ident'>password</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>encrypted_password</span>.<span class='ident'>is_ok</span>());
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>encrypted_password</span>.<span class='ident'>as_ref</span>().<span class='ident'>unwrap</span>() <span class='op'>!=</span> <span class='kw-2'>&amp;</span><span class='ident'>password</span>);
+		<span class='kw'>let</span> <span class='ident'>decrypted_password</span> <span class='op'>=</span> <span class='ident'>password_cryptor</span>.<span class='ident'>decrypt</span>(<span class='kw-2'>&amp;</span><span class='ident'>encrypted_password</span>.<span class='ident'>unwrap</span>());
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>decrypted_password</span>.<span class='ident'>is_ok</span>());
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>decrypted_password</span>.<span class='ident'>unwrap</span>() <span class='op'>==</span> <span class='ident'>password</span>);
+	}
+
+	<span class='attribute'>#[<span class='ident'>test</span>]</span>
+	<span class='kw'>fn</span> <span class='ident'>password_string_encryption</span>() {
+		<span class='kw'>let</span> <span class='ident'>password_cryptor</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>EntryPasswordCryptor</span>::<span class='ident'>new</span>();
+		<span class='kw'>let</span> <span class='ident'>password</span> <span class='op'>=</span> <span class='string'>&quot;hello&quot;</span>;
+		<span class='kw'>let</span> <span class='ident'>encrypted_password</span> <span class='op'>=</span> <span class='ident'>password_cryptor</span>.<span class='ident'>encrypt_str</span>(<span class='kw-2'>&amp;</span><span class='ident'>password</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>encrypted_password</span>.<span class='ident'>is_ok</span>());
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>encrypted_password</span>.<span class='ident'>as_ref</span>().<span class='ident'>unwrap</span>() <span class='op'>!=</span> <span class='kw-2'>&amp;</span><span class='ident'>password</span>);
+		<span class='kw'>let</span> <span class='ident'>decrypted_password</span> <span class='op'>=</span> <span class='ident'>password_cryptor</span>.<span class='ident'>decrypt_str</span>(<span class='kw-2'>&amp;</span><span class='ident'>encrypted_password</span>.<span class='ident'>unwrap</span>());
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>decrypted_password</span>.<span class='ident'>is_ok</span>());
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>decrypted_password</span>.<span class='ident'>unwrap</span>() <span class='op'>==</span> <span class='ident'>password</span>);
 	}
 }</pre>
 </section>

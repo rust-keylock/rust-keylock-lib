@@ -9,7 +9,6 @@
 
     <title>lib.rs.html -- source</title>
 
-    <link rel="stylesheet" type="text/css" href="../../normalize.css">
     <link rel="stylesheet" type="text/css" href="../../rustdoc.css">
     <link rel="stylesheet" type="text/css" href="../../main.css">
     
@@ -735,6 +734,305 @@
 <span id="690">690</span>
 <span id="691">691</span>
 <span id="692">692</span>
+<span id="693">693</span>
+<span id="694">694</span>
+<span id="695">695</span>
+<span id="696">696</span>
+<span id="697">697</span>
+<span id="698">698</span>
+<span id="699">699</span>
+<span id="700">700</span>
+<span id="701">701</span>
+<span id="702">702</span>
+<span id="703">703</span>
+<span id="704">704</span>
+<span id="705">705</span>
+<span id="706">706</span>
+<span id="707">707</span>
+<span id="708">708</span>
+<span id="709">709</span>
+<span id="710">710</span>
+<span id="711">711</span>
+<span id="712">712</span>
+<span id="713">713</span>
+<span id="714">714</span>
+<span id="715">715</span>
+<span id="716">716</span>
+<span id="717">717</span>
+<span id="718">718</span>
+<span id="719">719</span>
+<span id="720">720</span>
+<span id="721">721</span>
+<span id="722">722</span>
+<span id="723">723</span>
+<span id="724">724</span>
+<span id="725">725</span>
+<span id="726">726</span>
+<span id="727">727</span>
+<span id="728">728</span>
+<span id="729">729</span>
+<span id="730">730</span>
+<span id="731">731</span>
+<span id="732">732</span>
+<span id="733">733</span>
+<span id="734">734</span>
+<span id="735">735</span>
+<span id="736">736</span>
+<span id="737">737</span>
+<span id="738">738</span>
+<span id="739">739</span>
+<span id="740">740</span>
+<span id="741">741</span>
+<span id="742">742</span>
+<span id="743">743</span>
+<span id="744">744</span>
+<span id="745">745</span>
+<span id="746">746</span>
+<span id="747">747</span>
+<span id="748">748</span>
+<span id="749">749</span>
+<span id="750">750</span>
+<span id="751">751</span>
+<span id="752">752</span>
+<span id="753">753</span>
+<span id="754">754</span>
+<span id="755">755</span>
+<span id="756">756</span>
+<span id="757">757</span>
+<span id="758">758</span>
+<span id="759">759</span>
+<span id="760">760</span>
+<span id="761">761</span>
+<span id="762">762</span>
+<span id="763">763</span>
+<span id="764">764</span>
+<span id="765">765</span>
+<span id="766">766</span>
+<span id="767">767</span>
+<span id="768">768</span>
+<span id="769">769</span>
+<span id="770">770</span>
+<span id="771">771</span>
+<span id="772">772</span>
+<span id="773">773</span>
+<span id="774">774</span>
+<span id="775">775</span>
+<span id="776">776</span>
+<span id="777">777</span>
+<span id="778">778</span>
+<span id="779">779</span>
+<span id="780">780</span>
+<span id="781">781</span>
+<span id="782">782</span>
+<span id="783">783</span>
+<span id="784">784</span>
+<span id="785">785</span>
+<span id="786">786</span>
+<span id="787">787</span>
+<span id="788">788</span>
+<span id="789">789</span>
+<span id="790">790</span>
+<span id="791">791</span>
+<span id="792">792</span>
+<span id="793">793</span>
+<span id="794">794</span>
+<span id="795">795</span>
+<span id="796">796</span>
+<span id="797">797</span>
+<span id="798">798</span>
+<span id="799">799</span>
+<span id="800">800</span>
+<span id="801">801</span>
+<span id="802">802</span>
+<span id="803">803</span>
+<span id="804">804</span>
+<span id="805">805</span>
+<span id="806">806</span>
+<span id="807">807</span>
+<span id="808">808</span>
+<span id="809">809</span>
+<span id="810">810</span>
+<span id="811">811</span>
+<span id="812">812</span>
+<span id="813">813</span>
+<span id="814">814</span>
+<span id="815">815</span>
+<span id="816">816</span>
+<span id="817">817</span>
+<span id="818">818</span>
+<span id="819">819</span>
+<span id="820">820</span>
+<span id="821">821</span>
+<span id="822">822</span>
+<span id="823">823</span>
+<span id="824">824</span>
+<span id="825">825</span>
+<span id="826">826</span>
+<span id="827">827</span>
+<span id="828">828</span>
+<span id="829">829</span>
+<span id="830">830</span>
+<span id="831">831</span>
+<span id="832">832</span>
+<span id="833">833</span>
+<span id="834">834</span>
+<span id="835">835</span>
+<span id="836">836</span>
+<span id="837">837</span>
+<span id="838">838</span>
+<span id="839">839</span>
+<span id="840">840</span>
+<span id="841">841</span>
+<span id="842">842</span>
+<span id="843">843</span>
+<span id="844">844</span>
+<span id="845">845</span>
+<span id="846">846</span>
+<span id="847">847</span>
+<span id="848">848</span>
+<span id="849">849</span>
+<span id="850">850</span>
+<span id="851">851</span>
+<span id="852">852</span>
+<span id="853">853</span>
+<span id="854">854</span>
+<span id="855">855</span>
+<span id="856">856</span>
+<span id="857">857</span>
+<span id="858">858</span>
+<span id="859">859</span>
+<span id="860">860</span>
+<span id="861">861</span>
+<span id="862">862</span>
+<span id="863">863</span>
+<span id="864">864</span>
+<span id="865">865</span>
+<span id="866">866</span>
+<span id="867">867</span>
+<span id="868">868</span>
+<span id="869">869</span>
+<span id="870">870</span>
+<span id="871">871</span>
+<span id="872">872</span>
+<span id="873">873</span>
+<span id="874">874</span>
+<span id="875">875</span>
+<span id="876">876</span>
+<span id="877">877</span>
+<span id="878">878</span>
+<span id="879">879</span>
+<span id="880">880</span>
+<span id="881">881</span>
+<span id="882">882</span>
+<span id="883">883</span>
+<span id="884">884</span>
+<span id="885">885</span>
+<span id="886">886</span>
+<span id="887">887</span>
+<span id="888">888</span>
+<span id="889">889</span>
+<span id="890">890</span>
+<span id="891">891</span>
+<span id="892">892</span>
+<span id="893">893</span>
+<span id="894">894</span>
+<span id="895">895</span>
+<span id="896">896</span>
+<span id="897">897</span>
+<span id="898">898</span>
+<span id="899">899</span>
+<span id="900">900</span>
+<span id="901">901</span>
+<span id="902">902</span>
+<span id="903">903</span>
+<span id="904">904</span>
+<span id="905">905</span>
+<span id="906">906</span>
+<span id="907">907</span>
+<span id="908">908</span>
+<span id="909">909</span>
+<span id="910">910</span>
+<span id="911">911</span>
+<span id="912">912</span>
+<span id="913">913</span>
+<span id="914">914</span>
+<span id="915">915</span>
+<span id="916">916</span>
+<span id="917">917</span>
+<span id="918">918</span>
+<span id="919">919</span>
+<span id="920">920</span>
+<span id="921">921</span>
+<span id="922">922</span>
+<span id="923">923</span>
+<span id="924">924</span>
+<span id="925">925</span>
+<span id="926">926</span>
+<span id="927">927</span>
+<span id="928">928</span>
+<span id="929">929</span>
+<span id="930">930</span>
+<span id="931">931</span>
+<span id="932">932</span>
+<span id="933">933</span>
+<span id="934">934</span>
+<span id="935">935</span>
+<span id="936">936</span>
+<span id="937">937</span>
+<span id="938">938</span>
+<span id="939">939</span>
+<span id="940">940</span>
+<span id="941">941</span>
+<span id="942">942</span>
+<span id="943">943</span>
+<span id="944">944</span>
+<span id="945">945</span>
+<span id="946">946</span>
+<span id="947">947</span>
+<span id="948">948</span>
+<span id="949">949</span>
+<span id="950">950</span>
+<span id="951">951</span>
+<span id="952">952</span>
+<span id="953">953</span>
+<span id="954">954</span>
+<span id="955">955</span>
+<span id="956">956</span>
+<span id="957">957</span>
+<span id="958">958</span>
+<span id="959">959</span>
+<span id="960">960</span>
+<span id="961">961</span>
+<span id="962">962</span>
+<span id="963">963</span>
+<span id="964">964</span>
+<span id="965">965</span>
+<span id="966">966</span>
+<span id="967">967</span>
+<span id="968">968</span>
+<span id="969">969</span>
+<span id="970">970</span>
+<span id="971">971</span>
+<span id="972">972</span>
+<span id="973">973</span>
+<span id="974">974</span>
+<span id="975">975</span>
+<span id="976">976</span>
+<span id="977">977</span>
+<span id="978">978</span>
+<span id="979">979</span>
+<span id="980">980</span>
+<span id="981">981</span>
+<span id="982">982</span>
+<span id="983">983</span>
+<span id="984">984</span>
+<span id="985">985</span>
+<span id="986">986</span>
+<span id="987">987</span>
+<span id="988">988</span>
+<span id="989">989</span>
+<span id="990">990</span>
+<span id="991">991</span>
 </pre><pre class='rust '>
 <span class='doccomment'>//!# The _rust-keylock_ library</span>
 <span class='doccomment'>//!</span>
@@ -798,6 +1096,7 @@
 <span class='kw'>extern</span> <span class='kw'>crate</span> <span class='ident'>crypto</span>;
 <span class='kw'>extern</span> <span class='kw'>crate</span> <span class='ident'>rustc_serialize</span>;
 <span class='kw'>extern</span> <span class='kw'>crate</span> <span class='ident'>rand</span>;
+<span class='kw'>extern</span> <span class='kw'>crate</span> <span class='ident'>secstr</span>;
 
 <span class='kw'>use</span> <span class='ident'>toml</span>::<span class='ident'>Table</span>;
 <span class='kw'>use</span> <span class='ident'>std</span>::<span class='ident'>error</span>::<span class='ident'>Error</span>;
@@ -828,44 +1127,36 @@
 		<span class='prelude-val'>Err</span>(<span class='ident'>error</span>) <span class='op'>=&gt;</span> <span class='macro'>panic</span><span class='macro'>!</span>(<span class='string'>&quot;Could not load properties: {}&quot;</span>, <span class='ident'>error</span>.<span class='ident'>description</span>()),
 	};
 
-	<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>entries</span>;
+	<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>safe</span> <span class='op'>=</span> <span class='ident'>Safe</span>::<span class='ident'>new</span>();
 	<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>contents_changed</span> <span class='op'>=</span> <span class='bool-val'>false</span>;
 
+	<span class='comment'>// Create a Cryptor</span>
 	<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>cryptor</span> <span class='op'>=</span> {
+		<span class='comment'>// First time run?</span>
 		<span class='kw'>let</span> <span class='ident'>provided_password</span> <span class='op'>=</span> <span class='kw'>if</span> <span class='ident'>file_handler</span>::<span class='ident'>is_first_run</span>(<span class='ident'>filename</span>) {
 			<span class='ident'>editor</span>.<span class='ident'>show_change_password</span>()
 		}
 		<span class='kw'>else</span> {
 			<span class='ident'>editor</span>.<span class='ident'>show_password_enter</span>()
 		};
-		<span class='kw'>match</span> <span class='ident'>provided_password</span> {
-			<span class='ident'>UserSelection</span>::<span class='ident'>ProvidedPassword</span>(<span class='ident'>pwd</span>, <span class='ident'>salt_pos</span>) <span class='op'>=&gt;</span> {
-				<span class='kw'>let</span> <span class='ident'>cr</span> <span class='op'>=</span> <span class='ident'>file_handler</span>::<span class='ident'>create_bcryptor</span>(<span class='ident'>filename</span>, <span class='ident'>pwd</span>, <span class='ident'>salt_pos</span>, <span class='bool-val'>false</span>, <span class='bool-val'>true</span>);
-				<span class='kw'>let</span> <span class='ident'>retrieved_entries</span> <span class='op'>=</span> <span class='kw'>match</span> <span class='ident'>file_handler</span>::<span class='ident'>load</span>(<span class='ident'>filename</span>, <span class='kw-2'>&amp;</span><span class='ident'>cr</span>, <span class='bool-val'>true</span>) {
-					<span class='prelude-val'>Ok</span>(<span class='ident'>ents</span>) <span class='op'>=&gt;</span> {
-						<span class='ident'>user_selection</span> <span class='op'>=</span> <span class='ident'>UserSelection</span>::<span class='ident'>GoTo</span>(<span class='ident'>Menu</span>::<span class='ident'>Main</span>);
-						<span class='ident'>ents</span>
-					},
-					<span class='prelude-val'>Err</span>(<span class='ident'>error</span>) <span class='op'>=&gt;</span> {
-						<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;{}&quot;</span>, <span class='ident'>error</span>.<span class='ident'>description</span>());
-						<span class='ident'>user_selection</span> <span class='op'>=</span> <span class='ident'>UserSelection</span>::<span class='ident'>GoTo</span>(<span class='ident'>Menu</span>::<span class='ident'>TryFileRecovery</span>);
-						<span class='ident'>Vec</span>::<span class='ident'>new</span>()
-					},
-				};
-				<span class='ident'>entries</span> <span class='op'>=</span> <span class='ident'>retrieved_entries</span>;
-				<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;Retrieved entries. Returning {:?} with {} entries &quot;</span>, <span class='kw-2'>&amp;</span><span class='ident'>user_selection</span>, <span class='kw-2'>&amp;</span><span class='ident'>entries</span>.<span class='ident'>len</span>());
-				<span class='ident'>cr</span>
-			},
-			_ <span class='op'>=&gt;</span> <span class='macro'>panic</span><span class='macro'>!</span>(<span class='string'>&quot;Wrong initialization sequence... The editor.show_password_enter must always return a UserSelection::ProvidedPassword. Please, consider opening a bug to the developers.&quot;</span>),
-		}
+
+		<span class='comment'>// Take the provided password and do the initialization</span>
+		<span class='kw'>let</span>(<span class='ident'>us</span>, <span class='ident'>cr</span>) <span class='op'>=</span> <span class='ident'>handle_provided_password_for_init</span>(<span class='ident'>provided_password</span>, <span class='ident'>filename</span>, <span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>safe</span>, <span class='ident'>editor</span>);
+		<span class='ident'>user_selection</span> <span class='op'>=</span> <span class='ident'>us</span>;
+		<span class='ident'>cr</span>
 	};
 
 	<span class='kw'>loop</span> {
-		<span class='ident'>editor</span>.<span class='ident'>sort_entries</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>entries</span>);
+		<span class='ident'>editor</span>.<span class='ident'>sort_entries</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>safe</span>.<span class='ident'>entries</span>);
 		<span class='ident'>user_selection</span> <span class='op'>=</span> <span class='kw'>match</span> <span class='ident'>user_selection</span> {
+			<span class='ident'>UserSelection</span>::<span class='ident'>GoTo</span>(<span class='ident'>Menu</span>::<span class='ident'>TryPass</span>) <span class='op'>=&gt;</span> {
+				<span class='kw'>let</span>(<span class='ident'>user_selection</span>, <span class='ident'>cr</span>) <span class='op'>=</span> <span class='ident'>handle_provided_password_for_init</span>(<span class='ident'>editor</span>.<span class='ident'>show_password_enter</span>(), <span class='ident'>filename</span>, <span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>safe</span>, <span class='ident'>editor</span>);
+				<span class='ident'>cryptor</span> <span class='op'>=</span> <span class='ident'>cr</span>;
+				<span class='ident'>user_selection</span>
+			}
 			<span class='ident'>UserSelection</span>::<span class='ident'>GoTo</span>(<span class='ident'>Menu</span>::<span class='ident'>Main</span>) <span class='op'>=&gt;</span> {
 				<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;UserSelection::GoTo(Menu::Main)&quot;</span>);
-				<span class='kw'>let</span> <span class='ident'>m</span> <span class='op'>=</span> <span class='ident'>editor</span>.<span class='ident'>show_menu</span>(<span class='kw-2'>&amp;</span><span class='ident'>Menu</span>::<span class='ident'>Main</span>, <span class='kw-2'>&amp;</span><span class='ident'>entries</span>);
+				<span class='kw'>let</span> <span class='ident'>m</span> <span class='op'>=</span> <span class='ident'>editor</span>.<span class='ident'>show_menu</span>(<span class='kw-2'>&amp;</span><span class='ident'>Menu</span>::<span class='ident'>Main</span>, <span class='kw-2'>&amp;</span><span class='ident'>safe</span>);
 				<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;UserSelection::GoTo(Menu::Main) returns {:?}&quot;</span>, <span class='kw-2'>&amp;</span><span class='ident'>m</span>);
 				<span class='ident'>m</span>
 			},
@@ -881,27 +1172,27 @@
 			},
 			<span class='ident'>UserSelection</span>::<span class='ident'>GoTo</span>(<span class='ident'>Menu</span>::<span class='ident'>EntriesList</span>) <span class='op'>=&gt;</span> {
 				<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;UserSelection::GoTo(Menu::EntriesList)&quot;</span>);
-				<span class='ident'>editor</span>.<span class='ident'>show_menu</span>(<span class='kw-2'>&amp;</span><span class='ident'>Menu</span>::<span class='ident'>EntriesList</span>, <span class='kw-2'>&amp;</span><span class='ident'>entries</span>)
+				<span class='ident'>editor</span>.<span class='ident'>show_menu</span>(<span class='kw-2'>&amp;</span><span class='ident'>Menu</span>::<span class='ident'>EntriesList</span>, <span class='kw-2'>&amp;</span><span class='ident'>safe</span>)
 			},
 			<span class='ident'>UserSelection</span>::<span class='ident'>GoTo</span>(<span class='ident'>Menu</span>::<span class='ident'>NewEntry</span>) <span class='op'>=&gt;</span> {
 				<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;UserSelection::GoTo(Menu::NewEntry)&quot;</span>);
-				<span class='ident'>editor</span>.<span class='ident'>show_menu</span>(<span class='kw-2'>&amp;</span><span class='ident'>Menu</span>::<span class='ident'>NewEntry</span>, <span class='kw-2'>&amp;</span><span class='ident'>entries</span>)
+				<span class='ident'>editor</span>.<span class='ident'>show_menu</span>(<span class='kw-2'>&amp;</span><span class='ident'>Menu</span>::<span class='ident'>NewEntry</span>, <span class='kw-2'>&amp;</span><span class='ident'>safe</span>)
 			},
 			<span class='ident'>UserSelection</span>::<span class='ident'>GoTo</span>(<span class='ident'>Menu</span>::<span class='ident'>ShowEntry</span>(<span class='ident'>index</span>)) <span class='op'>=&gt;</span> {
 				<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;UserSelection::GoTo(Menu::ShowEntry(index))&quot;</span>);
-				<span class='ident'>editor</span>.<span class='ident'>show_menu</span>(<span class='kw-2'>&amp;</span><span class='ident'>Menu</span>::<span class='ident'>ShowEntry</span>(<span class='ident'>index</span>), <span class='kw-2'>&amp;</span><span class='ident'>entries</span>)
+				<span class='ident'>editor</span>.<span class='ident'>show_menu</span>(<span class='kw-2'>&amp;</span><span class='ident'>Menu</span>::<span class='ident'>ShowEntry</span>(<span class='ident'>index</span>), <span class='kw-2'>&amp;</span><span class='ident'>safe</span>)
 			},
 			<span class='ident'>UserSelection</span>::<span class='ident'>GoTo</span>(<span class='ident'>Menu</span>::<span class='ident'>EditEntry</span>(<span class='ident'>index</span>)) <span class='op'>=&gt;</span> {
 				<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;UserSelection::GoTo(Menu::EditEntry(index))&quot;</span>);
-				<span class='ident'>editor</span>.<span class='ident'>show_menu</span>(<span class='kw-2'>&amp;</span><span class='ident'>Menu</span>::<span class='ident'>EditEntry</span>(<span class='ident'>index</span>), <span class='kw-2'>&amp;</span><span class='ident'>entries</span>)
+				<span class='ident'>editor</span>.<span class='ident'>show_menu</span>(<span class='kw-2'>&amp;</span><span class='ident'>Menu</span>::<span class='ident'>EditEntry</span>(<span class='ident'>index</span>), <span class='kw-2'>&amp;</span><span class='ident'>safe</span>)
 			},
 			<span class='ident'>UserSelection</span>::<span class='ident'>GoTo</span>(<span class='ident'>Menu</span>::<span class='ident'>DeleteEntry</span>(<span class='ident'>index</span>)) <span class='op'>=&gt;</span> {
 				<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;UserSelection::GoTo(Menu::DeleteEntry(index))&quot;</span>);
-				<span class='ident'>editor</span>.<span class='ident'>show_menu</span>(<span class='kw-2'>&amp;</span><span class='ident'>Menu</span>::<span class='ident'>DeleteEntry</span>(<span class='ident'>index</span>), <span class='kw-2'>&amp;</span><span class='ident'>entries</span>)
+				<span class='ident'>editor</span>.<span class='ident'>show_menu</span>(<span class='kw-2'>&amp;</span><span class='ident'>Menu</span>::<span class='ident'>DeleteEntry</span>(<span class='ident'>index</span>), <span class='kw-2'>&amp;</span><span class='ident'>safe</span>)
 			},
 			<span class='ident'>UserSelection</span>::<span class='ident'>GoTo</span>(<span class='ident'>Menu</span>::<span class='ident'>Save</span>) <span class='op'>=&gt;</span> {
 				<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;UserSelection::GoTo(Menu::Save)&quot;</span>);
-				<span class='kw'>match</span> <span class='ident'>file_handler</span>::<span class='ident'>save</span>(<span class='kw-2'>&amp;</span><span class='ident'>entries</span>, <span class='ident'>filename</span>, <span class='kw-2'>&amp;</span><span class='ident'>cryptor</span>, <span class='bool-val'>true</span>) {
+				<span class='kw'>match</span> <span class='ident'>file_handler</span>::<span class='ident'>save</span>(<span class='kw-2'>&amp;</span><span class='ident'>safe</span>.<span class='ident'>get_entries_decrypted</span>(), <span class='ident'>filename</span>, <span class='kw-2'>&amp;</span><span class='ident'>cryptor</span>, <span class='bool-val'>true</span>) {
 					<span class='prelude-val'>Ok</span>(_) <span class='op'>=&gt;</span> {
 						<span class='ident'>contents_changed</span> <span class='op'>=</span> <span class='bool-val'>false</span>;
 						<span class='kw'>let</span> _ <span class='op'>=</span> <span class='ident'>editor</span>.<span class='ident'>show_message</span>(<span class='string'>&quot;Encrypted and saved successfully!&quot;</span>);
@@ -923,28 +1214,28 @@
 			},
 			<span class='ident'>UserSelection</span>::<span class='ident'>NewEntry</span>(<span class='ident'>entry</span>) <span class='op'>=&gt;</span> {
 				<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;UserSelection::NewEntry(entry)&quot;</span>);
-				<span class='ident'>entries</span>.<span class='ident'>push</span>(<span class='ident'>entry</span>);
+				<span class='ident'>safe</span>.<span class='ident'>add_entry</span>(<span class='ident'>entry</span>);
 				<span class='ident'>contents_changed</span> <span class='op'>=</span> <span class='bool-val'>true</span>;
 				<span class='ident'>UserSelection</span>::<span class='ident'>GoTo</span>(<span class='ident'>Menu</span>::<span class='ident'>EntriesList</span>)
 			},
 			<span class='ident'>UserSelection</span>::<span class='ident'>ReplaceEntry</span>(<span class='ident'>index</span>, <span class='ident'>entry</span>) <span class='op'>=&gt;</span> {
 				<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;UserSelection::ReplaceEntry(index, entry)&quot;</span>);
-				<span class='ident'>entries</span>.<span class='ident'>push</span>(<span class='ident'>entry</span>);
 				<span class='ident'>contents_changed</span> <span class='op'>=</span> <span class='bool-val'>true</span>;
-				<span class='ident'>entries</span>.<span class='ident'>swap_remove</span>(<span class='ident'>index</span>);
+				<span class='ident'>safe</span>.<span class='ident'>replace_entry</span>(<span class='ident'>index</span>, <span class='ident'>entry</span>);
 				<span class='ident'>UserSelection</span>::<span class='ident'>GoTo</span>(<span class='ident'>Menu</span>::<span class='ident'>EntriesList</span>)
 			},
 			<span class='ident'>UserSelection</span>::<span class='ident'>DeleteEntry</span>(<span class='ident'>index</span>) <span class='op'>=&gt;</span> {
 				<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;UserSelection::DeleteEntry(index)&quot;</span>);
-				<span class='ident'>entries</span>.<span class='ident'>remove</span>(<span class='ident'>index</span>);
+				<span class='ident'>safe</span>.<span class='ident'>remove_entry</span>(<span class='ident'>index</span>);
 				<span class='ident'>contents_changed</span> <span class='op'>=</span> <span class='bool-val'>true</span>;
 				<span class='ident'>UserSelection</span>::<span class='ident'>GoTo</span>(<span class='ident'>Menu</span>::<span class='ident'>EntriesList</span>)
 			},
 			<span class='ident'>UserSelection</span>::<span class='ident'>GoTo</span>(<span class='ident'>Menu</span>::<span class='ident'>TryFileRecovery</span>) <span class='op'>=&gt;</span> {
 				<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;UserSelection::GoTo(Menu::TryFileRecovery)&quot;</span>);
 				<span class='kw'>let</span> _ <span class='op'>=</span> <span class='ident'>editor</span>.<span class='ident'>show_message</span>(<span class='string'>&quot;The password entries are corrupted.\n\nPress Enter to attempt recovery...&quot;</span>);
-				<span class='ident'>entries</span> <span class='op'>=</span> <span class='ident'>file_handler</span>::<span class='ident'>recover</span>(<span class='ident'>filename</span>, <span class='kw-2'>&amp;</span><span class='ident'>cryptor</span>).<span class='ident'>unwrap</span>();
-				<span class='kw'>let</span> <span class='ident'>message</span> <span class='op'>=</span> <span class='string'>r#&quot;
+				<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>rec_entries</span> <span class='op'>=</span> <span class='kw'>match</span> <span class='ident'>file_handler</span>::<span class='ident'>recover</span>(<span class='ident'>filename</span>, <span class='kw-2'>&amp;</span><span class='ident'>cryptor</span>) {
+					<span class='prelude-val'>Ok</span>(<span class='ident'>recovered_entries</span>) <span class='op'>=&gt;</span> {
+						<span class='kw'>let</span> <span class='ident'>message</span> <span class='op'>=</span> <span class='string'>r#&quot;
 Recovery succeeded...
 
 Note the errors that caused the recovery. You may see some useful information about possible values that could not be recovered.
@@ -952,17 +1243,29 @@ Press Enter to show the Recovered Entries and if you are ok with it, save them.
 
 Warning: Saving will discard all the entries that could not be recovered.
 &quot;#</span>;
-				<span class='kw'>let</span> _ <span class='op'>=</span> <span class='ident'>editor</span>.<span class='ident'>show_message</span>(<span class='ident'>message</span>);
-				<span class='ident'>contents_changed</span> <span class='op'>=</span> <span class='bool-val'>true</span>;
+						<span class='kw'>let</span> _ <span class='op'>=</span> <span class='ident'>editor</span>.<span class='ident'>show_message</span>(<span class='ident'>message</span>);
+						<span class='ident'>contents_changed</span> <span class='op'>=</span> <span class='bool-val'>true</span>;
+						<span class='ident'>safe</span>.<span class='ident'>entries</span>.<span class='ident'>clear</span>();
+						<span class='ident'>recovered_entries</span>
+					}
+					<span class='prelude-val'>Err</span>(<span class='ident'>error</span>) <span class='op'>=&gt;</span> {
+						<span class='kw'>let</span> <span class='ident'>message</span> <span class='op'>=</span> <span class='macro'>format</span><span class='macro'>!</span>(<span class='string'>&quot;Recovery failed... Reason {:?}&quot;</span>, <span class='ident'>error</span>);
+						<span class='macro'>error</span><span class='macro'>!</span>(<span class='string'>&quot;{}&quot;</span>, <span class='kw-2'>&amp;</span><span class='ident'>message</span>);
+						<span class='kw'>let</span> _ <span class='op'>=</span> <span class='ident'>editor</span>.<span class='ident'>show_message</span>(<span class='string'>&quot;Recovery failed...&quot;</span>);
+						<span class='ident'>safe</span>.<span class='ident'>entries</span>.<span class='ident'>clone</span>()
+					}
+				};
+				<span class='ident'>safe</span>.<span class='ident'>entries</span>.<span class='ident'>append</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>rec_entries</span>);
+
 				<span class='ident'>UserSelection</span>::<span class='ident'>GoTo</span>(<span class='ident'>Menu</span>::<span class='ident'>EntriesList</span>)
 			},
 			<span class='ident'>UserSelection</span>::<span class='ident'>GoTo</span>(<span class='ident'>Menu</span>::<span class='ident'>ExportEntries</span>) <span class='op'>=&gt;</span> {
 				<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;UserSelection::GoTo(Menu::ExportEntries)&quot;</span>);
-				<span class='ident'>editor</span>.<span class='ident'>show_menu</span>(<span class='kw-2'>&amp;</span><span class='ident'>Menu</span>::<span class='ident'>ExportEntries</span>, <span class='kw-2'>&amp;</span><span class='ident'>entries</span>)
+				<span class='ident'>editor</span>.<span class='ident'>show_menu</span>(<span class='kw-2'>&amp;</span><span class='ident'>Menu</span>::<span class='ident'>ExportEntries</span>, <span class='kw-2'>&amp;</span><span class='ident'>safe</span>)
 			}
 			<span class='ident'>UserSelection</span>::<span class='ident'>ExportTo</span>(<span class='ident'>path</span>) <span class='op'>=&gt;</span> {
 				<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;UserSelection::ExportTo(path)&quot;</span>);
-				<span class='kw'>match</span> <span class='ident'>file_handler</span>::<span class='ident'>save</span>(<span class='kw-2'>&amp;</span><span class='ident'>entries</span>, <span class='kw-2'>&amp;</span><span class='ident'>path</span>, <span class='kw-2'>&amp;</span><span class='ident'>cryptor</span>, <span class='bool-val'>false</span>) {
+				<span class='kw'>match</span> <span class='ident'>file_handler</span>::<span class='ident'>save</span>(<span class='kw-2'>&amp;</span><span class='ident'>safe</span>.<span class='ident'>get_entries_decrypted</span>(), <span class='kw-2'>&amp;</span><span class='ident'>path</span>, <span class='kw-2'>&amp;</span><span class='ident'>cryptor</span>, <span class='bool-val'>false</span>) {
 					<span class='prelude-val'>Ok</span>(_) <span class='op'>=&gt;</span> {
 						<span class='kw'>let</span> _ <span class='op'>=</span> <span class='ident'>editor</span>.<span class='ident'>show_message</span>(<span class='string'>&quot;Export completed successfully!&quot;</span>);
 					},
@@ -975,16 +1278,16 @@ Warning: Saving will discard all the entries that could not be recovered.
 			}
 			<span class='ident'>UserSelection</span>::<span class='ident'>GoTo</span>(<span class='ident'>Menu</span>::<span class='ident'>ImportEntries</span>) <span class='op'>=&gt;</span> {
 				<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;UserSelection::GoTo(Menu::ImportEntries)&quot;</span>);
-				<span class='ident'>editor</span>.<span class='ident'>show_menu</span>(<span class='kw-2'>&amp;</span><span class='ident'>Menu</span>::<span class='ident'>ImportEntries</span>, <span class='kw-2'>&amp;</span><span class='ident'>entries</span>)
+				<span class='ident'>editor</span>.<span class='ident'>show_menu</span>(<span class='kw-2'>&amp;</span><span class='ident'>Menu</span>::<span class='ident'>ImportEntries</span>, <span class='kw-2'>&amp;</span><span class='ident'>safe</span>)
 			}
 			<span class='ident'>UserSelection</span>::<span class='ident'>ImportFrom</span>(<span class='ident'>path</span>, <span class='ident'>pwd</span>, <span class='ident'>salt_pos</span>) <span class='op'>=&gt;</span> {
 				<span class='kw'>let</span> <span class='ident'>cr</span> <span class='op'>=</span> <span class='ident'>file_handler</span>::<span class='ident'>create_bcryptor</span>(<span class='kw-2'>&amp;</span><span class='ident'>path</span>, <span class='ident'>pwd</span>, <span class='ident'>salt_pos</span>, <span class='bool-val'>false</span>, <span class='bool-val'>false</span>);
 				<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;UserSelection::ImportFrom(path, pwd, salt_pos)&quot;</span>);
 				<span class='kw'>match</span> <span class='ident'>file_handler</span>::<span class='ident'>load</span>(<span class='kw-2'>&amp;</span><span class='ident'>path</span>, <span class='kw-2'>&amp;</span><span class='ident'>cr</span>, <span class='bool-val'>false</span>) {
 					<span class='prelude-val'>Ok</span>(<span class='ident'>ents</span>) <span class='op'>=&gt;</span> {
-						<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;Imported {} entries &quot;</span>, <span class='kw-2'>&amp;</span><span class='ident'>ents</span>.<span class='ident'>len</span>());
+						<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;Imported {} entries&quot;</span>, <span class='kw-2'>&amp;</span><span class='ident'>ents</span>.<span class='ident'>len</span>());
 						<span class='ident'>contents_changed</span> <span class='op'>=</span> <span class='bool-val'>true</span>;
-						<span class='ident'>merge</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>entries</span>, <span class='ident'>ents</span>);
+						<span class='ident'>safe</span>.<span class='ident'>merge</span>(<span class='ident'>ents</span>);
 						<span class='kw'>let</span> _ <span class='op'>=</span> <span class='ident'>editor</span>.<span class='ident'>show_message</span>(<span class='string'>&quot;Passwords were successfully imported!&quot;</span>);
 					},
 					<span class='prelude-val'>Err</span>(<span class='ident'>error</span>) <span class='op'>=&gt;</span> {
@@ -1004,20 +1307,44 @@ Warning: Saving will discard all the entries that could not be recovered.
 	<span class='macro'>info</span><span class='macro'>!</span>(<span class='string'>&quot;Exiting rust-keylock...&quot;</span>);
 }
 
-<span class='doccomment'>/// Merges the main Entries Vector with an incoming one, by appending the incoming elements that are not the same with some existing one in the main</span>
-<span class='kw'>fn</span> <span class='ident'>merge</span>(<span class='ident'>main</span>: <span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>Entry</span><span class='op'>&gt;</span>, <span class='ident'>incoming</span>: <span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>Entry</span><span class='op'>&gt;</span>) {
-	<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>to_add</span> <span class='op'>=</span> {
-		<span class='ident'>incoming</span>.<span class='ident'>into_iter</span>().<span class='ident'>filter</span>(<span class='op'>|</span><span class='ident'>entry</span><span class='op'>|</span> {
-			<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>main_iter</span> <span class='op'>=</span> <span class='ident'>main</span>.<span class='ident'>clone</span>().<span class='ident'>into_iter</span>();
-			<span class='kw'>let</span> <span class='ident'>opt</span> <span class='op'>=</span> <span class='ident'>main_iter</span>.<span class='ident'>find</span>(<span class='op'>|</span><span class='ident'>main_entry</span><span class='op'>|</span> {
-					<span class='ident'>main_entry</span> <span class='op'>==</span> <span class='ident'>entry</span>
-			});
-
-			<span class='ident'>opt</span>.<span class='ident'>is_none</span>()
-		}).<span class='ident'>collect</span>()
-	};
-
-	<span class='ident'>main</span>.<span class='ident'>append</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>to_add</span>);
+<span class='kw'>fn</span> <span class='ident'>handle_provided_password_for_init</span>(<span class='ident'>provided_password</span>: <span class='ident'>UserSelection</span>, <span class='ident'>filename</span>: <span class='kw-2'>&amp;</span><span class='ident'>str</span>, <span class='ident'>safe</span>: <span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>Safe</span>, <span class='ident'>editor</span>: <span class='kw-2'>&amp;</span><span class='ident'>Editor</span>) <span class='op'>-&gt;</span> (<span class='ident'>UserSelection</span>, <span class='ident'>datacrypt</span>::<span class='ident'>BcryptAes</span>) {
+	<span class='kw'>let</span> <span class='ident'>user_selection</span>: <span class='ident'>UserSelection</span>;
+	<span class='kw'>match</span> <span class='ident'>provided_password</span> {
+		<span class='ident'>UserSelection</span>::<span class='ident'>ProvidedPassword</span>(<span class='ident'>pwd</span>, <span class='ident'>salt_pos</span>) <span class='op'>=&gt;</span> {
+			<span class='comment'>// New Cryptor here</span>
+			<span class='kw'>let</span> <span class='ident'>cr</span> <span class='op'>=</span> <span class='ident'>file_handler</span>::<span class='ident'>create_bcryptor</span>(<span class='ident'>filename</span>, <span class='ident'>pwd</span>, <span class='ident'>salt_pos</span>, <span class='bool-val'>false</span>, <span class='bool-val'>true</span>);
+			<span class='comment'>// Try to decrypt and load the Entries</span>
+			<span class='kw'>let</span> <span class='ident'>retrieved_entries</span> <span class='op'>=</span> <span class='kw'>match</span> <span class='ident'>file_handler</span>::<span class='ident'>load</span>(<span class='ident'>filename</span>, <span class='kw-2'>&amp;</span><span class='ident'>cr</span>, <span class='bool-val'>true</span>) {
+				<span class='comment'>// Success, go th the Main menu</span>
+				<span class='prelude-val'>Ok</span>(<span class='ident'>ents</span>) <span class='op'>=&gt;</span> {
+					<span class='ident'>user_selection</span> <span class='op'>=</span> <span class='ident'>UserSelection</span>::<span class='ident'>GoTo</span>(<span class='ident'>Menu</span>::<span class='ident'>Main</span>);
+					<span class='ident'>ents</span>
+				},
+				<span class='comment'>// Failure cases</span>
+				<span class='prelude-val'>Err</span>(<span class='ident'>error</span>) <span class='op'>=&gt;</span> {
+					<span class='kw'>match</span> <span class='ident'>error</span> {
+						<span class='comment'>// If Parse error, try recovery</span>
+						<span class='ident'>errors</span>::<span class='ident'>RustKeylockError</span>::<span class='ident'>ParseError</span>(<span class='ident'>desc</span>) <span class='op'>=&gt;</span> {
+							<span class='macro'>warn</span><span class='macro'>!</span>(<span class='string'>&quot;{}&quot;</span>, <span class='ident'>desc</span>);
+							<span class='ident'>user_selection</span> <span class='op'>=</span> <span class='ident'>UserSelection</span>::<span class='ident'>GoTo</span>(<span class='ident'>Menu</span>::<span class='ident'>TryFileRecovery</span>);
+							<span class='ident'>Vec</span>::<span class='ident'>new</span>()
+						},
+						<span class='comment'>// In all the other cases, notify the User and retry</span>
+						_ <span class='op'>=&gt;</span> {
+							<span class='macro'>error</span><span class='macro'>!</span>(<span class='string'>&quot;{}&quot;</span>, <span class='ident'>error</span>.<span class='ident'>description</span>());
+							<span class='kw'>let</span> _ <span class='op'>=</span> <span class='ident'>editor</span>.<span class='ident'>show_message</span>(<span class='string'>&quot;Wrong password or number&quot;</span>);
+							<span class='ident'>user_selection</span> <span class='op'>=</span> <span class='ident'>UserSelection</span>::<span class='ident'>GoTo</span>(<span class='ident'>Menu</span>::<span class='ident'>TryPass</span>);
+							<span class='ident'>Vec</span>::<span class='ident'>new</span>()
+						}
+					}
+				},
+			};
+			<span class='ident'>safe</span>.<span class='ident'>add_all</span>(<span class='ident'>retrieved_entries</span>);
+			<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;Retrieved entries. Returning {:?} with {} entries &quot;</span>, <span class='kw-2'>&amp;</span><span class='ident'>user_selection</span>, <span class='ident'>safe</span>.<span class='ident'>entries</span>.<span class='ident'>len</span>());
+			(<span class='ident'>user_selection</span>, <span class='ident'>cr</span>)
+		},
+		_ <span class='op'>=&gt;</span> <span class='macro'>panic</span><span class='macro'>!</span>(<span class='string'>&quot;Wrong initialization sequence... The editor.show_password_enter must always return a UserSelection::ProvidedPassword. Please, consider opening a bug to the developers.&quot;</span>),
+	}
 }
 
 <span class='doccomment'>/// Struct that defines a password entry.</span>
@@ -1033,6 +1360,8 @@ Warning: Saving will discard all the entries that could not be recovered.
     <span class='kw'>pub</span> <span class='ident'>pass</span>: <span class='ident'>String</span>,
     <span class='doccomment'>///A description of the `Entry`</span>
     <span class='kw'>pub</span> <span class='ident'>desc</span>: <span class='ident'>String</span>,
+    <span class='doccomment'>///Whether the Entry has encrypted elements (like password)</span>
+    <span class='kw'>pub</span> <span class='ident'>encrypted</span>: <span class='ident'>bool</span>,
 }
 
 <span class='kw'>impl</span> <span class='ident'>Entry</span> {
@@ -1043,6 +1372,7 @@ Warning: Saving will discard all the entries that could not be recovered.
             <span class='ident'>user</span>: <span class='ident'>user</span>,
             <span class='ident'>pass</span>: <span class='ident'>pass</span>,
             <span class='ident'>desc</span>: <span class='ident'>desc</span>,
+            <span class='ident'>encrypted</span>: <span class='bool-val'>false</span>,
         }
     }
 
@@ -1053,6 +1383,7 @@ Warning: Saving will discard all the entries that could not be recovered.
             <span class='ident'>user</span>: <span class='string'>&quot;&quot;</span>.<span class='ident'>to_string</span>(),
             <span class='ident'>pass</span>: <span class='string'>&quot;&quot;</span>.<span class='ident'>to_string</span>(),
             <span class='ident'>desc</span>: <span class='string'>&quot;&quot;</span>.<span class='ident'>to_string</span>(),
+            <span class='ident'>encrypted</span>: <span class='bool-val'>false</span>,
         }
     }
 
@@ -1094,6 +1425,131 @@ Warning: Saving will discard all the entries that could not be recovered.
 		<span class='ident'>table</span>.<span class='ident'>insert</span>(<span class='string'>&quot;desc&quot;</span>.<span class='ident'>to_string</span>(), <span class='ident'>toml</span>::<span class='ident'>Value</span>::<span class='ident'>String</span>(<span class='self'>self</span>.<span class='ident'>desc</span>.<span class='ident'>clone</span>()));
 
 		<span class='ident'>table</span>
+	}
+
+	<span class='kw'>fn</span> <span class='ident'>encrypted</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>, <span class='ident'>cryptor</span>: <span class='kw-2'>&amp;</span><span class='ident'>datacrypt</span>::<span class='ident'>EntryPasswordCryptor</span>) <span class='op'>-&gt;</span> <span class='ident'>Entry</span> {
+		<span class='kw'>let</span> (<span class='ident'>encrypted_password</span>, <span class='ident'>encryption_succeeded</span>) <span class='op'>=</span> <span class='kw'>match</span> <span class='ident'>cryptor</span>.<span class='ident'>encrypt_str</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>.<span class='ident'>pass</span>) {
+			<span class='prelude-val'>Ok</span>(<span class='ident'>encrypted</span>) <span class='op'>=&gt;</span> (<span class='ident'>encrypted</span>, <span class='bool-val'>true</span>),
+			<span class='prelude-val'>Err</span>(_) <span class='op'>=&gt;</span> {
+				<span class='macro'>error</span><span class='macro'>!</span>(<span class='string'>&quot;Could not encrypt password for {}. Defaulting in keeping it in plain...&quot;</span>, <span class='kw-2'>&amp;</span><span class='self'>self</span>.<span class='ident'>name</span>);
+				(<span class='self'>self</span>.<span class='ident'>pass</span>.<span class='ident'>clone</span>(), <span class='bool-val'>false</span>)
+			},
+		};
+		<span class='ident'>Entry</span> {
+			<span class='ident'>name</span>: <span class='self'>self</span>.<span class='ident'>name</span>.<span class='ident'>clone</span>(),
+            <span class='ident'>user</span>: <span class='self'>self</span>.<span class='ident'>user</span>.<span class='ident'>clone</span>(),
+            <span class='ident'>pass</span>: <span class='ident'>encrypted_password</span>,
+            <span class='ident'>desc</span>: <span class='self'>self</span>.<span class='ident'>desc</span>.<span class='ident'>clone</span>(),
+            <span class='ident'>encrypted</span>: <span class='ident'>encryption_succeeded</span>,
+		}
+	}
+
+	<span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>decrypted</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>, <span class='ident'>cryptor</span>: <span class='kw-2'>&amp;</span><span class='ident'>datacrypt</span>::<span class='ident'>EntryPasswordCryptor</span>) <span class='op'>-&gt;</span> <span class='ident'>Entry</span> {
+		<span class='kw'>let</span> <span class='ident'>decrypted_password</span> <span class='op'>=</span> <span class='kw'>if</span> <span class='self'>self</span>.<span class='ident'>encrypted</span> {
+			<span class='kw'>match</span> <span class='ident'>cryptor</span>.<span class='ident'>decrypt_str</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>.<span class='ident'>pass</span>) {
+				<span class='prelude-val'>Ok</span>(<span class='ident'>decrypted</span>) <span class='op'>=&gt;</span> <span class='ident'>decrypted</span>,
+				<span class='prelude-val'>Err</span>(_) <span class='op'>=&gt;</span> {
+					<span class='self'>self</span>.<span class='ident'>pass</span>.<span class='ident'>clone</span>()
+				},
+			}
+		} <span class='kw'>else</span> {
+			<span class='self'>self</span>.<span class='ident'>pass</span>.<span class='ident'>clone</span>()
+		};
+		<span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='self'>self</span>.<span class='ident'>name</span>.<span class='ident'>clone</span>(), <span class='self'>self</span>.<span class='ident'>user</span>.<span class='ident'>clone</span>(), <span class='ident'>decrypted_password</span>, <span class='self'>self</span>.<span class='ident'>desc</span>.<span class='ident'>clone</span>())
+	}
+}
+
+<span class='doccomment'>///Holds the data that should be safe and secret.</span>
+<span class='doccomment'>///</span>
+<span class='doccomment'>///This includes the password entries and a Cryptor that is used to encrypt the passwords of the entries when they are stored in memory</span>
+<span class='doccomment'>///and decrypt them when needed (to be presented to the User)</span>
+<span class='kw'>pub</span> <span class='kw'>struct</span> <span class='ident'>Safe</span> {
+	<span class='ident'>entries</span>: <span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>Entry</span><span class='op'>&gt;</span>,
+	<span class='ident'>password_cryptor</span>: <span class='ident'>datacrypt</span>::<span class='ident'>EntryPasswordCryptor</span>,
+}
+
+<span class='kw'>impl</span> <span class='ident'>Default</span>  <span class='kw'>for</span> <span class='ident'>Safe</span> {
+    <span class='kw'>fn</span> <span class='ident'>default</span>() <span class='op'>-&gt;</span> <span class='self'>Self</span> {
+    	<span class='ident'>Safe</span> {
+			<span class='ident'>entries</span>: <span class='ident'>Vec</span>::<span class='ident'>new</span>(),
+			<span class='ident'>password_cryptor</span>: <span class='ident'>datacrypt</span>::<span class='ident'>EntryPasswordCryptor</span>::<span class='ident'>new</span>(),
+		}
+    }
+} 
+
+<span class='kw'>impl</span> <span class='ident'>Safe</span> {
+	<span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>new</span>() <span class='op'>-&gt;</span> <span class='ident'>Safe</span> {
+		<span class='ident'>Safe</span> {
+			<span class='ident'>entries</span>: <span class='ident'>Vec</span>::<span class='ident'>new</span>(),
+			<span class='ident'>password_cryptor</span>: <span class='ident'>datacrypt</span>::<span class='ident'>EntryPasswordCryptor</span>::<span class='ident'>new</span>(),
+		}
+	}
+
+	<span class='doccomment'>///Adds an Entry to the Safe, with the Entry password encrypted</span>
+	<span class='kw'>fn</span> <span class='ident'>add_entry</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='self'>self</span>, <span class='ident'>new_entry</span>: <span class='ident'>Entry</span>) {
+		<span class='self'>self</span>.<span class='ident'>entries</span>.<span class='ident'>push</span>(<span class='ident'>new_entry</span>.<span class='ident'>encrypted</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>.<span class='ident'>password_cryptor</span>));
+	}
+
+	<span class='doccomment'>///Replaces an Entry in the Safe, with a new Entry that has the password encrypted</span>
+	<span class='kw'>fn</span> <span class='ident'>replace_entry</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='self'>self</span>, <span class='ident'>index</span>: <span class='ident'>usize</span>, <span class='ident'>entry</span>: <span class='ident'>Entry</span>) {
+		<span class='self'>self</span>.<span class='ident'>entries</span>.<span class='ident'>push</span>(<span class='ident'>entry</span>.<span class='ident'>encrypted</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>.<span class='ident'>password_cryptor</span>));
+		<span class='self'>self</span>.<span class='ident'>entries</span>.<span class='ident'>swap_remove</span>(<span class='ident'>index</span>);
+	}
+
+	<span class='doccomment'>///Removes an Entry from the Safe</span>
+	<span class='kw'>fn</span> <span class='ident'>remove_entry</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='self'>self</span>, <span class='ident'>index</span>: <span class='ident'>usize</span>) {
+		<span class='self'>self</span>.<span class='ident'>entries</span>.<span class='ident'>remove</span>(<span class='ident'>index</span>);
+	}
+
+	<span class='doccomment'>///Merges the Entries, by appending the incoming elements that are not the same with some existing one in Safe</span>
+	<span class='kw'>fn</span> <span class='ident'>merge</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='self'>self</span>, <span class='ident'>incoming</span>: <span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>Entry</span><span class='op'>&gt;</span>) {
+		<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>to_add</span> <span class='op'>=</span> {
+			<span class='ident'>incoming</span>.<span class='ident'>into_iter</span>().<span class='ident'>filter</span>(<span class='op'>|</span><span class='ident'>entry</span><span class='op'>|</span> {
+				<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>main_iter</span> <span class='op'>=</span> <span class='self'>self</span>.<span class='ident'>entries</span>.<span class='ident'>clone</span>().<span class='ident'>into_iter</span>();
+				<span class='kw'>let</span> <span class='ident'>opt</span> <span class='op'>=</span> <span class='ident'>main_iter</span>.<span class='ident'>find</span>(<span class='op'>|</span><span class='ident'>main_entry</span><span class='op'>|</span> {
+						<span class='ident'>main_entry</span> <span class='op'>==</span> <span class='ident'>entry</span>
+				});
+	
+				<span class='ident'>opt</span>.<span class='ident'>is_none</span>()
+			})
+			.<span class='ident'>map</span>(<span class='op'>|</span><span class='ident'>entry</span><span class='op'>|</span> <span class='ident'>entry</span>.<span class='ident'>encrypted</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>.<span class='ident'>password_cryptor</span>))
+			.<span class='ident'>collect</span>()
+		};
+	
+		<span class='self'>self</span>.<span class='ident'>entries</span>.<span class='ident'>append</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>to_add</span>);
+	}
+
+	<span class='doccomment'>///Adds the Entrie in the Safe</span>
+	<span class='kw'>fn</span> <span class='ident'>add_all</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='self'>self</span>, <span class='ident'>incoming</span>: <span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>Entry</span><span class='op'>&gt;</span>) {
+		<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>to_add</span> <span class='op'>=</span> {
+			<span class='ident'>incoming</span>.<span class='ident'>into_iter</span>()
+			.<span class='ident'>map</span>(<span class='op'>|</span><span class='ident'>entry</span><span class='op'>|</span> <span class='ident'>entry</span>.<span class='ident'>encrypted</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>.<span class='ident'>password_cryptor</span>))
+			.<span class='ident'>collect</span>()
+		};
+
+		<span class='self'>self</span>.<span class='ident'>entries</span>.<span class='ident'>append</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>to_add</span>);
+	}
+
+	<span class='doccomment'>///Retrieves an Entry at a given index</span>
+	<span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>get_entry</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>, <span class='ident'>index</span>: <span class='ident'>usize</span>) <span class='op'>-&gt;</span> <span class='kw-2'>&amp;</span><span class='ident'>Entry</span> {
+		<span class='kw-2'>&amp;</span><span class='self'>self</span>.<span class='ident'>entries</span>[<span class='ident'>index</span>]
+	}
+
+	<span class='doccomment'>///Retrieves an Entry at a given index with the password decrypted</span>
+	<span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>get_entry_decrypted</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>, <span class='ident'>index</span>: <span class='ident'>usize</span>) <span class='op'>-&gt;</span> <span class='ident'>Entry</span> {
+		<span class='self'>self</span>.<span class='ident'>get_entry</span>(<span class='ident'>index</span>).<span class='ident'>decrypted</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>.<span class='ident'>password_cryptor</span>)
+	}
+
+	<span class='doccomment'>///Retrieves an Entry at a given index</span>
+	<span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>get_entries</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>) <span class='op'>-&gt;</span> <span class='kw-2'>&amp;</span>[<span class='ident'>Entry</span>] {
+		<span class='kw-2'>&amp;</span><span class='self'>self</span>.<span class='ident'>entries</span>
+	}
+
+	<span class='doccomment'>///Retrieves all Entries with the passwords decrypted</span>
+	<span class='kw'>fn</span> <span class='ident'>get_entries_decrypted</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>) <span class='op'>-&gt;</span> <span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>Entry</span><span class='op'>&gt;</span> {
+		<span class='self'>self</span>.<span class='ident'>get_entries</span>().<span class='ident'>into_iter</span>()
+			.<span class='ident'>map</span>(<span class='op'>|</span><span class='ident'>entry</span><span class='op'>|</span> <span class='ident'>entry</span>.<span class='ident'>decrypted</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>.<span class='ident'>password_cryptor</span>))
+			.<span class='ident'>collect</span>()
 	}
 }
 
@@ -1263,7 +1719,7 @@ Warning: Saving will discard all the entries that could not be recovered.
 	<span class='doccomment'>///Shows the interface for changing a Password and/or a Number.</span>
 	<span class='kw'>fn</span> <span class='ident'>show_change_password</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>) <span class='op'>-&gt;</span> <span class='ident'>UserSelection</span>;
 	<span class='doccomment'>///Shows the specified `Menu` to the User.</span>
-	<span class='kw'>fn</span> <span class='ident'>show_menu</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>, <span class='ident'>menu</span>: <span class='kw-2'>&amp;</span><span class='ident'>Menu</span>, <span class='ident'>entries</span>: <span class='kw-2'>&amp;</span>[<span class='ident'>Entry</span>]) <span class='op'>-&gt;</span> <span class='ident'>UserSelection</span>;
+	<span class='kw'>fn</span> <span class='ident'>show_menu</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>, <span class='ident'>menu</span>: <span class='kw-2'>&amp;</span><span class='ident'>Menu</span>, <span class='ident'>safe</span>: <span class='kw-2'>&amp;</span><span class='ident'>Safe</span>) <span class='op'>-&gt;</span> <span class='ident'>UserSelection</span>;
 	<span class='doccomment'>///Shows the Exit `Menu` to the User.</span>
 	<span class='kw'>fn</span> <span class='ident'>exit</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>, <span class='ident'>contents_changed</span>: <span class='ident'>bool</span>) <span class='op'>-&gt;</span> <span class='ident'>UserSelection</span>;
 	<span class='doccomment'>///Shows a message to the User.</span>
@@ -1279,6 +1735,7 @@ Warning: Saving will discard all the entries that could not be recovered.
 <span class='kw'>mod</span> <span class='ident'>unit_tests</span> {
     <span class='kw'>use</span> <span class='ident'>toml</span>;
     <span class='kw'>use</span> <span class='kw'>super</span>::{<span class='ident'>Menu</span>, <span class='ident'>Entry</span>};
+    <span class='kw'>use</span> <span class='kw'>super</span>::<span class='ident'>datacrypt</span>::<span class='ident'>EntryPasswordCryptor</span>;
 
     <span class='attribute'>#[<span class='ident'>test</span>]</span>
     <span class='kw'>fn</span> <span class='ident'>entry_from_table_success</span>() {
@@ -1345,6 +1802,27 @@ Warning: Saving will discard all the entries that could not be recovered.
     }
 
 	<span class='attribute'>#[<span class='ident'>test</span>]</span>
+    <span class='kw'>fn</span> <span class='ident'>entry_to_encrypted</span>() {
+    	<span class='kw'>let</span> <span class='ident'>cryptor</span> <span class='op'>=</span> <span class='ident'>EntryPasswordCryptor</span>::<span class='ident'>new</span>();
+        <span class='kw'>let</span> <span class='ident'>entry</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='string'>&quot;name&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;user&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;pass&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;desc&quot;</span>.<span class='ident'>to_string</span>());
+        <span class='kw'>let</span> <span class='ident'>enc_entry</span> <span class='op'>=</span> <span class='ident'>entry</span>.<span class='ident'>encrypted</span>(<span class='kw-2'>&amp;</span><span class='ident'>cryptor</span>);
+        <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>enc_entry</span>.<span class='ident'>name</span> <span class='op'>==</span> <span class='ident'>entry</span>.<span class='ident'>name</span>);
+        <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>enc_entry</span>.<span class='ident'>user</span> <span class='op'>==</span> <span class='ident'>entry</span>.<span class='ident'>user</span>);
+        <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>enc_entry</span>.<span class='ident'>pass</span> <span class='op'>!=</span> <span class='ident'>entry</span>.<span class='ident'>pass</span>);
+        <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>enc_entry</span>.<span class='ident'>desc</span> <span class='op'>==</span> <span class='ident'>entry</span>.<span class='ident'>desc</span>);
+        <span class='kw'>let</span> <span class='ident'>dec_entry</span> <span class='op'>=</span> <span class='ident'>enc_entry</span>.<span class='ident'>decrypted</span>(<span class='kw-2'>&amp;</span><span class='ident'>cryptor</span>);
+        <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>dec_entry</span>.<span class='ident'>pass</span> <span class='op'>==</span> <span class='ident'>entry</span>.<span class='ident'>pass</span>);
+    }
+
+	<span class='attribute'>#[<span class='ident'>test</span>]</span>
+    <span class='kw'>fn</span> <span class='ident'>entry_to_encrypted_encryption_may_fail</span>() {
+    	<span class='kw'>let</span> <span class='ident'>cryptor</span> <span class='op'>=</span> <span class='ident'>EntryPasswordCryptor</span>::<span class='ident'>new</span>();
+        <span class='kw'>let</span> <span class='ident'>entry</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='string'>&quot;name&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;user&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;pass&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;desc&quot;</span>.<span class='ident'>to_string</span>());
+        <span class='kw'>let</span> <span class='ident'>dec_entry</span> <span class='op'>=</span> <span class='ident'>entry</span>.<span class='ident'>decrypted</span>(<span class='kw-2'>&amp;</span><span class='ident'>cryptor</span>);
+        <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>dec_entry</span>.<span class='ident'>pass</span> <span class='op'>==</span> <span class='ident'>entry</span>.<span class='ident'>pass</span>);
+    }
+
+	<span class='attribute'>#[<span class='ident'>test</span>]</span>
     <span class='kw'>fn</span> <span class='ident'>props_from_table_success</span>() {
         <span class='kw'>let</span> <span class='ident'>toml</span> <span class='op'>=</span> <span class='string'>r#&quot;salt = &quot;alas&quot;&quot;#</span>;
 
@@ -1407,25 +1885,144 @@ Warning: Saving will discard all the entries that could not be recovered.
 
 	<span class='attribute'>#[<span class='ident'>test</span>]</span>
 	<span class='kw'>fn</span> <span class='ident'>merge_entries</span>() {
-		<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>all</span> <span class='op'>=</span> <span class='macro'>vec</span><span class='macro'>!</span>[
+		<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>safe</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>Safe</span>::<span class='ident'>new</span>();
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>safe</span>.<span class='ident'>entries</span>.<span class='ident'>len</span>() <span class='op'>==</span> <span class='number'>0</span>);
+
+		<span class='comment'>// Add some initial Entries</span>
+		<span class='kw'>let</span> <span class='ident'>all</span> <span class='op'>=</span> <span class='macro'>vec</span><span class='macro'>!</span>[
 			<span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='string'>&quot;1&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;1&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;1&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;1&quot;</span>.<span class='ident'>to_string</span>()),
 			<span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='string'>&quot;2&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;2&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;2&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;2&quot;</span>.<span class='ident'>to_string</span>()),
 		];
+		<span class='ident'>safe</span>.<span class='ident'>entries</span> <span class='op'>=</span> <span class='ident'>all</span>;
 
 		<span class='comment'>// This one should be added</span>
 		<span class='kw'>let</span> <span class='ident'>first</span> <span class='op'>=</span> <span class='macro'>vec</span><span class='macro'>!</span>[<span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>())];
-		<span class='kw'>super</span>::<span class='ident'>merge</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>all</span>, <span class='ident'>first</span>);
-		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>all</span>.<span class='ident'>len</span>() <span class='op'>==</span> <span class='number'>3</span>);
+		<span class='ident'>safe</span>.<span class='ident'>merge</span>(<span class='ident'>first</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>safe</span>.<span class='ident'>entries</span>.<span class='ident'>len</span>() <span class='op'>==</span> <span class='number'>3</span>);
 
 		<span class='comment'>// This one should not be added</span>
 		<span class='kw'>let</span> <span class='ident'>second</span> <span class='op'>=</span> <span class='macro'>vec</span><span class='macro'>!</span>[<span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='string'>&quot;1&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;1&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;1&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;1&quot;</span>.<span class='ident'>to_string</span>())];
-		<span class='kw'>super</span>::<span class='ident'>merge</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>all</span>, <span class='ident'>second</span>);
-		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>all</span>.<span class='ident'>len</span>() <span class='op'>==</span> <span class='number'>3</span>);
+		<span class='ident'>safe</span>.<span class='ident'>merge</span>(<span class='ident'>second</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>safe</span>.<span class='ident'>entries</span>.<span class='ident'>len</span>() <span class='op'>==</span> <span class='number'>3</span>);
 
 		<span class='comment'>// This one should not be added either (the description is not the same with any of the existing ones</span>
 		<span class='kw'>let</span> <span class='ident'>third</span> <span class='op'>=</span> <span class='macro'>vec</span><span class='macro'>!</span>[<span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='string'>&quot;1&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;1&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;1&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>())];
-		<span class='kw'>super</span>::<span class='ident'>merge</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>all</span>, <span class='ident'>third</span>);
-		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>all</span>.<span class='ident'>len</span>() <span class='op'>==</span> <span class='number'>4</span>);
+		<span class='ident'>safe</span>.<span class='ident'>merge</span>(<span class='ident'>third</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>safe</span>.<span class='ident'>entries</span>.<span class='ident'>len</span>() <span class='op'>==</span> <span class='number'>4</span>);
+	}
+
+	<span class='attribute'>#[<span class='ident'>test</span>]</span>
+	<span class='kw'>fn</span> <span class='ident'>add_entry</span>() {
+		<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>safe</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>Safe</span>::<span class='ident'>new</span>();
+		<span class='kw'>let</span> <span class='ident'>entry</span> <span class='op'>=</span> <span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>());
+		<span class='ident'>safe</span>.<span class='ident'>add_entry</span>(<span class='ident'>entry</span>.<span class='ident'>clone</span>());
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>safe</span>.<span class='ident'>entries</span>.<span class='ident'>len</span>() <span class='op'>==</span> <span class='number'>1</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>safe</span>.<span class='ident'>entries</span>[<span class='number'>0</span>].<span class='ident'>name</span> <span class='op'>==</span> <span class='ident'>entry</span>.<span class='ident'>name</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>safe</span>.<span class='ident'>entries</span>[<span class='number'>0</span>].<span class='ident'>user</span> <span class='op'>==</span> <span class='ident'>entry</span>.<span class='ident'>user</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>safe</span>.<span class='ident'>entries</span>[<span class='number'>0</span>].<span class='ident'>pass</span> <span class='op'>!=</span> <span class='ident'>entry</span>.<span class='ident'>pass</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>safe</span>.<span class='ident'>entries</span>[<span class='number'>0</span>].<span class='ident'>desc</span> <span class='op'>==</span> <span class='ident'>entry</span>.<span class='ident'>desc</span>);
+	}
+
+	<span class='attribute'>#[<span class='ident'>test</span>]</span>
+	<span class='kw'>fn</span> <span class='ident'>replace_entry</span>() {
+		<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>safe</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>Safe</span>::<span class='ident'>new</span>();
+		<span class='kw'>let</span> <span class='ident'>entry</span> <span class='op'>=</span> <span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>());
+		<span class='ident'>safe</span>.<span class='ident'>add_entry</span>(<span class='ident'>entry</span>.<span class='ident'>clone</span>());
+		<span class='kw'>let</span> <span class='ident'>new_entry</span> <span class='op'>=</span> <span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='string'>&quot;33&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;33&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;33&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;33&quot;</span>.<span class='ident'>to_string</span>());
+		<span class='ident'>safe</span>.<span class='ident'>replace_entry</span>(<span class='number'>1</span>, <span class='ident'>new_entry</span>.<span class='ident'>clone</span>());
+
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>safe</span>.<span class='ident'>entries</span>.<span class='ident'>len</span>() <span class='op'>==</span> <span class='number'>1</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>safe</span>.<span class='ident'>entries</span>[<span class='number'>0</span>].<span class='ident'>name</span> <span class='op'>!=</span> <span class='ident'>new_entry</span>.<span class='ident'>name</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>safe</span>.<span class='ident'>entries</span>[<span class='number'>0</span>].<span class='ident'>user</span> <span class='op'>!=</span> <span class='ident'>new_entry</span>.<span class='ident'>user</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>safe</span>.<span class='ident'>entries</span>[<span class='number'>0</span>].<span class='ident'>pass</span> <span class='op'>!=</span> <span class='ident'>new_entry</span>.<span class='ident'>pass</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>safe</span>.<span class='ident'>entries</span>[<span class='number'>0</span>].<span class='ident'>desc</span> <span class='op'>!=</span> <span class='ident'>new_entry</span>.<span class='ident'>desc</span>);
+	}
+
+	<span class='attribute'>#[<span class='ident'>test</span>]</span>
+	<span class='kw'>fn</span> <span class='ident'>remove_entry</span>() {
+		<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>safe</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>Safe</span>::<span class='ident'>new</span>();
+		<span class='kw'>let</span> <span class='ident'>entry1</span> <span class='op'>=</span> <span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>());
+		<span class='kw'>let</span> <span class='ident'>entry2</span> <span class='op'>=</span> <span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='string'>&quot;33&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;33&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;33&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;33&quot;</span>.<span class='ident'>to_string</span>());
+		<span class='ident'>safe</span>.<span class='ident'>add_entry</span>(<span class='ident'>entry1</span>.<span class='ident'>clone</span>());
+		<span class='ident'>safe</span>.<span class='ident'>add_entry</span>(<span class='ident'>entry2</span>.<span class='ident'>clone</span>());
+
+		<span class='ident'>safe</span>.<span class='ident'>remove_entry</span>(<span class='number'>1</span>);
+
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>safe</span>.<span class='ident'>entries</span>.<span class='ident'>len</span>() <span class='op'>==</span> <span class='number'>1</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>safe</span>.<span class='ident'>entries</span>[<span class='number'>0</span>].<span class='ident'>name</span> <span class='op'>==</span> <span class='ident'>entry1</span>.<span class='ident'>name</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>safe</span>.<span class='ident'>entries</span>[<span class='number'>0</span>].<span class='ident'>user</span> <span class='op'>==</span> <span class='ident'>entry1</span>.<span class='ident'>user</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>safe</span>.<span class='ident'>entries</span>[<span class='number'>0</span>].<span class='ident'>pass</span> <span class='op'>!=</span> <span class='ident'>entry1</span>.<span class='ident'>pass</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>safe</span>.<span class='ident'>entries</span>[<span class='number'>0</span>].<span class='ident'>desc</span> <span class='op'>==</span> <span class='ident'>entry1</span>.<span class='ident'>desc</span>);
+	}
+
+	<span class='attribute'>#[<span class='ident'>test</span>]</span>
+	<span class='kw'>fn</span> <span class='ident'>add_all</span>() {
+		<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>safe</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>Safe</span>::<span class='ident'>new</span>();
+		<span class='kw'>let</span> <span class='ident'>entry1</span> <span class='op'>=</span> <span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>());
+		<span class='kw'>let</span> <span class='ident'>entry2</span> <span class='op'>=</span> <span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='string'>&quot;33&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;33&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;33&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;33&quot;</span>.<span class='ident'>to_string</span>());
+		<span class='kw'>let</span> <span class='ident'>entries</span> <span class='op'>=</span> <span class='macro'>vec</span><span class='macro'>!</span>[<span class='ident'>entry1</span>.<span class='ident'>clone</span>(), <span class='ident'>entry2</span>.<span class='ident'>clone</span>()];
+
+		<span class='ident'>safe</span>.<span class='ident'>add_all</span>(<span class='ident'>entries</span>);
+
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>safe</span>.<span class='ident'>entries</span>.<span class='ident'>len</span>() <span class='op'>==</span> <span class='number'>2</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>safe</span>.<span class='ident'>entries</span>[<span class='number'>0</span>].<span class='ident'>pass</span> <span class='op'>!=</span> <span class='ident'>entry1</span>.<span class='ident'>pass</span> <span class='op'>&amp;&amp;</span> <span class='ident'>safe</span>.<span class='ident'>entries</span>[<span class='number'>0</span>].<span class='ident'>pass</span> <span class='op'>!=</span> <span class='ident'>entry2</span>.<span class='ident'>pass</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>safe</span>.<span class='ident'>entries</span>[<span class='number'>1</span>].<span class='ident'>pass</span> <span class='op'>!=</span> <span class='ident'>entry1</span>.<span class='ident'>pass</span> <span class='op'>&amp;&amp;</span> <span class='ident'>safe</span>.<span class='ident'>entries</span>[<span class='number'>0</span>].<span class='ident'>pass</span> <span class='op'>!=</span> <span class='ident'>entry2</span>.<span class='ident'>pass</span>);
+	}
+
+	<span class='attribute'>#[<span class='ident'>test</span>]</span>
+	<span class='kw'>fn</span> <span class='ident'>get_entry</span>() {
+		<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>safe</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>Safe</span>::<span class='ident'>new</span>();
+		<span class='kw'>let</span> <span class='ident'>entry1</span> <span class='op'>=</span> <span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>());
+		<span class='kw'>let</span> <span class='ident'>entry2</span> <span class='op'>=</span> <span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='string'>&quot;33&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;33&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;33&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;33&quot;</span>.<span class='ident'>to_string</span>());
+		<span class='kw'>let</span> <span class='ident'>entries</span> <span class='op'>=</span> <span class='macro'>vec</span><span class='macro'>!</span>[<span class='ident'>entry1</span>.<span class='ident'>clone</span>(), <span class='ident'>entry2</span>.<span class='ident'>clone</span>()];
+		<span class='ident'>safe</span>.<span class='ident'>add_all</span>(<span class='ident'>entries</span>);
+
+		<span class='kw'>let</span> <span class='ident'>got_entry</span> <span class='op'>=</span> <span class='ident'>safe</span>.<span class='ident'>get_entry</span>(<span class='number'>1</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>got_entry</span>.<span class='ident'>name</span> <span class='op'>==</span> <span class='ident'>entry2</span>.<span class='ident'>name</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>got_entry</span>.<span class='ident'>user</span> <span class='op'>==</span> <span class='ident'>entry2</span>.<span class='ident'>user</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>got_entry</span>.<span class='ident'>pass</span> <span class='op'>!=</span> <span class='ident'>entry2</span>.<span class='ident'>pass</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>got_entry</span>.<span class='ident'>desc</span> <span class='op'>==</span> <span class='ident'>entry2</span>.<span class='ident'>desc</span>);
+	}
+
+	<span class='attribute'>#[<span class='ident'>test</span>]</span>
+	<span class='kw'>fn</span> <span class='ident'>get_entry_decrypted</span>() {
+		<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>safe</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>Safe</span>::<span class='ident'>new</span>();
+		<span class='kw'>let</span> <span class='ident'>entry1</span> <span class='op'>=</span> <span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>());
+		<span class='kw'>let</span> <span class='ident'>entry2</span> <span class='op'>=</span> <span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='string'>&quot;33&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;33&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;33&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;33&quot;</span>.<span class='ident'>to_string</span>());
+		<span class='kw'>let</span> <span class='ident'>entries</span> <span class='op'>=</span> <span class='macro'>vec</span><span class='macro'>!</span>[<span class='ident'>entry1</span>.<span class='ident'>clone</span>(), <span class='ident'>entry2</span>.<span class='ident'>clone</span>()];
+		<span class='ident'>safe</span>.<span class='ident'>add_all</span>(<span class='ident'>entries</span>);
+
+		<span class='kw'>let</span> <span class='ident'>got_entry</span> <span class='op'>=</span> <span class='ident'>safe</span>.<span class='ident'>get_entry_decrypted</span>(<span class='number'>1</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>got_entry</span>.<span class='ident'>name</span> <span class='op'>==</span> <span class='ident'>entry2</span>.<span class='ident'>name</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>got_entry</span>.<span class='ident'>user</span> <span class='op'>==</span> <span class='ident'>entry2</span>.<span class='ident'>user</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>got_entry</span>.<span class='ident'>pass</span> <span class='op'>==</span> <span class='ident'>entry2</span>.<span class='ident'>pass</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>got_entry</span>.<span class='ident'>desc</span> <span class='op'>==</span> <span class='ident'>entry2</span>.<span class='ident'>desc</span>);
+	}
+
+	<span class='attribute'>#[<span class='ident'>test</span>]</span>
+	<span class='kw'>fn</span> <span class='ident'>get_entries</span>() {
+		<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>safe</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>Safe</span>::<span class='ident'>new</span>();
+		<span class='kw'>let</span> <span class='ident'>entry1</span> <span class='op'>=</span> <span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>());
+		<span class='kw'>let</span> <span class='ident'>entry2</span> <span class='op'>=</span> <span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='string'>&quot;33&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;33&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;33&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;33&quot;</span>.<span class='ident'>to_string</span>());
+		<span class='kw'>let</span> <span class='ident'>entries</span> <span class='op'>=</span> <span class='macro'>vec</span><span class='macro'>!</span>[<span class='ident'>entry1</span>.<span class='ident'>clone</span>(), <span class='ident'>entry2</span>.<span class='ident'>clone</span>()];
+		<span class='ident'>safe</span>.<span class='ident'>add_all</span>(<span class='ident'>entries</span>);
+
+		<span class='kw'>let</span> <span class='ident'>got_entries</span> <span class='op'>=</span> <span class='ident'>safe</span>.<span class='ident'>get_entries</span>();
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>got_entries</span>.<span class='ident'>len</span>() <span class='op'>==</span> <span class='number'>2</span>);
+	}
+
+	<span class='attribute'>#[<span class='ident'>test</span>]</span>
+	<span class='kw'>fn</span> <span class='ident'>get_entries_decrypted</span>() {
+		<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>safe</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>Safe</span>::<span class='ident'>new</span>();
+		<span class='kw'>let</span> <span class='ident'>entry1</span> <span class='op'>=</span> <span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;3&quot;</span>.<span class='ident'>to_string</span>());
+		<span class='kw'>let</span> <span class='ident'>entry2</span> <span class='op'>=</span> <span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='string'>&quot;33&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;33&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;33&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;33&quot;</span>.<span class='ident'>to_string</span>());
+		<span class='kw'>let</span> <span class='ident'>entries</span> <span class='op'>=</span> <span class='macro'>vec</span><span class='macro'>!</span>[<span class='ident'>entry1</span>.<span class='ident'>clone</span>(), <span class='ident'>entry2</span>.<span class='ident'>clone</span>()];
+		<span class='ident'>safe</span>.<span class='ident'>add_all</span>(<span class='ident'>entries</span>);
+
+		<span class='kw'>let</span> <span class='ident'>got_entries</span> <span class='op'>=</span> <span class='ident'>safe</span>.<span class='ident'>get_entries_decrypted</span>();
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>got_entries</span>.<span class='ident'>len</span>() <span class='op'>==</span> <span class='number'>2</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>got_entries</span>[<span class='number'>0</span>].<span class='ident'>pass</span> <span class='op'>==</span> <span class='ident'>entry1</span>.<span class='ident'>pass</span>);
+		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>got_entries</span>[<span class='number'>1</span>].<span class='ident'>pass</span> <span class='op'>==</span> <span class='ident'>entry2</span>.<span class='ident'>pass</span>);
 	}
 }
 </pre>
