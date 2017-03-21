@@ -2,6 +2,17 @@
 name = "rust_keylock"
 version = "0.2.0"
 authors = ["aston <astonbitecode@gmail.com>"]
+description = "A password manager with goals to be Secure, Simple to use, Portable and Extensible"
+keywords = ["password", "manager", "safe", "encryption", "key"]
+license = "GPL-3.0"
+documentation = "https://rust-keylock.github.io/rust-keylock-lib/rust_keylock/"
+repository = "https://github.com/rust-keylock/rust-keylock-lib"
+homepage = "https://rust-keylock.github.io/"
+readme = "README.md"
+categories = ["cryptography", "authentication"]
+
+[badges]
+travis-ci = { repository = "https://github.com/rust-keylock/rust-keylock-lib", branch = "master" }
 
 [lib]
 name = "rust_keylock"
