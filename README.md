@@ -1,4 +1,5 @@
 ![Build Status](https://travis-ci.org/rust-keylock/rust-keylock-lib.svg?branch=master)
+[![crates.io](https://img.shields.io/crates/v/rust_keylock.svg)](https://crates.io/crates/rust_keylock)
 
 ## General
 
