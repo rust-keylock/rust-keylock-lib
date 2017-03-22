@@ -1,3 +1,0 @@
-[submodule "custom-deps/rust-crypto"]
-	path = custom-deps/rust-crypto
-	url = https://github.com/astonbitecode/rust-crypto

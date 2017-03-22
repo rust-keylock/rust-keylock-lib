@@ -19,7 +19,7 @@ name = "rust_keylock"
 crate-type = ["rlib", "dylib"]
 
 [dependencies]
-rust-crypto = { path = "custom-deps/rust-crypto", version = "0.2.36" }
+rust-crypto = "0.2"
 toml = "0.2"
 rustc-serialize = "0.3"
 rand = "0.3"

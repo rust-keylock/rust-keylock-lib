@@ -2,9 +2,11 @@
 use rand::{ Rng, OsRng };
 use std::iter::repeat;
 use crypto::bcrypt::bcrypt;
-use crypto::{ buffer, aes };
+use crypto::{ buffer, aes, aessafe };
+use crypto::blockmodes::CtrModeX8;
+use crypto::aes::KeySize;
 use crypto::buffer::{ ReadBuffer, WriteBuffer, BufferResult };
-use crypto::symmetriccipher::{ Encryptor, Decryptor };
+use crypto::symmetriccipher::{ Encryptor, Decryptor, SynchronousStreamCipher };
 use super::errors::RustKeylockError;
 use rustc_serialize::base64::{FromBase64, ToBase64, STANDARD};
 use secstr::SecStr;
@@ -72,6 +74,29 @@ impl BcryptAes {
 			salt_key_pairs: salt_key_pairs,
 		}
 	}
+
+	pub fn ctr(
+	        key_size: KeySize,
+	        key: &[u8],
+	        iv: &[u8]) -> Box<SynchronousStreamCipher + 'static> {
+        match key_size {
+            KeySize::KeySize128 => {
+                let aes_dec = aessafe::AesSafe128EncryptorX8::new(key);
+                let dec = Box::new(CtrModeX8::new(aes_dec, iv));
+                dec
+            }
+            KeySize::KeySize192 => {
+                let aes_dec = aessafe::AesSafe192EncryptorX8::new(key);
+                let dec = Box::new(CtrModeX8::new(aes_dec, iv));
+                dec
+            }
+            KeySize::KeySize256 => {
+                let aes_dec = aessafe::AesSafe256EncryptorX8::new(key);
+                let dec = Box::new(CtrModeX8::new(aes_dec, iv));
+                dec
+            }
+        }
+	}
 }
 
 impl Cryptor for BcryptAes {
@@ -81,7 +106,7 @@ impl Cryptor for BcryptAes {
 	    // Code taken from the rust-crypto example
 	    let mut final_result = Vec::<u8>::new();
 	    {
-		    let mut decryptor = aes::ctr(
+		    let mut decryptor = Self::ctr(
 	            aes::KeySize::KeySize256,
 	            &self.key.borrow(),
 	            &self.iv);
@@ -116,7 +141,7 @@ impl Cryptor for BcryptAes {
 			// Create an encryptor instance of the best performing
 		    // type available for the platform.
 		    // Code taken from the rust-crypto example
-			let mut encryptor = aes::ctr(
+			let mut encryptor = Self::ctr(
 	            aes::KeySize::KeySize256,
 	            &salt_key_pair.1.borrow(),
 	            &iv);
