@@ -1,6 +1,6 @@
 [package]
 name = "rust_keylock"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["aston <astonbitecode@gmail.com>"]
 description = "A password manager with goals to be Secure, Simple to use, Portable and Extensible"
 keywords = ["password", "manager", "safe", "encryption", "key"]
@@ -12,7 +12,7 @@ readme = "README.md"
 categories = ["cryptography", "authentication"]
 
 [badges]
-travis-ci = { repository = "https://github.com/rust-keylock/rust-keylock-lib", branch = "master" }
+travis-ci = { repository = "rust-keylock/rust-keylock-lib", branch = "master" }
 
 [lib]
 name = "rust_keylock"
