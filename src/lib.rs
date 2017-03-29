@@ -1030,14 +1030,44 @@ mod unit_tests {
 	fn user_selection_after_idle_check_timed_out() {
 		let time = SystemTime::now();
 		std::thread::sleep(std::time::Duration::new(2, 0));
-		let user_selection = super::user_selection_after_idle_check(&time, 1, UserSelection::GoTo(Menu::Main));
+		let user_selection = super::user_selection_after_idle_check(&time, 1, UserSelection::GoTo(Menu::Main), &DummyEditor::new());
 		assert!(user_selection == UserSelection::GoTo(Menu::TryPass));
 	}
 
 	#[test]
 	fn user_selection_after_idle_check_not_timed_out() {
 		let time = SystemTime::now();
-		let user_selection = super::user_selection_after_idle_check(&time, 10, UserSelection::GoTo(Menu::Main));
+		let user_selection = super::user_selection_after_idle_check(&time, 10, UserSelection::GoTo(Menu::Main), &DummyEditor::new());
 		assert!(user_selection == UserSelection::GoTo(Menu::Main));
+	}
+
+	struct DummyEditor;
+
+	impl DummyEditor {
+		pub fn new() -> DummyEditor {
+			DummyEditor {}
+		}
+	}
+
+	impl super::Editor for DummyEditor {
+		fn show_password_enter(&self) -> UserSelection {
+			UserSelection::ProvidedPassword("dummy".to_string(), 0)
+		}
+	
+		fn show_change_password(&self) -> UserSelection {
+			self.show_password_enter()
+		}
+	
+		fn show_menu(&self, _: &Menu, _: &super::Safe) -> UserSelection {
+			UserSelection::GoTo(Menu::Main)
+		}
+	
+		fn exit(&self, _: bool) -> UserSelection {
+			UserSelection::Ack
+		}
+	
+		fn show_message(&self, _: & str) -> UserSelection {
+			UserSelection::Ack
+		}
 	}
 }
