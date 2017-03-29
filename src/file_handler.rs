@@ -6,7 +6,8 @@ use std::io::prelude::*;
 use std::env;
 use std::fs::{ self, File };
 use std::path::PathBuf;
-use toml::{ self, Table, Parser };
+use toml::value::{ Table, Value };
+use toml;
 
 pub fn create_bcryptor(filename: &str, password: String, salt_position: usize, reinitialize_randoms: bool, use_default_location: bool) -> BcryptAes {
 	debug!("Creating bcryptor");
@@ -80,11 +81,11 @@ pub fn load(filename: &str, cryptor: &Cryptor, use_default_location: bool) -> Re
 	};
 	debug!("Full Path to load: {:?}", full_path);
     let toml = try!(load_existing_file(&full_path, Some(cryptor)));
+	let value = try!(toml.as_str().parse::<Value>());
 
-    let mut parser = Parser::new(toml.as_str());
-    match parser.parse() {
-    	Some(table) => transform_to_dtos(table, false),
-    	None => Err(RustKeylockError::ParseError(format!("{:?}", parser.errors)))
+    match value.as_table() {
+		Some(table) => transform_to_dtos(table, false),
+    	None => Err(RustKeylockError::ParseError("No Table found in the toml.".to_string()))
     }
 }
 
@@ -97,12 +98,12 @@ pub fn load_properties(filename: &str) -> Result<Props, RustKeylockError> {
     let toml = try!(load_existing_file(&full_path, None));
 
 	if toml.len() == 0 {
-		Ok(Props::empty())
+		Ok(Props::default())
 	} else {
-	    let mut parser = Parser::new(toml.as_str());
-	    match parser.parse() {
+		let value = try!(toml.as_str().parse::<Value>());
+	    match value.as_table() {
 	    	Some(table) => transform_to_props(table),
-	    	None => Err(RustKeylockError::ParseError(format!("{:?}", parser.errors)))
+	    	None => Err(RustKeylockError::ParseError("No Table found in the toml while loading properties.".to_string()))
 	    }
 	}
 }
@@ -114,10 +115,11 @@ pub fn recover(filename: &str, cryptor: &Cryptor) -> Result<Vec<Entry>, RustKeyl
 	info!("Full path of file to recover {:?}", full_path);
     let toml = try!(load_existing_file(&full_path, Some(cryptor)));
 
-    let mut parser = Parser::new(toml.as_str());
-    match parser.parse() {
+	let value = try!(toml.as_str().parse::<Value>());
+
+    match value.as_table() {
     	Some(table) => transform_to_dtos(table, true),
-    	None => Err(RustKeylockError::ParseError(format!("{:?}", parser.errors)))
+    	None => Err(RustKeylockError::ParseError("No Table found in the toml while trying to recover.".to_string()))
     }
 }
 
@@ -152,18 +154,18 @@ fn default_rustkeylock_location() -> PathBuf {
 }
 
 /// Transforms properties toml to Props dto
-fn transform_to_props(table: Table) -> Result<Props, RustKeylockError> {
-	Props::from_table(&table)
+fn transform_to_props(table: &Table) -> Result<Props, RustKeylockError> {
+	Props::from_table(table)
 }
 
 /// Transforms from toml Table which contains a List of Tables (entry) to a Vec<Entry>
 /// If recover is true, then only the valid Entries are retrieved (no Error is returned if possible)
-fn transform_to_dtos(table: Table, recover: bool) -> Result<Vec<Entry>, RustKeylockError> {
+fn transform_to_dtos(table: &Table, recover: bool) -> Result<Vec<Entry>, RustKeylockError> {
     match table.get("entry") {
     	Some(value) => {
-    		match value.as_slice() {
-    			Some(slice) => {
-	    			let iter = slice.into_iter();
+    		match value.as_array() {
+    			Some(array) => {
+	    			let iter = array.into_iter();
 	    			let vec: Vec<Option<Entry>> = iter.map(|value| {
 	    				let conversion_result = match value.as_table() {
 		            		Some(value_table) => Entry::from_table(value_table),
@@ -247,12 +249,12 @@ pub fn save(entries: &Vec<Entry>, filename: &str, cryptor: &Cryptor, use_default
 		toml_path(filename)
 	};
 	let tables_vec = entries.iter().map(|entry| {
-		toml::Value::Table(entry.to_table())
+		Value::Table(entry.to_table())
 	}).collect();
 	let mut table = Table::new();
-	table.insert("entry".to_string(), toml::Value::Array(tables_vec));
+	table.insert("entry".to_string(), Value::Array(tables_vec));
     let toml_string = if entries.len() > 0 {
-    	toml::encode_str(&table)
+    	try!(toml::ser::to_string(&table))
     } else {
     	"".to_string()
     };
@@ -266,12 +268,13 @@ pub fn save(entries: &Vec<Entry>, filename: &str, cryptor: &Cryptor, use_default
 }
 
 /// Saves the specified Props to a toml file with the specified name
+#[allow(dead_code)] 
 pub fn save_props(props: &Props, filename: &str) -> errors::Result<()> {
 	info!("Saving Properties in {}", filename);
 	let path_buf = default_toml_path(filename);
 	let mut file = try!(File::create(path_buf));
 	let table = props.to_table();
-    let toml_string = toml::encode_str(&table);
+    let toml_string = try!(toml::ser::to_string(&table));
     try!(file.write_all(toml_string.as_bytes()));
     info!("Properties saved in {}. Syncing...", filename);
     Ok(try!(file.sync_all()))
@@ -341,12 +344,12 @@ mod test_parser {
 
         let opt = super::load_properties(filename);
         assert!(opt.is_ok());
-        assert!(super::save_props(&Props::new("alasalas".to_string()), filename).is_ok());
+        assert!(super::save_props(&Props::new(60), filename).is_ok());
 
         let new_opt = super::load_properties(filename);
         assert!(new_opt.is_ok());
         let new_props = new_opt.unwrap();
-        assert!(new_props.salt == "alasalas");
+        assert!(new_props.idle_timeout_seconds == 60);
         delete_file(filename);
     }
 
@@ -365,7 +368,8 @@ mod test_parser {
 			desc = "other description"
 		"#;
 
-        let table = toml::Parser::new(toml).parse().unwrap();
+		let value = toml.parse::<toml::value::Value>().unwrap();
+        let table = value.as_table().unwrap();
         let res = super::transform_to_dtos(table, false);
         assert!(res.is_ok());
         let vec = res.unwrap();
@@ -395,7 +399,8 @@ mod test_parser {
 			desc = "other description"
 		"#;
 
-        let table = toml::Parser::new(toml).parse().unwrap();
+        let value = toml.parse::<toml::value::Value>().unwrap();
+        let table = value.as_table().unwrap();
         let res = super::transform_to_dtos(table, false);
         assert!(res.is_err());
     }
@@ -414,7 +419,8 @@ mod test_parser {
 			desc = "other description"
 		"#;
 
-        let table = toml::Parser::new(toml).parse().unwrap();
+        let value = toml.parse::<toml::value::Value>().unwrap();
+        let table = value.as_table().unwrap();
         let res = super::transform_to_dtos(table, true);
         assert!(res.is_ok());
         let vec = res.unwrap();
@@ -425,7 +431,6 @@ mod test_parser {
         assert!(vec[0].desc == "other description");
     }
 
-	// TODO: Why it fails when all tests are running, whereas it passes once it runs alone?
 	#[test]
 	fn create_encrypt_and_then_decrypt() {
 		let filename = "create_encrypt_and_then_decrypt.toml";
@@ -524,7 +529,7 @@ mod test_parser {
 
 	fn create_props_file_with_toml_contents(name: &str) {
         // Create the file with some toml contents
-        let contents = r#"salt = "alas""#;
+        let contents = r#"idle_timeout_seconds = 33"#;
 		create_file_with_contents(name, contents);
     }
 

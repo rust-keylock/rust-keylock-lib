@@ -62,8 +62,9 @@ extern crate rustc_serialize;
 extern crate rand;
 extern crate secstr;
 
-use toml::Table;
+use toml::value::Table;
 use std::error::Error;
+use std::time::SystemTime;
 
 mod file_handler;
 mod errors;
@@ -76,19 +77,17 @@ pub fn execute<T: Editor>(editor: &T) {
 
 	let filename = ".sec";
 	let props_filename = ".props";
+	// Holds the UserSelections
 	let mut user_selection;
+	// Holds the time of the latest user action
+	let mut last_action_time;
 
-	let _ = match file_handler::load_properties(props_filename) {
-		Ok(m) => {
-			if m.salt.len() == 0 {
-				let new_props = Props::new("tmp".to_string());
-				assert!(file_handler::save_props(&new_props, props_filename).is_ok());
-				new_props
-			} else {
-				m
-			}
+	let props = match file_handler::load_properties(props_filename) {
+		Ok(m) => m,
+		Err(error) => {
+			error!("Could not load properties. Using defaults. The error was: {}", error.description());
+			Props::default()
 		},
-		Err(error) => panic!("Could not load properties: {}", error.description()),
 	};
 
 	let mut safe = Safe::new();
@@ -106,12 +105,20 @@ pub fn execute<T: Editor>(editor: &T) {
 
 		// Take the provided password and do the initialization
 		let(us, cr) = handle_provided_password_for_init(provided_password, filename, &mut safe, editor);
+		// Set the UserSelection
 		user_selection = us;
+		// Set the time of the action
+		last_action_time = SystemTime::now();
 		cr
 	};
 
 	loop {
 		editor.sort_entries(&mut safe.entries);
+		// Idle time check
+		user_selection = user_selection_after_idle_check(&last_action_time, props.idle_timeout_seconds, user_selection, editor);
+		// Update the action time
+		last_action_time = SystemTime::now();
+		// Handle
 		user_selection = match user_selection {
 			UserSelection::GoTo(Menu::TryPass) => {
 				let(user_selection, cr) = handle_provided_password_for_init(editor.show_password_enter(), filename, &mut safe, editor);
@@ -271,6 +278,26 @@ Warning: Saving will discard all the entries that could not be recovered.
 	info!("Exiting rust-keylock...");
 }
 
+fn user_selection_after_idle_check(last_action_time: &SystemTime, timeout_seconds: i64, us: UserSelection, editor: &Editor) -> UserSelection {
+	match last_action_time.elapsed() {
+		Ok(elapsed) => {
+			let elapsed_seconds = elapsed.as_secs();
+			if elapsed_seconds as i64 > timeout_seconds {
+				warn!("Idle time of {} seconds elapsed! Locking...", timeout_seconds);
+				let message = format!("Idle time of {} seconds elapsed! Locking...", timeout_seconds);
+				let _ = editor.show_message(&message);
+				UserSelection::GoTo(Menu::TryPass)
+			} else {
+				us
+			}
+		},
+		Err(error) => {
+			error!("Cannot get the elapsed time since the last action of the user: {:?}", &error);
+			us
+		},
+	}
+}
+
 fn handle_provided_password_for_init(provided_password: UserSelection, filename: &str, safe: &mut Safe, editor: &Editor) -> (UserSelection, datacrypt::BcryptAes) {
 	let user_selection: UserSelection;
 	match provided_password {
@@ -377,7 +404,7 @@ impl Entry {
             (Some(n), Some(u), Some(p), Some(d)) => {
             	Ok(Self::new(n, u, p, d))
             },
-            _ => Err(errors::RustKeylockError::ParseError(toml::encode_str(&table).to_string())),
+            _ => Err(errors::RustKeylockError::ParseError(toml::ser::to_string(&table).unwrap_or("Cannot serialize toml".to_string()))),
         }
     }
 
@@ -518,47 +545,47 @@ impl Safe {
 }
 
 ///A struct that allows storing general configuration values.
-///
-///The functionality is not currently used, as it turns out that no additional configuration is needed for the _rust-keylock_.
-///However, it may be used in the future.
-///
 ///The configuration values are stored in plaintext.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Props {
-    salt: String,
+	///Inactivity timeout seconds
+    idle_timeout_seconds: i64,
+}
+
+impl Default  for Props {
+    fn default() -> Self {
+    	Props {
+            idle_timeout_seconds: 60,
+        }
+    }
 }
 
 impl Props {
-    fn new(salt: String) -> Props {
+    fn new(idle_timeout_seconds: i64) -> Props {
         Props {
-            salt: salt,
-        }
-    }
-
-	fn empty() -> Props {
-        Props {
-            salt: "".to_string(),
+            idle_timeout_seconds: idle_timeout_seconds,
         }
     }
 
     fn from_table(table: &Table) -> Result<Props, errors::RustKeylockError> {
-        let salt = table.get("salt").and_then(|value| {
-        		value.as_str().and_then(|str_ref| {
-        				Some(str_ref.to_string())
+        let idle_timeout_seconds = table.get("idle_timeout_seconds").and_then(|value| {
+        		value.as_integer().and_then(|i_ref| {
+        				Some(i_ref)
         		})
         });
 
-        match salt {
+        match idle_timeout_seconds {
             Some(s) => {
             	Ok(Self::new(s))
             },
-            _ => Err(errors::RustKeylockError::ParseError(toml::encode_str(&table).to_string())),
+            _ => Err(errors::RustKeylockError::ParseError(toml::ser::to_string(&table).unwrap_or("Cannot serialize toml".to_string()))),
         }
     }
 
+	#[allow(dead_code)] 
 	fn to_table(&self) -> Table {
 		let mut table = Table::new();
-		table.insert("salt".to_string(), toml::Value::String(self.salt.clone()));
+		table.insert("idle_timeout_seconds".to_string(), toml::Value::Integer(self.idle_timeout_seconds));
 
 		table
 	}
@@ -654,7 +681,7 @@ impl Menu {
 }
 
 /// Represents a User selection that is returned after showing a `Menu`.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum UserSelection {
 	///The User selected an `Entry`.
 	NewEntry(Entry),
@@ -687,7 +714,7 @@ pub trait Editor {
 	///Shows the Exit `Menu` to the User.
 	fn exit(&self, contents_changed: bool) -> UserSelection;
 	///Shows a message to the User.
-	fn show_message(&self, message: &'static str) -> UserSelection;
+	fn show_message(&self, message: & str) -> UserSelection;
 
 	///Sorts the supplied entries.
 	fn sort_entries(&self, entries: &mut [Entry]) {
@@ -698,8 +725,10 @@ pub trait Editor {
 #[cfg(test)]
 mod unit_tests {
     use toml;
-    use super::{Menu, Entry};
+    use super::{Menu, Entry, UserSelection};
     use super::datacrypt::EntryPasswordCryptor;
+    use std::time::SystemTime;
+    use std;
 
     #[test]
     fn entry_from_table_success() {
@@ -710,7 +739,8 @@ mod unit_tests {
 			desc = "some description"
 		"#;
 
-        let table = toml::Parser::new(toml).parse().unwrap();
+        let value = toml.parse::<toml::value::Value>().unwrap();
+        let table = value.as_table().unwrap();
         let entry_opt = super::Entry::from_table(&table);
         assert!(entry_opt.is_ok());
         let entry = entry_opt.unwrap();
@@ -729,7 +759,8 @@ mod unit_tests {
 			desc = "some description"
 		"#;
 
-        let table = toml::Parser::new(toml).parse().unwrap();
+        let value = toml.parse::<toml::value::Value>().unwrap();
+        let table = value.as_table().unwrap();
         let entry_opt = super::Entry::from_table(&table);
         assert!(entry_opt.is_err());
     }
@@ -743,7 +774,8 @@ mod unit_tests {
 			desc = "some description"
 		"#;
 
-        let table = toml::Parser::new(toml).parse().unwrap();
+        let value = toml.parse::<toml::value::Value>().unwrap();
+        let table = value.as_table().unwrap();
         let entry_opt = super::Entry::from_table(&table);
         assert!(entry_opt.is_err());
     }
@@ -757,12 +789,13 @@ mod unit_tests {
 			desc = "some description"
 		"#;
 
-        let table = toml::Parser::new(toml).parse().unwrap();
+        let value = toml.parse::<toml::value::Value>().unwrap();
+        let table = value.as_table().unwrap();
         let entry_opt = super::Entry::from_table(&table);
         assert!(entry_opt.is_ok());
         let entry = entry_opt.unwrap();
         let new_table = entry.to_table();
-        assert!(table == new_table);
+        assert!(table == &new_table);
     }
 
 	#[test]
@@ -788,20 +821,22 @@ mod unit_tests {
 
 	#[test]
     fn props_from_table_success() {
-        let toml = r#"salt = "alas""#;
+        let toml = r#"idle_timeout_seconds = 33"#;
 
-        let table = toml::Parser::new(toml).parse().unwrap();
+        let value = toml.parse::<toml::value::Value>().unwrap();
+        let table = value.as_table().unwrap();
         let props_opt = super::Props::from_table(&table);
         assert!(props_opt.is_ok());
         let props = props_opt.unwrap();
-        assert!(props.salt == "alas");
+        assert!(props.idle_timeout_seconds == 33);
     }
 
 	#[test]
     fn props_from_table_failure_wrong_key() {
         let toml = r#"wrong_key = "alas""#;
 
-        let table = toml::Parser::new(toml).parse().unwrap();
+        let value = toml.parse::<toml::value::Value>().unwrap();
+        let table = value.as_table().unwrap();
         let props_opt = super::Props::from_table(&table);
         assert!(props_opt.is_err());
     }
@@ -810,21 +845,23 @@ mod unit_tests {
     fn props_from_table_failure_wrong_value() {
         let toml = r#"salt = 1"#;
 
-        let table = toml::Parser::new(toml).parse().unwrap();
+        let value = toml.parse::<toml::value::Value>().unwrap();
+        let table = value.as_table().unwrap();
         let props_opt = super::Props::from_table(&table);
         assert!(props_opt.is_err());
     }
 
 	#[test]
     fn props_to_table() {
-        let toml = r#"salt = "alas""#;
+        let toml = r#"idle_timeout_seconds = 33"#;
 
-        let table = toml::Parser::new(toml).parse().unwrap();
+        let value = toml.parse::<toml::value::Value>().unwrap();
+        let table = value.as_table().unwrap();
         let props_opt = super::Props::from_table(&table);
         assert!(props_opt.is_ok());
         let props = props_opt.unwrap();
         let new_table = props.to_table();
-        assert!(table == new_table);
+        assert!(table == &new_table);
     }
 
 	#[test]
@@ -987,5 +1024,20 @@ mod unit_tests {
 		assert!(got_entries.len() == 2);
 		assert!(got_entries[0].pass == entry1.pass);
 		assert!(got_entries[1].pass == entry2.pass);
+	}
+
+	#[test]
+	fn user_selection_after_idle_check_timed_out() {
+		let time = SystemTime::now();
+		std::thread::sleep(std::time::Duration::new(2, 0));
+		let user_selection = super::user_selection_after_idle_check(&time, 1, UserSelection::GoTo(Menu::Main));
+		assert!(user_selection == UserSelection::GoTo(Menu::TryPass));
+	}
+
+	#[test]
+	fn user_selection_after_idle_check_not_timed_out() {
+		let time = SystemTime::now();
+		let user_selection = super::user_selection_after_idle_check(&time, 10, UserSelection::GoTo(Menu::Main));
+		assert!(user_selection == UserSelection::GoTo(Menu::Main));
 	}
 }

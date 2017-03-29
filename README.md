@@ -15,16 +15,20 @@ The main logic is written in [Rust](https://www.rust-lang.org), but the presenta
 ## Features
 
 * __Security__
+
  * Encryption using _AES_ with _CTR_ mode
  * Password hashing with _bcrypt_
  * Encrypted bytes blending
  * Passwords are kept encrypted in memory
  * Encryption keys on runtime stored in safe, non-swappable memory
  * Encryption keys change upon saving
+ 
 * __Application Portability__
+
  * Shell implementation running on Linux and Windows
  * Android implementation
  * JavaFX implementation (TODO)
+ 
 * __Import/export mechanism__
 
 ## The _rust-keylock_ library
