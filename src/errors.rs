@@ -32,9 +32,9 @@ impl Error for RustKeylockError {
     fn description(&self) -> &str {
         match *self {
             RustKeylockError::GeneralError(_) => ("General error occured"),
-        	RustKeylockError::ParseError(_) => ("Error during parsing"),
-        	RustKeylockError::DecryptionError(_) => ("Error during decryption"),
-        	RustKeylockError::EncryptionError(_) => ("Error during encryption"),
+            RustKeylockError::ParseError(_) => ("Error during parsing"),
+            RustKeylockError::DecryptionError(_) => ("Error during decryption"),
+            RustKeylockError::EncryptionError(_) => ("Error during encryption"),
         }
     }
 }
