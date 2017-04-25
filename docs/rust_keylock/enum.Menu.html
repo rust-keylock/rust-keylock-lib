@@ -9,6 +9,7 @@
 
     <title>rust_keylock::Menu - Rust</title>
 
+    <link rel="stylesheet" type="text/css" href="../normalize.css">
     <link rel="stylesheet" type="text/css" href="../rustdoc.css">
     <link rel="stylesheet" type="text/css" href="../main.css">
     
@@ -47,7 +48,7 @@
                    <a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">
                        [<span class='inner'>&#x2212;</span>]
                    </a>
-               </span><a class='srclink' href='../src/rust_keylock/lib.rs.html#569-604' title='goto source code'>[src]</a></span></h1>
+               </span><a class='srclink' href='../src/rust_keylock/lib.rs.html#578-613' title='goto source code'>[src]</a></span></h1>
 <pre class='rust enum'>pub enum Menu {
     TryPass,
     ChangePass,
@@ -85,17 +86,17 @@
 </div><span id='variant.TryFileRecovery' class='variant'><span id='TryFileRecovery.v' class='invisible'><code>TryFileRecovery</code></span></span><div class='docblock'><p>Parsing the <code>Entries</code> <em>after</em> decrypting them may lead to wrong data. This Menu informs the User about the situation and offers an attempt to recover anything that is recoverable.</p>
 </div><span id='variant.ImportEntries' class='variant'><span id='ImportEntries.v' class='invisible'><code>ImportEntries</code></span></span><div class='docblock'><p>The user should be able to import password <code>Entries</code>.</p>
 </div><span id='variant.ExportEntries' class='variant'><span id='ExportEntries.v' class='invisible'><code>ExportEntries</code></span></span><div class='docblock'><p>The user should be able to export password <code>Entries</code>.</p>
-</div><h2 id='methods'>Methods</h2><h3 class='impl'><span class='in-band'><code>impl <a class='enum' href='../rust_keylock/enum.Menu.html' title='rust_keylock::Menu'>Menu</a></code></span><span class='out-of-band'><div class='ghost'></div><a class='srclink' href='../src/rust_keylock/lib.rs.html#606-654' title='goto source code'>[src]</a></span></h3>
+</div><h2 id='methods'>Methods</h2><h3 class='impl'><span class='in-band'><code>impl <a class='enum' href='../rust_keylock/enum.Menu.html' title='rust_keylock::Menu'>Menu</a></code></span><span class='out-of-band'><div class='ghost'></div><a class='srclink' href='../src/rust_keylock/lib.rs.html#615-666' title='goto source code'>[src]</a></span></h3>
 <div class='impl-items'><h4 id='method.get_name' class='method'><span id='get_name.v' class='invisible'><code>fn <a href='#method.get_name' class='fnname'>get_name</a>(&amp;self) -&gt; <a class='struct' href='https://doc.rust-lang.org/nightly/collections/string/struct.String.html' title='collections::string::String'>String</a></code></span></h4>
 <div class='docblock'><p>Returns the name of a <code>Menu</code>.</p>
 </div><h4 id='method.from' class='method'><span id='from.v' class='invisible'><code>fn <a href='#method.from' class='fnname'>from</a>(name: <a class='struct' href='https://doc.rust-lang.org/nightly/collections/string/struct.String.html' title='collections::string::String'>String</a>, opt: <a class='enum' href='https://doc.rust-lang.org/nightly/core/option/enum.Option.html' title='core::option::Option'>Option</a>&lt;<a class='primitive' href='https://doc.rust-lang.org/nightly/std/primitive.usize.html'>usize</a>&gt;) -&gt; <a class='enum' href='../rust_keylock/enum.Menu.html' title='rust_keylock::Menu'>Menu</a></code></span></h4>
 <div class='docblock'><p>Parses a String and creates a <code>Menu</code>.</p>
 
 <p>Menus that have additional <code>usize</code> arguments exist. Thus the existence of the <code>Option</code>al argument during parsing.</p>
-</div></div><h2 id='implementations'>Trait Implementations</h2><h3 class='impl'><span class='in-band'><code>impl <a class='trait' href='https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html' title='core::fmt::Debug'>Debug</a> for <a class='enum' href='../rust_keylock/enum.Menu.html' title='rust_keylock::Menu'>Menu</a></code></span><span class='out-of-band'><div class='ghost'></div><a class='srclink' href='../src/rust_keylock/lib.rs.html#568' title='goto source code'>[src]</a></span></h3>
+</div></div><h2 id='implementations'>Trait Implementations</h2><h3 class='impl'><span class='in-band'><code>impl <a class='trait' href='https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html' title='core::fmt::Debug'>Debug</a> for <a class='enum' href='../rust_keylock/enum.Menu.html' title='rust_keylock::Menu'>Menu</a></code></span><span class='out-of-band'><div class='ghost'></div><a class='srclink' href='../src/rust_keylock/lib.rs.html#577' title='goto source code'>[src]</a></span></h3>
 <div class='impl-items'><h4 id='method.fmt' class='method'><span id='fmt.v' class='invisible'><code>fn <a href='https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html#tymethod.fmt' class='fnname'>fmt</a>(&amp;self, __arg_0: &amp;mut <a class='struct' href='https://doc.rust-lang.org/nightly/core/fmt/struct.Formatter.html' title='core::fmt::Formatter'>Formatter</a>) -&gt; <a class='type' href='https://doc.rust-lang.org/nightly/core/fmt/type.Result.html' title='core::fmt::Result'>Result</a></code></span></h4>
 <div class='docblock'><p>Formats the value using the given formatter.</p>
-</div></div><h3 class='impl'><span class='in-band'><code>impl <a class='trait' href='https://doc.rust-lang.org/nightly/core/cmp/trait.PartialEq.html' title='core::cmp::PartialEq'>PartialEq</a> for <a class='enum' href='../rust_keylock/enum.Menu.html' title='rust_keylock::Menu'>Menu</a></code></span><span class='out-of-band'><div class='ghost'></div><a class='srclink' href='../src/rust_keylock/lib.rs.html#568' title='goto source code'>[src]</a></span></h3>
+</div></div><h3 class='impl'><span class='in-band'><code>impl <a class='trait' href='https://doc.rust-lang.org/nightly/core/cmp/trait.PartialEq.html' title='core::cmp::PartialEq'>PartialEq</a> for <a class='enum' href='../rust_keylock/enum.Menu.html' title='rust_keylock::Menu'>Menu</a></code></span><span class='out-of-band'><div class='ghost'></div><a class='srclink' href='../src/rust_keylock/lib.rs.html#577' title='goto source code'>[src]</a></span></h3>
 <div class='impl-items'><h4 id='method.eq' class='method'><span id='eq.v' class='invisible'><code>fn <a href='https://doc.rust-lang.org/nightly/core/cmp/trait.PartialEq.html#tymethod.eq' class='fnname'>eq</a>(&amp;self, __arg_0: &amp;<a class='enum' href='../rust_keylock/enum.Menu.html' title='rust_keylock::Menu'>Menu</a>) -&gt; <a class='primitive' href='https://doc.rust-lang.org/nightly/std/primitive.bool.html'>bool</a></code></span></h4>
 <div class='docblock'><p>This method tests for <code>self</code> and <code>other</code> values to be equal, and is used by <code>==</code>. <a href="https://doc.rust-lang.org/nightly/core/cmp/trait.PartialEq.html#tymethod.eq">Read more</a></p>
 </div><h4 id='method.ne' class='method'><span id='ne.v' class='invisible'><code>fn <a href='https://doc.rust-lang.org/nightly/core/cmp/trait.PartialEq.html#method.ne' class='fnname'>ne</a>(&amp;self, __arg_0: &amp;<a class='enum' href='../rust_keylock/enum.Menu.html' title='rust_keylock::Menu'>Menu</a>) -&gt; <a class='primitive' href='https://doc.rust-lang.org/nightly/std/primitive.bool.html'>bool</a></code></span></h4>

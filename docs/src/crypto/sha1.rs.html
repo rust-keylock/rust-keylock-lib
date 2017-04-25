@@ -4,11 +4,12 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="generator" content="rustdoc">
-    <meta name="description" content="Source to the Rust file `/home/dimitris/.cargo/git/checkouts/rust-crypto-0031e8dd1c7c6e84/a7ed917/src/sha1.rs`.">
+    <meta name="description" content="Source to the Rust file `/home/dimitris/.cargo/registry/src/github.com-1ecc6299db9ec823/rust-crypto-0.2.36/src/sha1.rs`.">
     <meta name="keywords" content="rust, rustlang, rust-lang">
 
     <title>sha1.rs.html -- source</title>
 
+    <link rel="stylesheet" type="text/css" href="../../normalize.css">
     <link rel="stylesheet" type="text/css" href="../../rustdoc.css">
     <link rel="stylesheet" type="text/css" href="../../main.css">
     
@@ -766,7 +767,7 @@ algorithms, but some, like &quot;parity&quot; is only found in SHA-1.
     <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>e</span> <span class='op'>=</span> <span class='number'>0u32</span>;
 
     <span class='macro'>macro_rules</span><span class='macro'>!</span> <span class='ident'>bool3ary_202</span> {
-        (<span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>a</span>:<span class='ident'>expr</span>, <span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>b</span>:<span class='ident'>expr</span>, <span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>c</span>:<span class='ident'>expr</span>) <span class='op'>=&gt;</span> ((<span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>c</span> <span class='op'>^</span> (<span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>a</span> <span class='kw-2'>&amp;</span> (<span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>b</span> <span class='op'>^</span> <span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>c</span>))))
+        (<span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>a</span>:<span class='ident'>expr</span>, <span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>b</span>:<span class='ident'>expr</span>, <span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>c</span>:<span class='ident'>expr</span>) <span class='op'>=&gt;</span> ((<span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>c</span> <span class='op'>^</span> (<span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>a</span> <span class='op'>&amp;</span> (<span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>b</span> <span class='op'>^</span> <span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>c</span>))))
     } <span class='comment'>// Choose, MD5F, SHA1C</span>
 
     <span class='ident'>e</span> <span class='op'>=</span> <span class='ident'>e</span>.<span class='ident'>wrapping_add</span>(<span class='ident'>a</span>.<span class='ident'>rotate_left</span>(<span class='number'>5</span>)).<span class='ident'>wrapping_add</span>(<span class='macro'>bool3ary_202</span><span class='macro'>!</span>(<span class='ident'>b</span>, <span class='ident'>c</span>, <span class='ident'>d</span>)).<span class='ident'>wrapping_add</span>(<span class='ident'>t</span>);
@@ -816,7 +817,7 @@ algorithms, but some, like &quot;parity&quot; is only found in SHA-1.
     <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>e</span> <span class='op'>=</span> <span class='number'>0u32</span>;
 
     <span class='macro'>macro_rules</span><span class='macro'>!</span> <span class='ident'>bool3ary_232</span> {
-        (<span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>a</span>:<span class='ident'>expr</span>, <span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>b</span>:<span class='ident'>expr</span>, <span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>c</span>:<span class='ident'>expr</span>) <span class='op'>=&gt;</span> ((<span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>a</span> <span class='kw-2'>&amp;</span> <span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>b</span>) <span class='op'>^</span> (<span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>a</span> <span class='kw-2'>&amp;</span> <span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>c</span>) <span class='op'>^</span> (<span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>b</span> <span class='kw-2'>&amp;</span> <span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>c</span>))
+        (<span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>a</span>:<span class='ident'>expr</span>, <span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>b</span>:<span class='ident'>expr</span>, <span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>c</span>:<span class='ident'>expr</span>) <span class='op'>=&gt;</span> ((<span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>a</span> <span class='op'>&amp;</span> <span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>b</span>) <span class='op'>^</span> (<span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>a</span> <span class='op'>&amp;</span> <span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>c</span>) <span class='op'>^</span> (<span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>b</span> <span class='op'>&amp;</span> <span class='macro-nonterminal'>$</span><span class='macro-nonterminal'>c</span>))
     } <span class='comment'>// Majority, SHA1M</span>
 
     <span class='ident'>e</span> <span class='op'>=</span> <span class='ident'>e</span>.<span class='ident'>wrapping_add</span>(<span class='ident'>a</span>.<span class='ident'>rotate_left</span>(<span class='number'>5</span>)).<span class='ident'>wrapping_add</span>(<span class='macro'>bool3ary_232</span><span class='macro'>!</span>(<span class='ident'>b</span>, <span class='ident'>c</span>, <span class='ident'>d</span>)).<span class='ident'>wrapping_add</span>(<span class='ident'>t</span>);
@@ -972,7 +973,7 @@ algorithms, but some, like &quot;parity&quot; is only found in SHA-1.
 <span class='doccomment'>/// perform 4 rounds of the message block digest calculation.</span>
 <span class='doccomment'>///</span>
 <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>sha1_digest_block</span>(<span class='ident'>state</span>: <span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> [<span class='ident'>u32</span>; <span class='number'>5</span>], <span class='ident'>block</span>: <span class='kw-2'>&amp;</span>[<span class='ident'>u8</span><span class='comment'>/*; 64*/</span>]) {
-    <span class='macro'>assert_eq</span><span class='macro'>!</span>(<span class='ident'>block</span>.<span class='ident'>len</span>(), <span class='ident'>BLOCK_LEN</span><span class='op'>*</span><span class='number'>4</span>);
+    <span class='macro'>assert_eq</span><span class='macro'>!</span>(<span class='ident'>block</span>.<span class='ident'>len</span>(), <span class='ident'>BLOCK_LEN</span><span class='kw-2'>*</span><span class='number'>4</span>);
     <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>block2</span> <span class='op'>=</span> [<span class='number'>0u32</span>; <span class='ident'>BLOCK_LEN</span>];
     <span class='ident'>read_u32v_be</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>block2</span>[..], <span class='ident'>block</span>);
     <span class='ident'>sha1_digest_block_u32</span>(<span class='ident'>state</span>, <span class='kw-2'>&amp;</span><span class='ident'>block2</span>);
@@ -989,7 +990,7 @@ algorithms, but some, like &quot;parity&quot; is only found in SHA-1.
 <span class='kw'>fn</span> <span class='ident'>mk_result</span>(<span class='ident'>st</span>: <span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>Sha1</span>, <span class='ident'>rs</span>: <span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> [<span class='ident'>u8</span>]) {
     <span class='kw'>if</span> <span class='op'>!</span><span class='ident'>st</span>.<span class='ident'>computed</span> {
         <span class='kw'>let</span> <span class='ident'>st_h</span> <span class='op'>=</span> <span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>st</span>.<span class='ident'>h</span>;
-        <span class='ident'>st</span>.<span class='ident'>buffer</span>.<span class='ident'>standard_padding</span>(<span class='number'>8</span>, <span class='op'>|</span><span class='ident'>d</span>: <span class='kw-2'>&amp;</span>[<span class='ident'>u8</span>]<span class='op'>|</span> { <span class='ident'>sha1_digest_block</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='op'>*</span><span class='ident'>st_h</span>, <span class='ident'>d</span>) });
+        <span class='ident'>st</span>.<span class='ident'>buffer</span>.<span class='ident'>standard_padding</span>(<span class='number'>8</span>, <span class='op'>|</span><span class='ident'>d</span>: <span class='kw-2'>&amp;</span>[<span class='ident'>u8</span>]<span class='op'>|</span> { <span class='ident'>sha1_digest_block</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='kw-2'>*</span><span class='ident'>st_h</span>, <span class='ident'>d</span>) });
         <span class='ident'>write_u32_be</span>(<span class='ident'>st</span>.<span class='ident'>buffer</span>.<span class='ident'>next</span>(<span class='number'>4</span>), (<span class='ident'>st</span>.<span class='ident'>length_bits</span> <span class='op'>&gt;&gt;</span> <span class='number'>32</span>) <span class='kw'>as</span> <span class='ident'>u32</span> );
         <span class='ident'>write_u32_be</span>(<span class='ident'>st</span>.<span class='ident'>buffer</span>.<span class='ident'>next</span>(<span class='number'>4</span>), <span class='ident'>st</span>.<span class='ident'>length_bits</span> <span class='kw'>as</span> <span class='ident'>u32</span>);
         <span class='ident'>sha1_digest_block</span>(<span class='ident'>st_h</span>, <span class='ident'>st</span>.<span class='ident'>buffer</span>.<span class='ident'>full_buffer</span>());
@@ -1115,11 +1116,11 @@ algorithms, but some, like &quot;parity&quot; is only found in SHA-1.
 
         <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>sh</span> <span class='op'>=</span> <span class='ident'>Box</span>::<span class='ident'>new</span>(<span class='ident'>Sha1</span>::<span class='ident'>new</span>());
         <span class='kw'>for</span> <span class='ident'>t</span> <span class='kw'>in</span> <span class='ident'>tests</span>.<span class='ident'>iter</span>() {
-            (<span class='op'>*</span><span class='ident'>sh</span>).<span class='ident'>input_str</span>(<span class='ident'>t</span>.<span class='ident'>input</span>);
+            (<span class='kw-2'>*</span><span class='ident'>sh</span>).<span class='ident'>input_str</span>(<span class='ident'>t</span>.<span class='ident'>input</span>);
             <span class='ident'>sh</span>.<span class='ident'>result</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>out</span>);
             <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>t</span>.<span class='ident'>output</span>[..] <span class='op'>==</span> <span class='ident'>out</span>[..]);
 
-            <span class='kw'>let</span> <span class='ident'>out_str</span> <span class='op'>=</span> (<span class='op'>*</span><span class='ident'>sh</span>).<span class='ident'>result_str</span>();
+            <span class='kw'>let</span> <span class='ident'>out_str</span> <span class='op'>=</span> (<span class='kw-2'>*</span><span class='ident'>sh</span>).<span class='ident'>result_str</span>();
             <span class='macro'>assert_eq</span><span class='macro'>!</span>(<span class='ident'>out_str</span>.<span class='ident'>len</span>(), <span class='number'>40</span>);
             <span class='macro'>assert</span><span class='macro'>!</span>(<span class='kw-2'>&amp;</span><span class='ident'>out_str</span>[..] <span class='op'>==</span> <span class='ident'>t</span>.<span class='ident'>output_str</span>);
 
@@ -1133,13 +1134,13 @@ algorithms, but some, like &quot;parity&quot; is only found in SHA-1.
             <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>left</span> <span class='op'>=</span> <span class='ident'>len</span>;
             <span class='kw'>while</span> <span class='ident'>left</span> <span class='op'>&gt;</span> <span class='number'>0</span> {
                 <span class='kw'>let</span> <span class='ident'>take</span> <span class='op'>=</span> (<span class='ident'>left</span> <span class='op'>+</span> <span class='number'>1</span>) <span class='op'>/</span> <span class='number'>2</span>;
-                (<span class='op'>*</span><span class='ident'>sh</span>).<span class='ident'>input_str</span>(<span class='kw-2'>&amp;</span><span class='ident'>t</span>.<span class='ident'>input</span>[<span class='ident'>len</span> <span class='op'>-</span> <span class='ident'>left</span>..<span class='ident'>take</span> <span class='op'>+</span> <span class='ident'>len</span> <span class='op'>-</span> <span class='ident'>left</span>]);
+                (<span class='kw-2'>*</span><span class='ident'>sh</span>).<span class='ident'>input_str</span>(<span class='kw-2'>&amp;</span><span class='ident'>t</span>.<span class='ident'>input</span>[<span class='ident'>len</span> <span class='op'>-</span> <span class='ident'>left</span>..<span class='ident'>take</span> <span class='op'>+</span> <span class='ident'>len</span> <span class='op'>-</span> <span class='ident'>left</span>]);
                 <span class='ident'>left</span> <span class='op'>=</span> <span class='ident'>left</span> <span class='op'>-</span> <span class='ident'>take</span>;
             }
             <span class='ident'>sh</span>.<span class='ident'>result</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>out</span>);
             <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>t</span>.<span class='ident'>output</span>[..] <span class='op'>==</span> <span class='ident'>out</span>[..]);
 
-            <span class='kw'>let</span> <span class='ident'>out_str</span> <span class='op'>=</span> (<span class='op'>*</span><span class='ident'>sh</span>).<span class='ident'>result_str</span>();
+            <span class='kw'>let</span> <span class='ident'>out_str</span> <span class='op'>=</span> (<span class='kw-2'>*</span><span class='ident'>sh</span>).<span class='ident'>result_str</span>();
             <span class='macro'>assert_eq</span><span class='macro'>!</span>(<span class='ident'>out_str</span>.<span class='ident'>len</span>(), <span class='number'>40</span>);
             <span class='macro'>assert</span><span class='macro'>!</span>(<span class='kw-2'>&amp;</span><span class='ident'>out_str</span>[..] <span class='op'>==</span> <span class='ident'>t</span>.<span class='ident'>output_str</span>);
 
@@ -1165,7 +1166,7 @@ algorithms, but some, like &quot;parity&quot; is only found in SHA-1.
     <span class='kw'>use</span> <span class='ident'>sha1</span>::{<span class='ident'>Sha1</span>, <span class='ident'>sha1_digest_block_u32</span>};
 
     <span class='attribute'>#[<span class='ident'>bench</span>]</span>
-    <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>sha1_block</span>(<span class='ident'>bh</span>: <span class='kw-2'>&amp;</span> <span class='kw-2'>mut</span> <span class='ident'>Bencher</span>) {
+    <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>sha1_block</span>(<span class='ident'>bh</span>: <span class='op'>&amp;</span> <span class='kw-2'>mut</span> <span class='ident'>Bencher</span>) {
         <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>state</span> <span class='op'>=</span> [<span class='number'>0u32</span>; <span class='ident'>STATE_LEN</span>];
         <span class='kw'>let</span> <span class='ident'>words</span> <span class='op'>=</span> [<span class='number'>1u32</span>; <span class='ident'>BLOCK_LEN</span>];
         <span class='ident'>bh</span>.<span class='ident'>iter</span>( <span class='op'>||</span> {
@@ -1175,7 +1176,7 @@ algorithms, but some, like &quot;parity&quot; is only found in SHA-1.
     }
 
     <span class='attribute'>#[<span class='ident'>bench</span>]</span>
-    <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>sha1_10</span>(<span class='ident'>bh</span>: <span class='kw-2'>&amp;</span> <span class='kw-2'>mut</span> <span class='ident'>Bencher</span>) {
+    <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>sha1_10</span>(<span class='ident'>bh</span>: <span class='op'>&amp;</span> <span class='kw-2'>mut</span> <span class='ident'>Bencher</span>) {
         <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>sh</span> <span class='op'>=</span> <span class='ident'>Sha1</span>::<span class='ident'>new</span>();
         <span class='kw'>let</span> <span class='ident'>bytes</span> <span class='op'>=</span> [<span class='number'>1u8</span>; <span class='number'>10</span>];
         <span class='ident'>bh</span>.<span class='ident'>iter</span>( <span class='op'>||</span> {
@@ -1185,7 +1186,7 @@ algorithms, but some, like &quot;parity&quot; is only found in SHA-1.
     }
 
     <span class='attribute'>#[<span class='ident'>bench</span>]</span>
-    <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>sha1_1k</span>(<span class='ident'>bh</span>: <span class='kw-2'>&amp;</span> <span class='kw-2'>mut</span> <span class='ident'>Bencher</span>) {
+    <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>sha1_1k</span>(<span class='ident'>bh</span>: <span class='op'>&amp;</span> <span class='kw-2'>mut</span> <span class='ident'>Bencher</span>) {
         <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>sh</span> <span class='op'>=</span> <span class='ident'>Sha1</span>::<span class='ident'>new</span>();
         <span class='kw'>let</span> <span class='ident'>bytes</span> <span class='op'>=</span> [<span class='number'>1u8</span>; <span class='number'>1024</span>];
         <span class='ident'>bh</span>.<span class='ident'>iter</span>( <span class='op'>||</span> {
@@ -1195,7 +1196,7 @@ algorithms, but some, like &quot;parity&quot; is only found in SHA-1.
     }
 
     <span class='attribute'>#[<span class='ident'>bench</span>]</span>
-    <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>sha1_64k</span>(<span class='ident'>bh</span>: <span class='kw-2'>&amp;</span> <span class='kw-2'>mut</span> <span class='ident'>Bencher</span>) {
+    <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>sha1_64k</span>(<span class='ident'>bh</span>: <span class='op'>&amp;</span> <span class='kw-2'>mut</span> <span class='ident'>Bencher</span>) {
         <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>sh</span> <span class='op'>=</span> <span class='ident'>Sha1</span>::<span class='ident'>new</span>();
         <span class='kw'>let</span> <span class='ident'>bytes</span> <span class='op'>=</span> [<span class='number'>1u8</span>; <span class='number'>65536</span>];
         <span class='ident'>bh</span>.<span class='ident'>iter</span>( <span class='op'>||</span> {

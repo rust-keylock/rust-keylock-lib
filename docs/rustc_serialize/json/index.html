@@ -9,6 +9,7 @@
 
     <title>rustc_serialize::json - Rust</title>
 
+    <link rel="stylesheet" type="text/css" href="../../normalize.css">
     <link rel="stylesheet" type="text/css" href="../../rustdoc.css">
     <link rel="stylesheet" type="text/css" href="../../main.css">
     
@@ -245,7 +246,7 @@ which is required for custom mappings.</p>
     <span class='comment'>// u64? Some(13u64)</span>
 
     <span class='kw'>for</span> (<span class='ident'>key</span>, <span class='ident'>value</span>) <span class='kw'>in</span> <span class='ident'>obj</span>.<span class='ident'>iter</span>() {
-        <span class='macro'>println</span><span class='macro'>!</span>(<span class='string'>&quot;{}: {}&quot;</span>, <span class='ident'>key</span>, <span class='kw'>match</span> <span class='op'>*</span><span class='ident'>value</span> {
+        <span class='macro'>println</span><span class='macro'>!</span>(<span class='string'>&quot;{}: {}&quot;</span>, <span class='ident'>key</span>, <span class='kw'>match</span> <span class='kw-2'>*</span><span class='ident'>value</span> {
             <span class='ident'>Json</span>::<span class='ident'>U64</span>(<span class='ident'>v</span>) <span class='op'>=&gt;</span> <span class='macro'>format</span><span class='macro'>!</span>(<span class='string'>&quot;{} (u64)&quot;</span>, <span class='ident'>v</span>),
             <span class='ident'>Json</span>::<span class='ident'>String</span>(<span class='kw-2'>ref</span> <span class='ident'>v</span>) <span class='op'>=&gt;</span> <span class='macro'>format</span><span class='macro'>!</span>(<span class='string'>&quot;{} (string)&quot;</span>, <span class='ident'>v</span>),
             _ <span class='op'>=&gt;</span> <span class='macro'>format</span><span class='macro'>!</span>(<span class='string'>&quot;other&quot;</span>)

@@ -4,11 +4,12 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="generator" content="rustdoc">
-    <meta name="description" content="Source to the Rust file `/home/dimitris/.cargo/git/checkouts/rust-crypto-0031e8dd1c7c6e84/a7ed917/src/bcrypt_pbkdf.rs`.">
+    <meta name="description" content="Source to the Rust file `/home/dimitris/.cargo/registry/src/github.com-1ecc6299db9ec823/rust-crypto-0.2.36/src/bcrypt_pbkdf.rs`.">
     <meta name="keywords" content="rust, rustlang, rust-lang">
 
     <title>bcrypt_pbkdf.rs.html -- source</title>
 
+    <link rel="stylesheet" type="text/css" href="../../normalize.css">
     <link rel="stylesheet" type="text/css" href="../../rustdoc.css">
     <link rel="stylesheet" type="text/css" href="../../main.css">
     
@@ -359,7 +360,7 @@
     }
 
     <span class='kw'>for</span> <span class='ident'>i</span> <span class='kw'>in</span> <span class='number'>0</span>..<span class='number'>8</span> {
-        <span class='ident'>write_u32_le</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>output</span>[<span class='ident'>i</span><span class='op'>*</span><span class='number'>4</span>..(<span class='ident'>i</span><span class='op'>+</span><span class='number'>1</span>)<span class='op'>*</span><span class='number'>4</span>], <span class='ident'>buf</span>[<span class='ident'>i</span>]);
+        <span class='ident'>write_u32_le</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>output</span>[<span class='ident'>i</span><span class='kw-2'>*</span><span class='number'>4</span>..(<span class='ident'>i</span><span class='op'>+</span><span class='number'>1</span>)<span class='kw-2'>*</span><span class='number'>4</span>], <span class='ident'>buf</span>[<span class='ident'>i</span>]);
     }
 }
 

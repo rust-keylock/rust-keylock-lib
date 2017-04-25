@@ -9,6 +9,7 @@
 
     <title>duration.rs.html -- source</title>
 
+    <link rel="stylesheet" type="text/css" href="../../normalize.css">
     <link rel="stylesheet" type="text/css" href="../../rustdoc.css">
     <link rel="stylesheet" type="text/css" href="../../main.css">
     
@@ -1057,7 +1058,7 @@
     <span class='kw'>fn</span> <span class='ident'>fmt</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>, <span class='ident'>f</span>: <span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>fmt</span>::<span class='ident'>Formatter</span>) <span class='op'>-&gt;</span> <span class='ident'>fmt</span>::<span class='prelude-ty'>Result</span> {
         <span class='comment'>// technically speaking, negative duration is not valid ISO 8601,</span>
         <span class='comment'>// but we need to print it anyway.</span>
-        <span class='kw'>let</span> (<span class='ident'>abs</span>, <span class='ident'>sign</span>) <span class='op'>=</span> <span class='kw'>if</span> <span class='self'>self</span>.<span class='ident'>secs</span> <span class='op'>&lt;</span> <span class='number'>0</span> { (<span class='op'>-</span><span class='op'>*</span><span class='self'>self</span>, <span class='string'>&quot;-&quot;</span>) } <span class='kw'>else</span> { (<span class='op'>*</span><span class='self'>self</span>, <span class='string'>&quot;&quot;</span>) };
+        <span class='kw'>let</span> (<span class='ident'>abs</span>, <span class='ident'>sign</span>) <span class='op'>=</span> <span class='kw'>if</span> <span class='self'>self</span>.<span class='ident'>secs</span> <span class='op'>&lt;</span> <span class='number'>0</span> { (<span class='op'>-</span><span class='kw-2'>*</span><span class='self'>self</span>, <span class='string'>&quot;-&quot;</span>) } <span class='kw'>else</span> { (<span class='kw-2'>*</span><span class='self'>self</span>, <span class='string'>&quot;&quot;</span>) };
 
         <span class='kw'>let</span> <span class='ident'>days</span> <span class='op'>=</span> <span class='ident'>abs</span>.<span class='ident'>secs</span> <span class='op'>/</span> <span class='ident'>SECS_PER_DAY</span>;
         <span class='kw'>let</span> <span class='ident'>secs</span> <span class='op'>=</span> <span class='ident'>abs</span>.<span class='ident'>secs</span> <span class='op'>-</span> <span class='ident'>days</span> <span class='op'>*</span> <span class='ident'>SECS_PER_DAY</span>;

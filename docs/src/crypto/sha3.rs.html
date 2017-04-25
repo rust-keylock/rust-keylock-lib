@@ -4,11 +4,12 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="generator" content="rustdoc">
-    <meta name="description" content="Source to the Rust file `/home/dimitris/.cargo/git/checkouts/rust-crypto-0031e8dd1c7c6e84/a7ed917/src/sha3.rs`.">
+    <meta name="description" content="Source to the Rust file `/home/dimitris/.cargo/registry/src/github.com-1ecc6299db9ec823/rust-crypto-0.2.36/src/sha3.rs`.">
     <meta name="keywords" content="rust, rustlang, rust-lang">
 
     <title>sha3.rs.html -- source</title>
 
+    <link rel="stylesheet" type="text/css" href="../../normalize.css">
     <link rel="stylesheet" type="text/css" href="../../rustdoc.css">
     <link rel="stylesheet" type="text/css" href="../../main.css">
     
@@ -6909,7 +6910,7 @@ assert_eq!(hex, &quot;3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511
 
 <span class='attribute'>#[<span class='ident'>inline</span>]</span>
 <span class='kw'>fn</span> <span class='ident'>rotl64</span>(<span class='ident'>v</span>: <span class='ident'>u64</span>, <span class='ident'>n</span>: <span class='ident'>usize</span>) <span class='op'>-&gt;</span> <span class='ident'>u64</span> {
-    ((<span class='ident'>v</span> <span class='op'>&lt;&lt;</span> (<span class='ident'>n</span> <span class='op'>%</span> <span class='number'>64</span>)) <span class='kw-2'>&amp;</span> <span class='number'>0xffffffffffffffff</span>) <span class='op'>^</span> (<span class='ident'>v</span> <span class='op'>&gt;&gt;</span> (<span class='number'>64</span> <span class='op'>-</span> (<span class='ident'>n</span> <span class='op'>%</span> <span class='number'>64</span>)))
+    ((<span class='ident'>v</span> <span class='op'>&lt;&lt;</span> (<span class='ident'>n</span> <span class='op'>%</span> <span class='number'>64</span>)) <span class='op'>&amp;</span> <span class='number'>0xffffffffffffffff</span>) <span class='op'>^</span> (<span class='ident'>v</span> <span class='op'>&gt;&gt;</span> (<span class='number'>64</span> <span class='op'>-</span> (<span class='ident'>n</span> <span class='op'>%</span> <span class='number'>64</span>)))
 }
 
 <span class='comment'>// Code based on Keccak-compact64.c from ref implementation.</span>
@@ -6948,7 +6949,7 @@ assert_eq!(hex, &quot;3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511
                 <span class='ident'>c</span>[<span class='ident'>x</span>] <span class='op'>=</span> <span class='ident'>s</span>[<span class='ident'>y</span> <span class='op'>*</span> <span class='number'>5</span> <span class='op'>+</span> <span class='ident'>x</span>];
             }
             <span class='kw'>for</span> <span class='ident'>x</span> <span class='kw'>in</span> <span class='number'>0</span>..<span class='number'>5</span> {
-                <span class='ident'>s</span>[<span class='ident'>y</span> <span class='op'>*</span> <span class='number'>5</span> <span class='op'>+</span> <span class='ident'>x</span>] <span class='op'>=</span> <span class='ident'>c</span>[<span class='ident'>x</span>] <span class='op'>^</span> (<span class='op'>!</span><span class='ident'>c</span>[<span class='ident'>M5</span>[<span class='ident'>x</span> <span class='op'>+</span> <span class='number'>1</span>]] <span class='kw-2'>&amp;</span> <span class='ident'>c</span>[<span class='ident'>M5</span>[<span class='ident'>x</span> <span class='op'>+</span> <span class='number'>2</span>]]);
+                <span class='ident'>s</span>[<span class='ident'>y</span> <span class='op'>*</span> <span class='number'>5</span> <span class='op'>+</span> <span class='ident'>x</span>] <span class='op'>=</span> <span class='ident'>c</span>[<span class='ident'>x</span>] <span class='op'>^</span> (<span class='op'>!</span><span class='ident'>c</span>[<span class='ident'>M5</span>[<span class='ident'>x</span> <span class='op'>+</span> <span class='number'>1</span>]] <span class='op'>&amp;</span> <span class='ident'>c</span>[<span class='ident'>M5</span>[<span class='ident'>x</span> <span class='op'>+</span> <span class='number'>2</span>]]);
             }
         }
 
@@ -6980,7 +6981,7 @@ assert_eq!(hex, &quot;3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511
     <span class='doccomment'>/// Return the expected hash size in bytes specified for `mode`, or 0</span>
     <span class='doccomment'>/// for modes with variable output as for shake functions.</span>
     <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>digest_length</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>) <span class='op'>-&gt;</span> <span class='ident'>usize</span> {
-        <span class='kw'>match</span> <span class='op'>*</span><span class='self'>self</span> {
+        <span class='kw'>match</span> <span class='kw-2'>*</span><span class='self'>self</span> {
             <span class='ident'>Sha3Mode</span>::<span class='ident'>Sha3_224</span> <span class='op'>|</span> <span class='ident'>Sha3Mode</span>::<span class='ident'>Keccak224</span> <span class='op'>=&gt;</span> <span class='number'>28</span>,
             <span class='ident'>Sha3Mode</span>::<span class='ident'>Sha3_256</span> <span class='op'>|</span> <span class='ident'>Sha3Mode</span>::<span class='ident'>Keccak256</span> <span class='op'>=&gt;</span> <span class='number'>32</span>,
             <span class='ident'>Sha3Mode</span>::<span class='ident'>Sha3_384</span> <span class='op'>|</span> <span class='ident'>Sha3Mode</span>::<span class='ident'>Keccak384</span> <span class='op'>=&gt;</span> <span class='number'>48</span>,
@@ -6991,7 +6992,7 @@ assert_eq!(hex, &quot;3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511
 
     <span class='doccomment'>/// Return `true` if `mode` is a SHAKE mode.</span>
     <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>is_shake</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>) <span class='op'>-&gt;</span> <span class='ident'>bool</span> {
-        <span class='kw'>match</span> <span class='op'>*</span><span class='self'>self</span> {
+        <span class='kw'>match</span> <span class='kw-2'>*</span><span class='self'>self</span> {
             <span class='ident'>Sha3Mode</span>::<span class='ident'>Shake128</span> <span class='op'>|</span> <span class='ident'>Sha3Mode</span>::<span class='ident'>Shake256</span> <span class='op'>=&gt;</span> <span class='bool-val'>true</span>,
             _ <span class='op'>=&gt;</span> <span class='bool-val'>false</span>
         }
@@ -6999,7 +7000,7 @@ assert_eq!(hex, &quot;3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511
 
     <span class='doccomment'>/// Return `true` if `mode` is a Keccak mode.</span>
     <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>is_keccak</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>) <span class='op'>-&gt;</span> <span class='ident'>bool</span> {
-        <span class='kw'>match</span> <span class='op'>*</span><span class='self'>self</span> {
+        <span class='kw'>match</span> <span class='kw-2'>*</span><span class='self'>self</span> {
             <span class='ident'>Sha3Mode</span>::<span class='ident'>Keccak224</span> <span class='op'>|</span> <span class='ident'>Sha3Mode</span>::<span class='ident'>Keccak256</span> <span class='op'>|</span> <span class='ident'>Sha3Mode</span>::<span class='ident'>Keccak384</span> <span class='op'>|</span> <span class='ident'>Sha3Mode</span>::<span class='ident'>Keccak512</span> <span class='op'>=&gt;</span> <span class='bool-val'>true</span>,
             _ <span class='op'>=&gt;</span> <span class='bool-val'>false</span>
         }
@@ -7007,7 +7008,7 @@ assert_eq!(hex, &quot;3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511
 
     <span class='doccomment'>/// Return the capacity in bytes.</span>
     <span class='kw'>fn</span> <span class='ident'>capacity</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>) <span class='op'>-&gt;</span> <span class='ident'>usize</span> {
-        <span class='kw'>match</span> <span class='op'>*</span><span class='self'>self</span> {
+        <span class='kw'>match</span> <span class='kw-2'>*</span><span class='self'>self</span> {
             <span class='ident'>Sha3Mode</span>::<span class='ident'>Sha3_224</span> <span class='op'>|</span> <span class='ident'>Sha3Mode</span>::<span class='ident'>Keccak224</span> <span class='op'>=&gt;</span> <span class='number'>56</span>,
             <span class='ident'>Sha3Mode</span>::<span class='ident'>Sha3_256</span> <span class='op'>|</span> <span class='ident'>Sha3Mode</span>::<span class='ident'>Keccak256</span> <span class='op'>=&gt;</span> <span class='number'>64</span>,
             <span class='ident'>Sha3Mode</span>::<span class='ident'>Sha3_384</span> <span class='op'>|</span> <span class='ident'>Sha3Mode</span>::<span class='ident'>Keccak384</span> <span class='op'>=&gt;</span> <span class='number'>96</span>,
@@ -7264,7 +7265,7 @@ assert_eq!(hex, &quot;3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511
 
 <span class='kw'>impl</span> <span class='ident'>Clone</span> <span class='kw'>for</span> <span class='ident'>Sha3</span> {
     <span class='kw'>fn</span> <span class='ident'>clone</span>(<span class='kw-2'>&amp;</span><span class='self'>self</span>) <span class='op'>-&gt;</span> <span class='self'>Self</span> {
-        <span class='op'>*</span><span class='self'>self</span>
+        <span class='kw-2'>*</span><span class='self'>self</span>
     }
 }
 
@@ -7326,7 +7327,7 @@ assert_eq!(hex, &quot;3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511
 
         <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>sh</span> <span class='op'>=</span> <span class='ident'>Box</span>::<span class='ident'>new</span>(<span class='ident'>Sha3</span>::<span class='ident'>new</span>(<span class='ident'>Sha3Mode</span>::<span class='ident'>Keccak224</span>));
 
-        <span class='ident'>test_hash</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='op'>*</span><span class='ident'>sh</span>, <span class='kw-2'>&amp;</span><span class='ident'>test_cases</span>[..]);
+        <span class='ident'>test_hash</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='kw-2'>*</span><span class='ident'>sh</span>, <span class='kw-2'>&amp;</span><span class='ident'>test_cases</span>[..]);
     }
 
     <span class='attribute'>#[<span class='ident'>test</span>]</span>
@@ -7348,7 +7349,7 @@ assert_eq!(hex, &quot;3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511
 
         <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>sh</span> <span class='op'>=</span> <span class='ident'>Box</span>::<span class='ident'>new</span>(<span class='ident'>Sha3</span>::<span class='ident'>new</span>(<span class='ident'>Sha3Mode</span>::<span class='ident'>Keccak256</span>));
 
-        <span class='ident'>test_hash</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='op'>*</span><span class='ident'>sh</span>, <span class='kw-2'>&amp;</span><span class='ident'>test_cases</span>[..]);
+        <span class='ident'>test_hash</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='kw-2'>*</span><span class='ident'>sh</span>, <span class='kw-2'>&amp;</span><span class='ident'>test_cases</span>[..]);
     }
 
     <span class='attribute'>#[<span class='ident'>test</span>]</span>
@@ -7362,7 +7363,7 @@ assert_eq!(hex, &quot;3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511
 
         <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>sh</span> <span class='op'>=</span> <span class='ident'>Box</span>::<span class='ident'>new</span>(<span class='ident'>Sha3</span>::<span class='ident'>new</span>(<span class='ident'>Sha3Mode</span>::<span class='ident'>Keccak384</span>));
 
-        <span class='ident'>test_hash</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='op'>*</span><span class='ident'>sh</span>, <span class='kw-2'>&amp;</span><span class='ident'>test_cases</span>[..]);
+        <span class='ident'>test_hash</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='kw-2'>*</span><span class='ident'>sh</span>, <span class='kw-2'>&amp;</span><span class='ident'>test_cases</span>[..]);
     }
 
     <span class='attribute'>#[<span class='ident'>test</span>]</span>
@@ -7376,7 +7377,7 @@ assert_eq!(hex, &quot;3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511
 
         <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>sh</span> <span class='op'>=</span> <span class='ident'>Box</span>::<span class='ident'>new</span>(<span class='ident'>Sha3</span>::<span class='ident'>new</span>(<span class='ident'>Sha3Mode</span>::<span class='ident'>Keccak512</span>));
 
-        <span class='ident'>test_hash</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='op'>*</span><span class='ident'>sh</span>, <span class='kw-2'>&amp;</span><span class='ident'>test_cases</span>[..]);
+        <span class='ident'>test_hash</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='kw-2'>*</span><span class='ident'>sh</span>, <span class='kw-2'>&amp;</span><span class='ident'>test_cases</span>[..]);
     }
 
     <span class='attribute'>#[<span class='ident'>test</span>]</span>
@@ -8410,7 +8411,7 @@ assert_eq!(hex, &quot;3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511
 
         <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>sh</span> <span class='op'>=</span> <span class='ident'>Box</span>::<span class='ident'>new</span>(<span class='ident'>Sha3</span>::<span class='ident'>new</span>(<span class='ident'>Sha3Mode</span>::<span class='ident'>Sha3_224</span>));
 
-        <span class='ident'>test_hash</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='op'>*</span><span class='ident'>sh</span>, <span class='kw-2'>&amp;</span><span class='ident'>test_cases</span>[..]);
+        <span class='ident'>test_hash</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='kw-2'>*</span><span class='ident'>sh</span>, <span class='kw-2'>&amp;</span><span class='ident'>test_cases</span>[..]);
     }
 
     <span class='attribute'>#[<span class='ident'>test</span>]</span>
@@ -9444,7 +9445,7 @@ assert_eq!(hex, &quot;3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511
 
         <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>sh</span> <span class='op'>=</span> <span class='ident'>Box</span>::<span class='ident'>new</span>(<span class='ident'>Sha3</span>::<span class='ident'>new</span>(<span class='ident'>Sha3Mode</span>::<span class='ident'>Sha3_256</span>));
 
-        <span class='ident'>test_hash</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='op'>*</span><span class='ident'>sh</span>, <span class='kw-2'>&amp;</span><span class='ident'>test_cases</span>[..]);
+        <span class='ident'>test_hash</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='kw-2'>*</span><span class='ident'>sh</span>, <span class='kw-2'>&amp;</span><span class='ident'>test_cases</span>[..]);
     }
 
     <span class='attribute'>#[<span class='ident'>test</span>]</span>
@@ -10478,7 +10479,7 @@ assert_eq!(hex, &quot;3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511
 
         <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>sh</span> <span class='op'>=</span> <span class='ident'>Box</span>::<span class='ident'>new</span>(<span class='ident'>Sha3</span>::<span class='ident'>new</span>(<span class='ident'>Sha3Mode</span>::<span class='ident'>Sha3_384</span>));
 
-        <span class='ident'>test_hash</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='op'>*</span><span class='ident'>sh</span>, <span class='kw-2'>&amp;</span><span class='ident'>test_cases</span>[..]);
+        <span class='ident'>test_hash</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='kw-2'>*</span><span class='ident'>sh</span>, <span class='kw-2'>&amp;</span><span class='ident'>test_cases</span>[..]);
     }
 
     <span class='attribute'>#[<span class='ident'>test</span>]</span>
@@ -11512,7 +11513,7 @@ assert_eq!(hex, &quot;3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511
 
         <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>sh</span> <span class='op'>=</span> <span class='ident'>Box</span>::<span class='ident'>new</span>(<span class='ident'>Sha3</span>::<span class='ident'>new</span>(<span class='ident'>Sha3Mode</span>::<span class='ident'>Sha3_512</span>));
 
-        <span class='ident'>test_hash</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='op'>*</span><span class='ident'>sh</span>, <span class='kw-2'>&amp;</span><span class='ident'>test_cases</span>[..]);
+        <span class='ident'>test_hash</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='kw-2'>*</span><span class='ident'>sh</span>, <span class='kw-2'>&amp;</span><span class='ident'>test_cases</span>[..]);
     }
 
     <span class='attribute'>#[<span class='ident'>test</span>]</span>
@@ -12546,7 +12547,7 @@ assert_eq!(hex, &quot;3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511
 
         <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>sh</span> <span class='op'>=</span> <span class='ident'>Box</span>::<span class='ident'>new</span>(<span class='ident'>Sha3</span>::<span class='ident'>new</span>(<span class='ident'>Sha3Mode</span>::<span class='ident'>Shake128</span>));
 
-        <span class='ident'>test_hash</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='op'>*</span><span class='ident'>sh</span>, <span class='kw-2'>&amp;</span><span class='ident'>test_cases</span>[..]);
+        <span class='ident'>test_hash</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='kw-2'>*</span><span class='ident'>sh</span>, <span class='kw-2'>&amp;</span><span class='ident'>test_cases</span>[..]);
     }
 
     <span class='attribute'>#[<span class='ident'>test</span>]</span>
@@ -13580,7 +13581,7 @@ assert_eq!(hex, &quot;3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511
 
         <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>sh</span> <span class='op'>=</span> <span class='ident'>Box</span>::<span class='ident'>new</span>(<span class='ident'>Sha3</span>::<span class='ident'>new</span>(<span class='ident'>Sha3Mode</span>::<span class='ident'>Shake256</span>));
 
-        <span class='ident'>test_hash</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='op'>*</span><span class='ident'>sh</span>, <span class='kw-2'>&amp;</span><span class='ident'>test_cases</span>[..]);
+        <span class='ident'>test_hash</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='kw-2'>*</span><span class='ident'>sh</span>, <span class='kw-2'>&amp;</span><span class='ident'>test_cases</span>[..]);
     }
 }
 </pre>

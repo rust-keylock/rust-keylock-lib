@@ -9,6 +9,7 @@
 
     <title>crypto::blockmodes::PaddingProcessor - Rust</title>
 
+    <link rel="stylesheet" type="text/css" href="../../normalize.css">
     <link rel="stylesheet" type="text/css" href="../../rustdoc.css">
     <link rel="stylesheet" type="text/css" href="../../main.css">
     
@@ -55,10 +56,10 @@
 </div>
             <h2 id='required-methods'>Required Methods</h2>
             <div class='methods'>
-        <h3 id='tymethod.pad_input' class='method stab '><span id='pad_input.v' class='invisible'><code>fn <a href='#tymethod.pad_input' class='fnname'>pad_input</a>&lt;W:&nbsp;<a class='trait' href='../../crypto/buffer/trait.WriteBuffer.html' title='crypto::buffer::WriteBuffer'>WriteBuffer</a>&gt;(&amp;mut self, input_buffer: &amp;mut W)</code></span></h3><div class='docblock'><p>Add padding to the last block of input data
+        <h3 id='tymethod.pad_input' class='method'><span id='pad_input.v' class='invisible'><code>fn <a href='#tymethod.pad_input' class='fnname'>pad_input</a>&lt;W:&nbsp;<a class='trait' href='../../crypto/buffer/trait.WriteBuffer.html' title='crypto::buffer::WriteBuffer'>WriteBuffer</a>&gt;(&amp;mut self, input_buffer: &amp;mut W)</code></span></h3><div class='docblock'><p>Add padding to the last block of input data
 If the mode can&#39;t handle a non-full block, it signals that error by simply leaving the block
 as it is which will be detected as an InvalidLength error.</p>
-</div><h3 id='tymethod.strip_output' class='method stab '><span id='strip_output.v' class='invisible'><code>fn <a href='#tymethod.strip_output' class='fnname'>strip_output</a>&lt;R:&nbsp;<a class='trait' href='../../crypto/buffer/trait.ReadBuffer.html' title='crypto::buffer::ReadBuffer'>ReadBuffer</a>&gt;(&amp;mut self, output_buffer: &amp;mut R) -&gt; <a class='primitive' href='https://doc.rust-lang.org/nightly/std/primitive.bool.html'>bool</a></code></span></h3><div class='docblock'><p>Remove padding from the last block of output data
+</div><h3 id='tymethod.strip_output' class='method'><span id='strip_output.v' class='invisible'><code>fn <a href='#tymethod.strip_output' class='fnname'>strip_output</a>&lt;R:&nbsp;<a class='trait' href='../../crypto/buffer/trait.ReadBuffer.html' title='crypto::buffer::ReadBuffer'>ReadBuffer</a>&gt;(&amp;mut self, output_buffer: &amp;mut R) -&gt; <a class='primitive' href='https://doc.rust-lang.org/nightly/std/primitive.bool.html'>bool</a></code></span></h3><div class='docblock'><p>Remove padding from the last block of output data
 If false is returned, the processing fails</p>
 </div></div>
         <h2 id='implementors'>Implementors</h2>

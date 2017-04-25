@@ -4,11 +4,12 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="generator" content="rustdoc">
-    <meta name="description" content="Source to the Rust file `/home/dimitris/.cargo/git/checkouts/rust-crypto-0031e8dd1c7c6e84/a7ed917/src/symmetriccipher.rs`.">
+    <meta name="description" content="Source to the Rust file `/home/dimitris/.cargo/registry/src/github.com-1ecc6299db9ec823/rust-crypto-0.2.36/src/symmetriccipher.rs`.">
     <meta name="keywords" content="rust, rustlang, rust-lang">
 
     <title>symmetriccipher.rs.html -- source</title>
 
+    <link rel="stylesheet" type="text/css" href="../../normalize.css">
     <link rel="stylesheet" type="text/css" href="../../rustdoc.css">
     <link rel="stylesheet" type="text/css" href="../../main.css">
     
@@ -165,7 +166,7 @@
 <span class='comment'>// TODO - Its a bit unclear to me why this is necessary</span>
 <span class='kw'>impl</span> <span class='ident'>SynchronousStreamCipher</span> <span class='kw'>for</span> <span class='ident'>Box</span><span class='op'>&lt;</span><span class='ident'>SynchronousStreamCipher</span> <span class='op'>+</span> <span class='lifetime'>&#39;static</span><span class='op'>&gt;</span> {
     <span class='kw'>fn</span> <span class='ident'>process</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='self'>self</span>, <span class='ident'>input</span>: <span class='kw-2'>&amp;</span>[<span class='ident'>u8</span>], <span class='ident'>output</span>: <span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> [<span class='ident'>u8</span>]) {
-        <span class='kw'>let</span> <span class='ident'>me</span> <span class='op'>=</span> <span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='op'>*</span><span class='op'>*</span><span class='self'>self</span>;
+        <span class='kw'>let</span> <span class='ident'>me</span> <span class='op'>=</span> <span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='kw-2'>*</span><span class='kw-2'>*</span><span class='self'>self</span>;
         <span class='ident'>me</span>.<span class='ident'>process</span>(<span class='ident'>input</span>, <span class='ident'>output</span>);
     }
 }

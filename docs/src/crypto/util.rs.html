@@ -4,11 +4,12 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="generator" content="rustdoc">
-    <meta name="description" content="Source to the Rust file `/home/dimitris/.cargo/git/checkouts/rust-crypto-0031e8dd1c7c6e84/a7ed917/src/util.rs`.">
+    <meta name="description" content="Source to the Rust file `/home/dimitris/.cargo/registry/src/github.com-1ecc6299db9ec823/rust-crypto-0.2.36/src/util.rs`.">
     <meta name="keywords" content="rust, rustlang, rust-lang">
 
     <title>util.rs.html -- source</title>
 
+    <link rel="stylesheet" type="text/css" href="../../normalize.css">
     <link rel="stylesheet" type="text/css" href="../../rustdoc.css">
     <link rel="stylesheet" type="text/css" href="../../main.css">
     
@@ -145,11 +146,11 @@
 
 <span class='kw'>extern</span> {
     <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>rust_crypto_util_fixed_time_eq_asm</span>(
-            <span class='ident'>lhsp</span>: <span class='op'>*</span><span class='kw'>const</span> <span class='ident'>u8</span>,
-            <span class='ident'>rhsp</span>: <span class='op'>*</span><span class='kw'>const</span> <span class='ident'>u8</span>,
+            <span class='ident'>lhsp</span>: <span class='kw-2'>*</span><span class='kw'>const</span> <span class='ident'>u8</span>,
+            <span class='ident'>rhsp</span>: <span class='kw-2'>*</span><span class='kw'>const</span> <span class='ident'>u8</span>,
             <span class='ident'>count</span>: <span class='ident'>libc</span>::<span class='ident'>size_t</span>) <span class='op'>-&gt;</span> <span class='ident'>u32</span>;
     <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>rust_crypto_util_secure_memset</span>(
-            <span class='ident'>dst</span>: <span class='op'>*</span><span class='kw-2'>mut</span> <span class='ident'>u8</span>,
+            <span class='ident'>dst</span>: <span class='kw-2'>*</span><span class='kw-2'>mut</span> <span class='ident'>u8</span>,
             <span class='ident'>val</span>: <span class='ident'>libc</span>::<span class='ident'>uint8_t</span>,
             <span class='ident'>count</span>: <span class='ident'>libc</span>::<span class='ident'>size_t</span>);
 }

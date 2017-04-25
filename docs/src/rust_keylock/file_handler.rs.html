@@ -9,6 +9,7 @@
 
     <title>file_handler.rs.html -- source</title>
 
+    <link rel="stylesheet" type="text/css" href="../../normalize.css">
     <link rel="stylesheet" type="text/css" href="../../rustdoc.css">
     <link rel="stylesheet" type="text/css" href="../../main.css">
     
@@ -591,264 +592,297 @@
 <span id="547">547</span>
 <span id="548">548</span>
 <span id="549">549</span>
+<span id="550">550</span>
+<span id="551">551</span>
+<span id="552">552</span>
+<span id="553">553</span>
+<span id="554">554</span>
+<span id="555">555</span>
+<span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
+<span id="565">565</span>
+<span id="566">566</span>
+<span id="567">567</span>
 </pre><pre class='rust '>
-<span class='kw'>use</span> <span class='kw'>super</span>::{ <span class='ident'>Entry</span>, <span class='ident'>Props</span> };
-<span class='kw'>use</span> <span class='kw'>super</span>::<span class='ident'>datacrypt</span>::{ <span class='ident'>Cryptor</span>, <span class='ident'>BcryptAes</span> };
+<span class='kw'>use</span> <span class='kw'>super</span>::{<span class='ident'>Entry</span>, <span class='ident'>Props</span>};
+<span class='kw'>use</span> <span class='kw'>super</span>::<span class='ident'>datacrypt</span>::{<span class='ident'>Cryptor</span>, <span class='ident'>BcryptAes</span>};
 <span class='kw'>use</span> <span class='kw'>super</span>::<span class='ident'>errors</span>::{<span class='self'>self</span>, <span class='ident'>RustKeylockError</span>};
-<span class='kw'>use</span> <span class='ident'>std</span>::<span class='ident'>io</span>::<span class='ident'>prelude</span>::<span class='op'>*</span>;
+<span class='kw'>use</span> <span class='ident'>std</span>::<span class='ident'>io</span>::<span class='ident'>prelude</span>::<span class='kw-2'>*</span>;
 <span class='attribute'>#[<span class='ident'>cfg</span>(<span class='ident'>not</span>(<span class='ident'>target_os</span> <span class='op'>=</span> <span class='string'>&quot;android&quot;</span>))]</span>
 <span class='kw'>use</span> <span class='ident'>std</span>::<span class='ident'>env</span>;
-<span class='kw'>use</span> <span class='ident'>std</span>::<span class='ident'>fs</span>::{ <span class='self'>self</span>, <span class='ident'>File</span> };
+<span class='kw'>use</span> <span class='ident'>std</span>::<span class='ident'>fs</span>::{<span class='self'>self</span>, <span class='ident'>File</span>};
 <span class='kw'>use</span> <span class='ident'>std</span>::<span class='ident'>path</span>::<span class='ident'>PathBuf</span>;
-<span class='kw'>use</span> <span class='ident'>toml</span>::{ <span class='self'>self</span>, <span class='ident'>Table</span>, <span class='ident'>Parser</span> };
+<span class='kw'>use</span> <span class='ident'>toml</span>::<span class='ident'>value</span>::{<span class='ident'>Table</span>, <span class='ident'>Value</span>};
+<span class='kw'>use</span> <span class='ident'>toml</span>;
 
-<span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>create_bcryptor</span>(<span class='ident'>filename</span>: <span class='kw-2'>&amp;</span><span class='ident'>str</span>, <span class='ident'>password</span>: <span class='ident'>String</span>, <span class='ident'>salt_position</span>: <span class='ident'>usize</span>, <span class='ident'>reinitialize_randoms</span>: <span class='ident'>bool</span>, <span class='ident'>use_default_location</span>: <span class='ident'>bool</span>) <span class='op'>-&gt;</span> <span class='ident'>BcryptAes</span> {
-	<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;Creating bcryptor&quot;</span>);
-	<span class='kw'>let</span> <span class='ident'>full_path</span> <span class='op'>=</span> <span class='kw'>if</span> <span class='ident'>use_default_location</span> {
-		<span class='ident'>default_toml_path</span>(<span class='ident'>filename</span>)
-	} <span class='kw'>else</span> {
-		<span class='ident'>toml_path</span>(<span class='ident'>filename</span>)
-	};
-	<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;Full Path: {:?}&quot;</span>, <span class='ident'>full_path</span>);
-    <span class='kw'>let</span> (<span class='ident'>iv</span>, <span class='ident'>salt</span>) <span class='op'>=</span> {
-    	<span class='kw'>match</span> <span class='ident'>File</span>::<span class='ident'>open</span>(<span class='ident'>full_path</span>) {
-	        <span class='prelude-val'>Ok</span>(<span class='ident'>file</span>) <span class='op'>=&gt;</span> {
-	        	<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;Encrypted file found. Extracting salt and iv&quot;</span>);
-	        	<span class='kw'>let</span> <span class='ident'>bytes</span>: <span class='ident'>Vec</span><span class='op'>&lt;</span>_<span class='op'>&gt;</span> <span class='op'>=</span> <span class='ident'>file</span>.<span class='ident'>bytes</span>().<span class='ident'>collect</span>();
-
-	        	<span class='comment'>// The iv is always in the start of the file</span>
-	        	<span class='comment'>// If the bytes are not more than 32 (iv+salt) it means that there is no data for entries</span>
-	        	<span class='kw'>let</span> <span class='ident'>iv</span> <span class='op'>=</span> <span class='kw'>if</span> <span class='ident'>bytes</span>.<span class='ident'>len</span>() <span class='op'>&gt;</span> <span class='number'>32</span> <span class='op'>&amp;&amp;</span> <span class='op'>!</span><span class='ident'>reinitialize_randoms</span> {
-	        		<span class='ident'>bytes</span>.<span class='ident'>iter</span>().<span class='ident'>take</span>(<span class='number'>16</span>).<span class='ident'>map</span>(<span class='op'>|</span><span class='ident'>b_res</span><span class='op'>|</span> {
-	        			<span class='kw'>match</span> <span class='ident'>b_res</span> {
-	        				<span class='kw-2'>&amp;</span><span class='prelude-val'>Ok</span>(<span class='ident'>b</span>) <span class='op'>=&gt;</span> <span class='ident'>b</span>.<span class='ident'>clone</span>(),
-	        				<span class='kw-2'>&amp;</span><span class='prelude-val'>Err</span>(<span class='kw-2'>ref</span> <span class='ident'>error</span>) <span class='op'>=&gt;</span> <span class='macro'>panic</span><span class='macro'>!</span>(<span class='string'>&quot;Could not read from File {:?}&quot;</span>, <span class='ident'>error</span>),
-	        			}
-	        		}).<span class='ident'>collect</span>()
-	        	} <span class='kw'>else</span> {
-	        		<span class='kw'>super</span>::<span class='ident'>datacrypt</span>::<span class='ident'>create_random</span>(<span class='number'>16</span>)
-	        	};
-	    		<span class='comment'>// The actual salt position is the one selected by the user, plus 16 bytes because the first 16 bytes is the iv</span>
-	        	<span class='kw'>let</span> <span class='ident'>actual_salt_position</span> <span class='op'>=</span> <span class='ident'>salt_position</span> <span class='op'>+</span> <span class='number'>16</span>;
-	        	<span class='comment'>// If the bytes are not more than 32 (iv+salt) it means that there is no data for entries</span>
-			    <span class='kw'>let</span> <span class='ident'>salt</span> <span class='op'>=</span> <span class='kw'>if</span> <span class='ident'>bytes</span>.<span class='ident'>len</span>() <span class='op'>&gt;</span> <span class='number'>32</span> <span class='op'>&amp;&amp;</span> <span class='op'>!</span><span class='ident'>reinitialize_randoms</span> <span class='op'>&amp;&amp;</span> <span class='ident'>bytes</span>.<span class='ident'>len</span>() <span class='op'>&gt;=</span> <span class='ident'>actual_salt_position</span> {
-			    	<span class='ident'>bytes</span>.<span class='ident'>iter</span>().<span class='ident'>skip</span>(<span class='ident'>actual_salt_position</span>).<span class='ident'>take</span>(<span class='number'>16</span>).<span class='ident'>map</span>(<span class='op'>|</span><span class='ident'>b_res</span><span class='op'>|</span> {
-	        			<span class='kw'>match</span> <span class='ident'>b_res</span> {
-	        				<span class='kw-2'>&amp;</span><span class='prelude-val'>Ok</span>(<span class='ident'>b</span>) <span class='op'>=&gt;</span> <span class='ident'>b</span>.<span class='ident'>clone</span>(),
-	        				<span class='kw-2'>&amp;</span><span class='prelude-val'>Err</span>(<span class='kw-2'>ref</span> <span class='ident'>error</span>) <span class='op'>=&gt;</span> <span class='macro'>panic</span><span class='macro'>!</span>(<span class='string'>&quot;Could not read from File {:?}&quot;</span>, <span class='ident'>error</span>),
-	        			}
-	        		}).<span class='ident'>collect</span>()
-			    } <span class='kw'>else</span> {
-	        		<span class='kw'>super</span>::<span class='ident'>datacrypt</span>::<span class='ident'>create_random</span>(<span class='number'>16</span>)
-	        	};
-	
-				<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;Salt and iv extracted&quot;</span>);
-			    (<span class='ident'>iv</span>, <span class='ident'>salt</span>)
-	        },
-	        <span class='prelude-val'>Err</span>(_) <span class='op'>=&gt;</span> {
-	        	<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;Encrypted file does not exist. Initializing salt and iv&quot;</span>);
-	        	<span class='kw'>let</span> <span class='ident'>salt</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>datacrypt</span>::<span class='ident'>create_random</span>(<span class='number'>16</span>);
-	        	<span class='kw'>let</span> <span class='ident'>iv</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>datacrypt</span>::<span class='ident'>create_random</span>(<span class='number'>16</span>);
-		       	(<span class='ident'>iv</span>, <span class='ident'>salt</span>)
-	        },
-	    }
+<span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>create_bcryptor</span>(<span class='ident'>filename</span>: <span class='kw-2'>&amp;</span><span class='ident'>str</span>,
+                       <span class='ident'>password</span>: <span class='ident'>String</span>,
+                       <span class='ident'>salt_position</span>: <span class='ident'>usize</span>,
+                       <span class='ident'>reinitialize_randoms</span>: <span class='ident'>bool</span>,
+                       <span class='ident'>use_default_location</span>: <span class='ident'>bool</span>)
+                       <span class='op'>-&gt;</span> <span class='ident'>BcryptAes</span> {
+    <span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;Creating bcryptor&quot;</span>);
+    <span class='kw'>let</span> <span class='ident'>full_path</span> <span class='op'>=</span> <span class='kw'>if</span> <span class='ident'>use_default_location</span> {
+        <span class='ident'>default_toml_path</span>(<span class='ident'>filename</span>)
+    } <span class='kw'>else</span> {
+        <span class='ident'>toml_path</span>(<span class='ident'>filename</span>)
     };
-	<span class='comment'>// TODO: Take the cost from the configuration</span>
-	<span class='ident'>BcryptAes</span>::<span class='ident'>new</span>(<span class='ident'>password</span>, <span class='ident'>salt</span>, <span class='number'>3</span>, <span class='ident'>iv</span>, <span class='ident'>salt_position</span>)
+    <span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;Full Path: {:?}&quot;</span>, <span class='ident'>full_path</span>);
+    <span class='kw'>let</span> (<span class='ident'>iv</span>, <span class='ident'>salt</span>) <span class='op'>=</span> {
+        <span class='kw'>match</span> <span class='ident'>File</span>::<span class='ident'>open</span>(<span class='ident'>full_path</span>) {
+            <span class='prelude-val'>Ok</span>(<span class='ident'>file</span>) <span class='op'>=&gt;</span> {
+                <span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;Encrypted file found. Extracting salt and iv&quot;</span>);
+                <span class='kw'>let</span> <span class='ident'>bytes</span>: <span class='ident'>Vec</span><span class='op'>&lt;</span>_<span class='op'>&gt;</span> <span class='op'>=</span> <span class='ident'>file</span>.<span class='ident'>bytes</span>().<span class='ident'>collect</span>();
+
+                <span class='comment'>// The iv is always in the start of the file</span>
+                <span class='comment'>// If the bytes are not more than 32 (iv+salt) it means that there is no data for entries</span>
+                <span class='kw'>let</span> <span class='ident'>iv</span> <span class='op'>=</span> <span class='kw'>if</span> <span class='ident'>bytes</span>.<span class='ident'>len</span>() <span class='op'>&gt;</span> <span class='number'>32</span> <span class='op'>&amp;&amp;</span> <span class='op'>!</span><span class='ident'>reinitialize_randoms</span> {
+                    <span class='ident'>bytes</span>.<span class='ident'>iter</span>()
+                        .<span class='ident'>take</span>(<span class='number'>16</span>)
+                        .<span class='ident'>map</span>(<span class='op'>|</span><span class='ident'>b_res</span><span class='op'>|</span> {
+                            <span class='kw'>match</span> <span class='ident'>b_res</span> {
+                                <span class='kw-2'>&amp;</span><span class='prelude-val'>Ok</span>(<span class='ident'>b</span>) <span class='op'>=&gt;</span> <span class='ident'>b</span>.<span class='ident'>clone</span>(),
+                                <span class='kw-2'>&amp;</span><span class='prelude-val'>Err</span>(<span class='kw-2'>ref</span> <span class='ident'>error</span>) <span class='op'>=&gt;</span> <span class='macro'>panic</span><span class='macro'>!</span>(<span class='string'>&quot;Could not read from File {:?}&quot;</span>, <span class='ident'>error</span>),
+                            }
+                        })
+                        .<span class='ident'>collect</span>()
+                } <span class='kw'>else</span> {
+                    <span class='kw'>super</span>::<span class='ident'>datacrypt</span>::<span class='ident'>create_random</span>(<span class='number'>16</span>)
+                };
+                <span class='comment'>// The actual salt position is the one selected by the user, plus 16 bytes because the first 16 bytes is the iv</span>
+                <span class='kw'>let</span> <span class='ident'>actual_salt_position</span> <span class='op'>=</span> <span class='ident'>salt_position</span> <span class='op'>+</span> <span class='number'>16</span>;
+                <span class='comment'>// If the bytes are not more than 32 (iv+salt) it means that there is no data for entries</span>
+                <span class='kw'>let</span> <span class='ident'>salt</span> <span class='op'>=</span> <span class='kw'>if</span> <span class='ident'>bytes</span>.<span class='ident'>len</span>() <span class='op'>&gt;</span> <span class='number'>32</span> <span class='op'>&amp;&amp;</span> <span class='op'>!</span><span class='ident'>reinitialize_randoms</span> <span class='op'>&amp;&amp;</span> <span class='ident'>bytes</span>.<span class='ident'>len</span>() <span class='op'>&gt;=</span> <span class='ident'>actual_salt_position</span> {
+                    <span class='ident'>bytes</span>.<span class='ident'>iter</span>()
+                        .<span class='ident'>skip</span>(<span class='ident'>actual_salt_position</span>)
+                        .<span class='ident'>take</span>(<span class='number'>16</span>)
+                        .<span class='ident'>map</span>(<span class='op'>|</span><span class='ident'>b_res</span><span class='op'>|</span> {
+                            <span class='kw'>match</span> <span class='ident'>b_res</span> {
+                                <span class='kw-2'>&amp;</span><span class='prelude-val'>Ok</span>(<span class='ident'>b</span>) <span class='op'>=&gt;</span> <span class='ident'>b</span>.<span class='ident'>clone</span>(),
+                                <span class='kw-2'>&amp;</span><span class='prelude-val'>Err</span>(<span class='kw-2'>ref</span> <span class='ident'>error</span>) <span class='op'>=&gt;</span> <span class='macro'>panic</span><span class='macro'>!</span>(<span class='string'>&quot;Could not read from File {:?}&quot;</span>, <span class='ident'>error</span>),
+                            }
+                        })
+                        .<span class='ident'>collect</span>()
+                } <span class='kw'>else</span> {
+                    <span class='kw'>super</span>::<span class='ident'>datacrypt</span>::<span class='ident'>create_random</span>(<span class='number'>16</span>)
+                };
+
+                <span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;Salt and iv extracted&quot;</span>);
+                (<span class='ident'>iv</span>, <span class='ident'>salt</span>)
+            }
+            <span class='prelude-val'>Err</span>(_) <span class='op'>=&gt;</span> {
+                <span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;Encrypted file does not exist. Initializing salt and iv&quot;</span>);
+                <span class='kw'>let</span> <span class='ident'>salt</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>datacrypt</span>::<span class='ident'>create_random</span>(<span class='number'>16</span>);
+                <span class='kw'>let</span> <span class='ident'>iv</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>datacrypt</span>::<span class='ident'>create_random</span>(<span class='number'>16</span>);
+                (<span class='ident'>iv</span>, <span class='ident'>salt</span>)
+            }
+        }
+    };
+    <span class='comment'>// TODO: Take the cost from the configuration</span>
+    <span class='ident'>BcryptAes</span>::<span class='ident'>new</span>(<span class='ident'>password</span>, <span class='ident'>salt</span>, <span class='number'>3</span>, <span class='ident'>iv</span>, <span class='ident'>salt_position</span>)
 }
 
 <span class='doccomment'>/// Returns true if the passwords file exists in the Filesystem, flase otherwise</span>
 <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>is_first_run</span>(<span class='ident'>filename</span>: <span class='kw-2'>&amp;</span><span class='ident'>str</span>) <span class='op'>-&gt;</span> <span class='ident'>bool</span> {
-	<span class='kw'>let</span> <span class='ident'>full_path</span> <span class='op'>=</span> <span class='ident'>default_toml_path</span>(<span class='ident'>filename</span>);
-   	<span class='ident'>File</span>::<span class='ident'>open</span>(<span class='ident'>full_path</span>).<span class='ident'>is_err</span>()
+    <span class='kw'>let</span> <span class='ident'>full_path</span> <span class='op'>=</span> <span class='ident'>default_toml_path</span>(<span class='ident'>filename</span>);
+    <span class='ident'>File</span>::<span class='ident'>open</span>(<span class='ident'>full_path</span>).<span class='ident'>is_err</span>()
 }
 
 <span class='doccomment'>/// Loads a toml file with the specified name</span>
 <span class='doccomment'>/// If the file does not exist, it is created.</span>
 <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>load</span>(<span class='ident'>filename</span>: <span class='kw-2'>&amp;</span><span class='ident'>str</span>, <span class='ident'>cryptor</span>: <span class='kw-2'>&amp;</span><span class='ident'>Cryptor</span>, <span class='ident'>use_default_location</span>: <span class='ident'>bool</span>) <span class='op'>-&gt;</span> <span class='prelude-ty'>Result</span><span class='op'>&lt;</span><span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>Entry</span><span class='op'>&gt;</span>, <span class='ident'>RustKeylockError</span><span class='op'>&gt;</span> {
-	<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;Loading {}&quot;</span>, <span class='ident'>filename</span>);
-	<span class='kw'>let</span> <span class='ident'>full_path</span> <span class='op'>=</span> <span class='kw'>if</span> <span class='ident'>use_default_location</span> {
-		<span class='ident'>default_toml_path</span>(<span class='ident'>filename</span>)
-	} <span class='kw'>else</span> {
-		<span class='ident'>toml_path</span>(<span class='ident'>filename</span>)
-	};
-	<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;Full Path to load: {:?}&quot;</span>, <span class='ident'>full_path</span>);
+    <span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;Loading {}&quot;</span>, <span class='ident'>filename</span>);
+    <span class='kw'>let</span> <span class='ident'>full_path</span> <span class='op'>=</span> <span class='kw'>if</span> <span class='ident'>use_default_location</span> {
+        <span class='ident'>default_toml_path</span>(<span class='ident'>filename</span>)
+    } <span class='kw'>else</span> {
+        <span class='ident'>toml_path</span>(<span class='ident'>filename</span>)
+    };
+    <span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;Full Path to load: {:?}&quot;</span>, <span class='ident'>full_path</span>);
     <span class='kw'>let</span> <span class='ident'>toml</span> <span class='op'>=</span> <span class='macro'>try</span><span class='macro'>!</span>(<span class='ident'>load_existing_file</span>(<span class='kw-2'>&amp;</span><span class='ident'>full_path</span>, <span class='prelude-val'>Some</span>(<span class='ident'>cryptor</span>)));
+    <span class='kw'>let</span> <span class='ident'>value</span> <span class='op'>=</span> <span class='macro'>try</span><span class='macro'>!</span>(<span class='ident'>toml</span>.<span class='ident'>as_str</span>().<span class='ident'>parse</span>::<span class='op'>&lt;</span><span class='ident'>Value</span><span class='op'>&gt;</span>());
 
-    <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>parser</span> <span class='op'>=</span> <span class='ident'>Parser</span>::<span class='ident'>new</span>(<span class='ident'>toml</span>.<span class='ident'>as_str</span>());
-    <span class='kw'>match</span> <span class='ident'>parser</span>.<span class='ident'>parse</span>() {
-    	<span class='prelude-val'>Some</span>(<span class='ident'>table</span>) <span class='op'>=&gt;</span> <span class='ident'>transform_to_dtos</span>(<span class='ident'>table</span>, <span class='bool-val'>false</span>),
-    	<span class='prelude-val'>None</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Err</span>(<span class='ident'>RustKeylockError</span>::<span class='ident'>ParseError</span>(<span class='macro'>format</span><span class='macro'>!</span>(<span class='string'>&quot;{:?}&quot;</span>, <span class='ident'>parser</span>.<span class='ident'>errors</span>)))
+    <span class='kw'>match</span> <span class='ident'>value</span>.<span class='ident'>as_table</span>() {
+        <span class='prelude-val'>Some</span>(<span class='ident'>table</span>) <span class='op'>=&gt;</span> <span class='ident'>transform_to_dtos</span>(<span class='ident'>table</span>, <span class='bool-val'>false</span>),
+        <span class='prelude-val'>None</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Err</span>(<span class='ident'>RustKeylockError</span>::<span class='ident'>ParseError</span>(<span class='string'>&quot;No Table found in the toml.&quot;</span>.<span class='ident'>to_string</span>())),
     }
 }
 
 <span class='doccomment'>/// Loads a toml file with the specified name</span>
 <span class='doccomment'>/// If the file does not exist, it is created.</span>
 <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>load_properties</span>(<span class='ident'>filename</span>: <span class='kw-2'>&amp;</span><span class='ident'>str</span>) <span class='op'>-&gt;</span> <span class='prelude-ty'>Result</span><span class='op'>&lt;</span><span class='ident'>Props</span>, <span class='ident'>RustKeylockError</span><span class='op'>&gt;</span> {
-	<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;Loading Properties from {}&quot;</span>, <span class='ident'>filename</span>);
-	<span class='kw'>let</span> <span class='ident'>full_path</span> <span class='op'>=</span> <span class='ident'>default_toml_path</span>(<span class='ident'>filename</span>);
-	<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;Full Path to load properties from: {:?}&quot;</span>, <span class='ident'>full_path</span>);
+    <span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;Loading Properties from {}&quot;</span>, <span class='ident'>filename</span>);
+    <span class='kw'>let</span> <span class='ident'>full_path</span> <span class='op'>=</span> <span class='ident'>default_toml_path</span>(<span class='ident'>filename</span>);
+    <span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;Full Path to load properties from: {:?}&quot;</span>, <span class='ident'>full_path</span>);
     <span class='kw'>let</span> <span class='ident'>toml</span> <span class='op'>=</span> <span class='macro'>try</span><span class='macro'>!</span>(<span class='ident'>load_existing_file</span>(<span class='kw-2'>&amp;</span><span class='ident'>full_path</span>, <span class='prelude-val'>None</span>));
 
-	<span class='kw'>if</span> <span class='ident'>toml</span>.<span class='ident'>len</span>() <span class='op'>==</span> <span class='number'>0</span> {
-		<span class='prelude-val'>Ok</span>(<span class='ident'>Props</span>::<span class='ident'>empty</span>())
-	} <span class='kw'>else</span> {
-	    <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>parser</span> <span class='op'>=</span> <span class='ident'>Parser</span>::<span class='ident'>new</span>(<span class='ident'>toml</span>.<span class='ident'>as_str</span>());
-	    <span class='kw'>match</span> <span class='ident'>parser</span>.<span class='ident'>parse</span>() {
-	    	<span class='prelude-val'>Some</span>(<span class='ident'>table</span>) <span class='op'>=&gt;</span> <span class='ident'>transform_to_props</span>(<span class='ident'>table</span>),
-	    	<span class='prelude-val'>None</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Err</span>(<span class='ident'>RustKeylockError</span>::<span class='ident'>ParseError</span>(<span class='macro'>format</span><span class='macro'>!</span>(<span class='string'>&quot;{:?}&quot;</span>, <span class='ident'>parser</span>.<span class='ident'>errors</span>)))
-	    }
-	}
+    <span class='kw'>if</span> <span class='ident'>toml</span>.<span class='ident'>len</span>() <span class='op'>==</span> <span class='number'>0</span> {
+        <span class='prelude-val'>Ok</span>(<span class='ident'>Props</span>::<span class='ident'>default</span>())
+    } <span class='kw'>else</span> {
+        <span class='kw'>let</span> <span class='ident'>value</span> <span class='op'>=</span> <span class='macro'>try</span><span class='macro'>!</span>(<span class='ident'>toml</span>.<span class='ident'>as_str</span>().<span class='ident'>parse</span>::<span class='op'>&lt;</span><span class='ident'>Value</span><span class='op'>&gt;</span>());
+        <span class='kw'>match</span> <span class='ident'>value</span>.<span class='ident'>as_table</span>() {
+            <span class='prelude-val'>Some</span>(<span class='ident'>table</span>) <span class='op'>=&gt;</span> <span class='ident'>transform_to_props</span>(<span class='ident'>table</span>),
+            <span class='prelude-val'>None</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Err</span>(<span class='ident'>RustKeylockError</span>::<span class='ident'>ParseError</span>(<span class='string'>&quot;No Table found in the toml while loading properties.&quot;</span>.<span class='ident'>to_string</span>())),
+        }
+    }
 }
 
 <span class='doccomment'>/// Attempts to recover a toml file</span>
 <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>recover</span>(<span class='ident'>filename</span>: <span class='kw-2'>&amp;</span><span class='ident'>str</span>, <span class='ident'>cryptor</span>: <span class='kw-2'>&amp;</span><span class='ident'>Cryptor</span>) <span class='op'>-&gt;</span> <span class='prelude-ty'>Result</span><span class='op'>&lt;</span><span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>Entry</span><span class='op'>&gt;</span>, <span class='ident'>RustKeylockError</span><span class='op'>&gt;</span> {
-	<span class='macro'>info</span><span class='macro'>!</span>(<span class='string'>&quot;Trying to recover {}&quot;</span>, <span class='ident'>filename</span>);
-	<span class='kw'>let</span> <span class='ident'>full_path</span> <span class='op'>=</span> <span class='ident'>default_toml_path</span>(<span class='ident'>filename</span>);
-	<span class='macro'>info</span><span class='macro'>!</span>(<span class='string'>&quot;Full path of file to recover {:?}&quot;</span>, <span class='ident'>full_path</span>);
+    <span class='macro'>info</span><span class='macro'>!</span>(<span class='string'>&quot;Trying to recover {}&quot;</span>, <span class='ident'>filename</span>);
+    <span class='kw'>let</span> <span class='ident'>full_path</span> <span class='op'>=</span> <span class='ident'>default_toml_path</span>(<span class='ident'>filename</span>);
+    <span class='macro'>info</span><span class='macro'>!</span>(<span class='string'>&quot;Full path of file to recover {:?}&quot;</span>, <span class='ident'>full_path</span>);
     <span class='kw'>let</span> <span class='ident'>toml</span> <span class='op'>=</span> <span class='macro'>try</span><span class='macro'>!</span>(<span class='ident'>load_existing_file</span>(<span class='kw-2'>&amp;</span><span class='ident'>full_path</span>, <span class='prelude-val'>Some</span>(<span class='ident'>cryptor</span>)));
 
-    <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>parser</span> <span class='op'>=</span> <span class='ident'>Parser</span>::<span class='ident'>new</span>(<span class='ident'>toml</span>.<span class='ident'>as_str</span>());
-    <span class='kw'>match</span> <span class='ident'>parser</span>.<span class='ident'>parse</span>() {
-    	<span class='prelude-val'>Some</span>(<span class='ident'>table</span>) <span class='op'>=&gt;</span> <span class='ident'>transform_to_dtos</span>(<span class='ident'>table</span>, <span class='bool-val'>true</span>),
-    	<span class='prelude-val'>None</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Err</span>(<span class='ident'>RustKeylockError</span>::<span class='ident'>ParseError</span>(<span class='macro'>format</span><span class='macro'>!</span>(<span class='string'>&quot;{:?}&quot;</span>, <span class='ident'>parser</span>.<span class='ident'>errors</span>)))
+    <span class='kw'>let</span> <span class='ident'>value</span> <span class='op'>=</span> <span class='macro'>try</span><span class='macro'>!</span>(<span class='ident'>toml</span>.<span class='ident'>as_str</span>().<span class='ident'>parse</span>::<span class='op'>&lt;</span><span class='ident'>Value</span><span class='op'>&gt;</span>());
+
+    <span class='kw'>match</span> <span class='ident'>value</span>.<span class='ident'>as_table</span>() {
+        <span class='prelude-val'>Some</span>(<span class='ident'>table</span>) <span class='op'>=&gt;</span> <span class='ident'>transform_to_dtos</span>(<span class='ident'>table</span>, <span class='bool-val'>true</span>),
+        <span class='prelude-val'>None</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Err</span>(<span class='ident'>RustKeylockError</span>::<span class='ident'>ParseError</span>(<span class='string'>&quot;No Table found in the toml while trying to recover.&quot;</span>.<span class='ident'>to_string</span>())),
     }
 }
 
 <span class='doccomment'>/// Returns a PathBuf representing the path of the default location of the toml file.</span>
 <span class='doccomment'>/// home/$USER/.rust-keylock/rk.toml</span>
 <span class='kw'>fn</span> <span class='ident'>default_toml_path</span>(<span class='ident'>filename</span>: <span class='kw-2'>&amp;</span><span class='ident'>str</span>) <span class='op'>-&gt;</span> <span class='ident'>PathBuf</span> {
-	<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>default_rustkeylock_location</span> <span class='op'>=</span> <span class='ident'>default_rustkeylock_location</span>();
+    <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>default_rustkeylock_location</span> <span class='op'>=</span> <span class='ident'>default_rustkeylock_location</span>();
     <span class='ident'>default_rustkeylock_location</span>.<span class='ident'>push</span>(<span class='ident'>filename</span>);
     <span class='ident'>default_rustkeylock_location</span>
 }
 
 <span class='doccomment'>/// Returns a PathBuf representing the path of a location for the toml file, as this is passed to the argument.</span>
 <span class='kw'>fn</span> <span class='ident'>toml_path</span>(<span class='ident'>filename</span>: <span class='kw-2'>&amp;</span><span class='ident'>str</span>) <span class='op'>-&gt;</span> <span class='ident'>PathBuf</span> {
-	<span class='ident'>PathBuf</span>::<span class='ident'>from</span>(<span class='ident'>filename</span>)
+    <span class='ident'>PathBuf</span>::<span class='ident'>from</span>(<span class='ident'>filename</span>)
 }
 
 <span class='attribute'>#[<span class='ident'>cfg</span>(<span class='ident'>target_os</span> <span class='op'>=</span> <span class='string'>&quot;android&quot;</span>)]</span>
 <span class='kw'>fn</span> <span class='ident'>default_rustkeylock_location</span>() <span class='op'>-&gt;</span> <span class='ident'>PathBuf</span> {
-	<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>home_dir</span> <span class='op'>=</span> <span class='ident'>PathBuf</span>::<span class='ident'>from</span>(<span class='string'>&quot;/data/data/org.astonbitecode.rustkeylock/files&quot;</span>);
+    <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>home_dir</span> <span class='op'>=</span> <span class='ident'>PathBuf</span>::<span class='ident'>from</span>(<span class='string'>&quot;/data/data/org.astonbitecode.rustkeylock/files&quot;</span>);
     <span class='ident'>home_dir</span>.<span class='ident'>push</span>(<span class='string'>&quot;.rust-keylock&quot;</span>);
     <span class='ident'>home_dir</span>
 }
 
 <span class='attribute'>#[<span class='ident'>cfg</span>(<span class='ident'>not</span>(<span class='ident'>target_os</span> <span class='op'>=</span> <span class='string'>&quot;android&quot;</span>))]</span>
 <span class='kw'>fn</span> <span class='ident'>default_rustkeylock_location</span>() <span class='op'>-&gt;</span> <span class='ident'>PathBuf</span> {
-	<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>home_dir</span> <span class='op'>=</span> <span class='kw'>match</span> <span class='ident'>env</span>::<span class='ident'>home_dir</span>(){
-		<span class='prelude-val'>Some</span>(<span class='ident'>pb</span>) <span class='op'>=&gt;</span> <span class='ident'>pb</span>,
-		<span class='prelude-val'>None</span> <span class='op'>=&gt;</span> <span class='ident'>env</span>::<span class='ident'>current_dir</span>().<span class='ident'>unwrap</span>(),
-	};
+    <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>home_dir</span> <span class='op'>=</span> <span class='kw'>match</span> <span class='ident'>env</span>::<span class='ident'>home_dir</span>() {
+        <span class='prelude-val'>Some</span>(<span class='ident'>pb</span>) <span class='op'>=&gt;</span> <span class='ident'>pb</span>,
+        <span class='prelude-val'>None</span> <span class='op'>=&gt;</span> <span class='ident'>env</span>::<span class='ident'>current_dir</span>().<span class='ident'>unwrap</span>(),
+    };
     <span class='ident'>home_dir</span>.<span class='ident'>push</span>(<span class='string'>&quot;.rust-keylock&quot;</span>);
     <span class='ident'>home_dir</span>
 }
 
 <span class='doccomment'>/// Transforms properties toml to Props dto</span>
-<span class='kw'>fn</span> <span class='ident'>transform_to_props</span>(<span class='ident'>table</span>: <span class='ident'>Table</span>) <span class='op'>-&gt;</span> <span class='prelude-ty'>Result</span><span class='op'>&lt;</span><span class='ident'>Props</span>, <span class='ident'>RustKeylockError</span><span class='op'>&gt;</span> {
-	<span class='ident'>Props</span>::<span class='ident'>from_table</span>(<span class='kw-2'>&amp;</span><span class='ident'>table</span>)
+<span class='kw'>fn</span> <span class='ident'>transform_to_props</span>(<span class='ident'>table</span>: <span class='kw-2'>&amp;</span><span class='ident'>Table</span>) <span class='op'>-&gt;</span> <span class='prelude-ty'>Result</span><span class='op'>&lt;</span><span class='ident'>Props</span>, <span class='ident'>RustKeylockError</span><span class='op'>&gt;</span> {
+    <span class='ident'>Props</span>::<span class='ident'>from_table</span>(<span class='ident'>table</span>)
 }
 
 <span class='doccomment'>/// Transforms from toml Table which contains a List of Tables (entry) to a Vec&lt;Entry&gt;</span>
 <span class='doccomment'>/// If recover is true, then only the valid Entries are retrieved (no Error is returned if possible)</span>
-<span class='kw'>fn</span> <span class='ident'>transform_to_dtos</span>(<span class='ident'>table</span>: <span class='ident'>Table</span>, <span class='ident'>recover</span>: <span class='ident'>bool</span>) <span class='op'>-&gt;</span> <span class='prelude-ty'>Result</span><span class='op'>&lt;</span><span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>Entry</span><span class='op'>&gt;</span>, <span class='ident'>RustKeylockError</span><span class='op'>&gt;</span> {
+<span class='kw'>fn</span> <span class='ident'>transform_to_dtos</span>(<span class='ident'>table</span>: <span class='kw-2'>&amp;</span><span class='ident'>Table</span>, <span class='ident'>recover</span>: <span class='ident'>bool</span>) <span class='op'>-&gt;</span> <span class='prelude-ty'>Result</span><span class='op'>&lt;</span><span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>Entry</span><span class='op'>&gt;</span>, <span class='ident'>RustKeylockError</span><span class='op'>&gt;</span> {
     <span class='kw'>match</span> <span class='ident'>table</span>.<span class='ident'>get</span>(<span class='string'>&quot;entry&quot;</span>) {
-    	<span class='prelude-val'>Some</span>(<span class='ident'>value</span>) <span class='op'>=&gt;</span> {
-    		<span class='kw'>match</span> <span class='ident'>value</span>.<span class='ident'>as_slice</span>() {
-    			<span class='prelude-val'>Some</span>(<span class='ident'>slice</span>) <span class='op'>=&gt;</span> {
-	    			<span class='kw'>let</span> <span class='ident'>iter</span> <span class='op'>=</span> <span class='ident'>slice</span>.<span class='ident'>into_iter</span>();
-	    			<span class='kw'>let</span> <span class='ident'>vec</span>: <span class='ident'>Vec</span><span class='op'>&lt;</span><span class='prelude-ty'>Option</span><span class='op'>&lt;</span><span class='ident'>Entry</span><span class='op'>&gt;&gt;</span> <span class='op'>=</span> <span class='ident'>iter</span>.<span class='ident'>map</span>(<span class='op'>|</span><span class='ident'>value</span><span class='op'>|</span> {
-	    				<span class='kw'>let</span> <span class='ident'>conversion_result</span> <span class='op'>=</span> <span class='kw'>match</span> <span class='ident'>value</span>.<span class='ident'>as_table</span>() {
-		            		<span class='prelude-val'>Some</span>(<span class='ident'>value_table</span>) <span class='op'>=&gt;</span> <span class='ident'>Entry</span>::<span class='ident'>from_table</span>(<span class='ident'>value_table</span>),
-		            		<span class='prelude-val'>None</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Err</span>(<span class='ident'>RustKeylockError</span>::<span class='ident'>ParseError</span>(<span class='string'>&quot;Entry value should be a table&quot;</span>.<span class='ident'>to_string</span>())),
-		            	};
+        <span class='prelude-val'>Some</span>(<span class='ident'>value</span>) <span class='op'>=&gt;</span> {
+            <span class='kw'>match</span> <span class='ident'>value</span>.<span class='ident'>as_array</span>() {
+                <span class='prelude-val'>Some</span>(<span class='ident'>array</span>) <span class='op'>=&gt;</span> {
+                    <span class='kw'>let</span> <span class='ident'>iter</span> <span class='op'>=</span> <span class='ident'>array</span>.<span class='ident'>into_iter</span>();
+                    <span class='kw'>let</span> <span class='ident'>vec</span>: <span class='ident'>Vec</span><span class='op'>&lt;</span><span class='prelude-ty'>Option</span><span class='op'>&lt;</span><span class='ident'>Entry</span><span class='op'>&gt;&gt;</span> <span class='op'>=</span> <span class='ident'>iter</span>.<span class='ident'>map</span>(<span class='op'>|</span><span class='ident'>value</span><span class='op'>|</span> {
+                            <span class='kw'>let</span> <span class='ident'>conversion_result</span> <span class='op'>=</span> <span class='kw'>match</span> <span class='ident'>value</span>.<span class='ident'>as_table</span>() {
+                                <span class='prelude-val'>Some</span>(<span class='ident'>value_table</span>) <span class='op'>=&gt;</span> <span class='ident'>Entry</span>::<span class='ident'>from_table</span>(<span class='ident'>value_table</span>),
+                                <span class='prelude-val'>None</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Err</span>(<span class='ident'>RustKeylockError</span>::<span class='ident'>ParseError</span>(<span class='string'>&quot;Entry value should be a table&quot;</span>.<span class='ident'>to_string</span>())),
+                            };
 
-	    				<span class='kw'>match</span> <span class='ident'>conversion_result</span> {
-	    					<span class='prelude-val'>Ok</span>(<span class='ident'>entry</span>) <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='ident'>entry</span>),
-	    					<span class='prelude-val'>Err</span>(<span class='ident'>error</span>) <span class='op'>=&gt;</span> {
-	    						<span class='kw'>if</span> <span class='ident'>recover</span> {
-		    						<span class='macro'>error</span><span class='macro'>!</span>(<span class='string'>&quot;Error during parsing Entry: {}&quot;</span>, <span class='ident'>error</span>);
-	    						}
-	    						<span class='prelude-val'>None</span>
-	    					},
-	    				}
-	    			}).<span class='ident'>collect</span>();
+                            <span class='kw'>match</span> <span class='ident'>conversion_result</span> {
+                                <span class='prelude-val'>Ok</span>(<span class='ident'>entry</span>) <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='ident'>entry</span>),
+                                <span class='prelude-val'>Err</span>(<span class='ident'>error</span>) <span class='op'>=&gt;</span> {
+                                    <span class='kw'>if</span> <span class='ident'>recover</span> {
+                                        <span class='macro'>error</span><span class='macro'>!</span>(<span class='string'>&quot;Error during parsing Entry: {}&quot;</span>, <span class='ident'>error</span>);
+                                    }
+                                    <span class='prelude-val'>None</span>
+                                }
+                            }
+                        })
+                        .<span class='ident'>collect</span>();
 
-	    			<span class='kw'>if</span> <span class='ident'>vec</span>.<span class='ident'>contains</span>(<span class='kw-2'>&amp;</span><span class='prelude-val'>None</span>) {
-	    				<span class='kw'>if</span> <span class='ident'>recover</span> {
-	    					<span class='prelude-val'>Ok</span>(<span class='ident'>vec</span>.<span class='ident'>into_iter</span>().<span class='ident'>filter</span>(<span class='op'>|</span><span class='ident'>opt</span><span class='op'>|</span> <span class='ident'>opt</span>.<span class='ident'>is_some</span>()).<span class='ident'>map</span>(<span class='op'>|</span><span class='ident'>opt</span><span class='op'>|</span> <span class='ident'>opt</span>.<span class='ident'>unwrap</span>()).<span class='ident'>collect</span>())
-	    				} <span class='kw'>else</span> {
-		    				<span class='prelude-val'>Err</span>(<span class='ident'>RustKeylockError</span>::<span class='ident'>GeneralError</span>(<span class='string'>&quot;Failed because of previous errors (during mapping)&quot;</span>.<span class='ident'>to_string</span>()))
-	    				}
-	    			}
-	    			<span class='kw'>else</span> {
-	    				<span class='prelude-val'>Ok</span>(<span class='ident'>vec</span>.<span class='ident'>into_iter</span>().<span class='ident'>map</span>(<span class='op'>|</span><span class='ident'>opt</span><span class='op'>|</span> <span class='ident'>opt</span>.<span class='ident'>unwrap</span>()).<span class='ident'>collect</span>())
-	    			}
-	    		},
-    			<span class='prelude-val'>None</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Err</span>(<span class='ident'>RustKeylockError</span>::<span class='ident'>ParseError</span>(<span class='string'>&quot;Entry shoud be a List of Tables&quot;</span>.<span class='ident'>to_string</span>())),
-    		}
-    	},
-    	<span class='prelude-val'>None</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Ok</span>(<span class='ident'>Vec</span>::<span class='ident'>new</span>()),
+                    <span class='kw'>if</span> <span class='ident'>vec</span>.<span class='ident'>contains</span>(<span class='kw-2'>&amp;</span><span class='prelude-val'>None</span>) {
+                        <span class='kw'>if</span> <span class='ident'>recover</span> {
+                            <span class='prelude-val'>Ok</span>(<span class='ident'>vec</span>.<span class='ident'>into_iter</span>().<span class='ident'>filter</span>(<span class='op'>|</span><span class='ident'>opt</span><span class='op'>|</span> <span class='ident'>opt</span>.<span class='ident'>is_some</span>()).<span class='ident'>map</span>(<span class='op'>|</span><span class='ident'>opt</span><span class='op'>|</span> <span class='ident'>opt</span>.<span class='ident'>unwrap</span>()).<span class='ident'>collect</span>())
+                        } <span class='kw'>else</span> {
+                            <span class='prelude-val'>Err</span>(<span class='ident'>RustKeylockError</span>::<span class='ident'>GeneralError</span>(<span class='string'>&quot;Failed because of previous errors (during mapping)&quot;</span>.<span class='ident'>to_string</span>()))
+                        }
+                    } <span class='kw'>else</span> {
+                        <span class='prelude-val'>Ok</span>(<span class='ident'>vec</span>.<span class='ident'>into_iter</span>().<span class='ident'>map</span>(<span class='op'>|</span><span class='ident'>opt</span><span class='op'>|</span> <span class='ident'>opt</span>.<span class='ident'>unwrap</span>()).<span class='ident'>collect</span>())
+                    }
+                }
+                <span class='prelude-val'>None</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Err</span>(<span class='ident'>RustKeylockError</span>::<span class='ident'>ParseError</span>(<span class='string'>&quot;Entry shoud be a List of Tables&quot;</span>.<span class='ident'>to_string</span>())),
+            }
+        }
+        <span class='prelude-val'>None</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Ok</span>(<span class='ident'>Vec</span>::<span class='ident'>new</span>()),
     }
 }
 
 <span class='doccomment'>/// Loads a file that contains a toml String and returns this String</span>
 <span class='kw'>fn</span> <span class='ident'>load_existing_file</span><span class='op'>&lt;</span><span class='lifetime'>&#39;a</span><span class='op'>&gt;</span>(<span class='ident'>file_path</span>: <span class='kw-2'>&amp;</span><span class='ident'>PathBuf</span>, <span class='ident'>cryptor_opt</span>: <span class='prelude-ty'>Option</span><span class='op'>&lt;</span><span class='kw-2'>&amp;</span><span class='ident'>Cryptor</span><span class='op'>&gt;</span>) <span class='op'>-&gt;</span> <span class='prelude-ty'>Result</span><span class='op'>&lt;</span><span class='ident'>String</span>, <span class='ident'>RustKeylockError</span><span class='op'>&gt;</span> {
-	<span class='kw'>let</span> <span class='ident'>bytes</span> <span class='op'>=</span> {
-		<span class='kw'>match</span> <span class='ident'>File</span>::<span class='ident'>open</span>(<span class='ident'>file_path</span>) {
-			<span class='prelude-val'>Ok</span>(<span class='ident'>file</span>) <span class='op'>=&gt;</span> {
-				<span class='ident'>file</span>.<span class='ident'>bytes</span>().<span class='ident'>map</span>(<span class='op'>|</span><span class='ident'>b_res</span><span class='op'>|</span> {
-					<span class='kw'>match</span> <span class='ident'>b_res</span> {
-						<span class='prelude-val'>Ok</span>(<span class='ident'>b</span>) <span class='op'>=&gt;</span> <span class='ident'>b</span>.<span class='ident'>clone</span>(),
-						<span class='prelude-val'>Err</span>(<span class='ident'>error</span>) <span class='op'>=&gt;</span> {
-							<span class='macro'>error</span><span class='macro'>!</span>(<span class='string'>&quot;Could not read from File while loading {:?}&quot;</span>, <span class='ident'>error</span>);
-							<span class='macro'>panic</span><span class='macro'>!</span>(<span class='string'>&quot;Could not read from File while loading {:?}&quot;</span>, <span class='ident'>error</span>)
-						},
-					}
-				}).<span class='ident'>collect</span>()
-				
-			},
-	        <span class='prelude-val'>Err</span>(_) <span class='op'>=&gt;</span> {
-	        	<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;Encrypted file does not exist. Initializing...&quot;</span>);
-	        	<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>fs</span>::<span class='ident'>create_dir_all</span>(<span class='ident'>default_rustkeylock_location</span>()).<span class='ident'>is_ok</span>());
-	        	<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;Directories created successfully&quot;</span>);
-				<span class='ident'>Vec</span>::<span class='ident'>new</span>()
-	        },
-		}
-	};
+    <span class='kw'>let</span> <span class='ident'>bytes</span> <span class='op'>=</span> {
+        <span class='kw'>match</span> <span class='ident'>File</span>::<span class='ident'>open</span>(<span class='ident'>file_path</span>) {
+            <span class='prelude-val'>Ok</span>(<span class='ident'>file</span>) <span class='op'>=&gt;</span> {
+                <span class='ident'>file</span>.<span class='ident'>bytes</span>()
+                    .<span class='ident'>map</span>(<span class='op'>|</span><span class='ident'>b_res</span><span class='op'>|</span> {
+                        <span class='kw'>match</span> <span class='ident'>b_res</span> {
+                            <span class='prelude-val'>Ok</span>(<span class='ident'>b</span>) <span class='op'>=&gt;</span> <span class='ident'>b</span>.<span class='ident'>clone</span>(),
+                            <span class='prelude-val'>Err</span>(<span class='ident'>error</span>) <span class='op'>=&gt;</span> {
+                                <span class='macro'>error</span><span class='macro'>!</span>(<span class='string'>&quot;Could not read from File while loading {:?}&quot;</span>, <span class='ident'>error</span>);
+                                <span class='macro'>panic</span><span class='macro'>!</span>(<span class='string'>&quot;Could not read from File while loading {:?}&quot;</span>, <span class='ident'>error</span>)
+                            }
+                        }
+                    })
+                    .<span class='ident'>collect</span>()
+            }
+            <span class='prelude-val'>Err</span>(_) <span class='op'>=&gt;</span> {
+                <span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;Encrypted file does not exist. Initializing...&quot;</span>);
+                <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>fs</span>::<span class='ident'>create_dir_all</span>(<span class='ident'>default_rustkeylock_location</span>()).<span class='ident'>is_ok</span>());
+                <span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;Directories created successfully&quot;</span>);
+                <span class='ident'>Vec</span>::<span class='ident'>new</span>()
+            }
+        }
+    };
 
-	<span class='kw'>match</span> <span class='ident'>cryptor_opt</span> {
-		<span class='prelude-val'>Some</span>(<span class='ident'>cryptor</span>) <span class='op'>=&gt;</span> {
-			<span class='kw'>if</span> <span class='ident'>bytes</span>.<span class='ident'>len</span>() <span class='op'>&gt;</span> <span class='number'>0</span> {
-				<span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;Decrypting passwords file...&quot;</span>);
-				<span class='kw'>let</span> <span class='ident'>dbytes</span> <span class='op'>=</span> <span class='macro'>try</span><span class='macro'>!</span>(<span class='ident'>cryptor</span>.<span class='ident'>decrypt</span>(<span class='kw-2'>&amp;</span><span class='ident'>bytes</span>));
-				<span class='prelude-val'>Ok</span>(<span class='macro'>try</span><span class='macro'>!</span>(<span class='ident'>String</span>::<span class='ident'>from_utf8</span>(<span class='ident'>dbytes</span>)))
-			} <span class='kw'>else</span> {
-				<span class='prelude-val'>Ok</span>(<span class='string'>&quot;&quot;</span>.<span class='ident'>to_string</span>())
-			}
-		},
-		<span class='prelude-val'>None</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Ok</span>(<span class='macro'>try</span><span class='macro'>!</span>(<span class='ident'>String</span>::<span class='ident'>from_utf8</span>(<span class='ident'>bytes</span>))),
-	}
+    <span class='kw'>match</span> <span class='ident'>cryptor_opt</span> {
+        <span class='prelude-val'>Some</span>(<span class='ident'>cryptor</span>) <span class='op'>=&gt;</span> {
+            <span class='kw'>if</span> <span class='ident'>bytes</span>.<span class='ident'>len</span>() <span class='op'>&gt;</span> <span class='number'>0</span> {
+                <span class='macro'>debug</span><span class='macro'>!</span>(<span class='string'>&quot;Decrypting passwords file...&quot;</span>);
+                <span class='kw'>let</span> <span class='ident'>dbytes</span> <span class='op'>=</span> <span class='macro'>try</span><span class='macro'>!</span>(<span class='ident'>cryptor</span>.<span class='ident'>decrypt</span>(<span class='kw-2'>&amp;</span><span class='ident'>bytes</span>));
+                <span class='prelude-val'>Ok</span>(<span class='macro'>try</span><span class='macro'>!</span>(<span class='ident'>String</span>::<span class='ident'>from_utf8</span>(<span class='ident'>dbytes</span>)))
+            } <span class='kw'>else</span> {
+                <span class='prelude-val'>Ok</span>(<span class='string'>&quot;&quot;</span>.<span class='ident'>to_string</span>())
+            }
+        }
+        <span class='prelude-val'>None</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Ok</span>(<span class='macro'>try</span><span class='macro'>!</span>(<span class='ident'>String</span>::<span class='ident'>from_utf8</span>(<span class='ident'>bytes</span>))),
+    }
 }
 
 <span class='doccomment'>/// Saves the specified entries to a toml file with the specified name</span>
 <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>save</span>(<span class='ident'>entries</span>: <span class='kw-2'>&amp;</span><span class='ident'>Vec</span><span class='op'>&lt;</span><span class='ident'>Entry</span><span class='op'>&gt;</span>, <span class='ident'>filename</span>: <span class='kw-2'>&amp;</span><span class='ident'>str</span>, <span class='ident'>cryptor</span>: <span class='kw-2'>&amp;</span><span class='ident'>Cryptor</span>, <span class='ident'>use_default_location</span>: <span class='ident'>bool</span>) <span class='op'>-&gt;</span> <span class='ident'>errors</span>::<span class='prelude-ty'>Result</span><span class='op'>&lt;</span>()<span class='op'>&gt;</span> {
-	<span class='macro'>info</span><span class='macro'>!</span>(<span class='string'>&quot;Saving Entries in {}&quot;</span>, <span class='ident'>filename</span>);
-	<span class='kw'>let</span> <span class='ident'>path_buf</span> <span class='op'>=</span> <span class='kw'>if</span> <span class='ident'>use_default_location</span> {
-		<span class='ident'>default_toml_path</span>(<span class='ident'>filename</span>)
-	} <span class='kw'>else</span> {
-		<span class='ident'>toml_path</span>(<span class='ident'>filename</span>)
-	};
-	<span class='kw'>let</span> <span class='ident'>tables_vec</span> <span class='op'>=</span> <span class='ident'>entries</span>.<span class='ident'>iter</span>().<span class='ident'>map</span>(<span class='op'>|</span><span class='ident'>entry</span><span class='op'>|</span> {
-		<span class='ident'>toml</span>::<span class='ident'>Value</span>::<span class='ident'>Table</span>(<span class='ident'>entry</span>.<span class='ident'>to_table</span>())
-	}).<span class='ident'>collect</span>();
-	<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>table</span> <span class='op'>=</span> <span class='ident'>Table</span>::<span class='ident'>new</span>();
-	<span class='ident'>table</span>.<span class='ident'>insert</span>(<span class='string'>&quot;entry&quot;</span>.<span class='ident'>to_string</span>(), <span class='ident'>toml</span>::<span class='ident'>Value</span>::<span class='ident'>Array</span>(<span class='ident'>tables_vec</span>));
-    <span class='kw'>let</span> <span class='ident'>toml_string</span> <span class='op'>=</span> <span class='kw'>if</span> <span class='ident'>entries</span>.<span class='ident'>len</span>() <span class='op'>&gt;</span> <span class='number'>0</span> {
-    	<span class='ident'>toml</span>::<span class='ident'>encode_str</span>(<span class='kw-2'>&amp;</span><span class='ident'>table</span>)
+    <span class='macro'>info</span><span class='macro'>!</span>(<span class='string'>&quot;Saving Entries in {}&quot;</span>, <span class='ident'>filename</span>);
+    <span class='kw'>let</span> <span class='ident'>path_buf</span> <span class='op'>=</span> <span class='kw'>if</span> <span class='ident'>use_default_location</span> {
+        <span class='ident'>default_toml_path</span>(<span class='ident'>filename</span>)
     } <span class='kw'>else</span> {
-    	<span class='string'>&quot;&quot;</span>.<span class='ident'>to_string</span>()
+        <span class='ident'>toml_path</span>(<span class='ident'>filename</span>)
+    };
+    <span class='kw'>let</span> <span class='ident'>tables_vec</span> <span class='op'>=</span> <span class='ident'>entries</span>.<span class='ident'>iter</span>()
+        .<span class='ident'>map</span>(<span class='op'>|</span><span class='ident'>entry</span><span class='op'>|</span> <span class='ident'>Value</span>::<span class='ident'>Table</span>(<span class='ident'>entry</span>.<span class='ident'>to_table</span>()))
+        .<span class='ident'>collect</span>();
+    <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>table</span> <span class='op'>=</span> <span class='ident'>Table</span>::<span class='ident'>new</span>();
+    <span class='ident'>table</span>.<span class='ident'>insert</span>(<span class='string'>&quot;entry&quot;</span>.<span class='ident'>to_string</span>(), <span class='ident'>Value</span>::<span class='ident'>Array</span>(<span class='ident'>tables_vec</span>));
+    <span class='kw'>let</span> <span class='ident'>toml_string</span> <span class='op'>=</span> <span class='kw'>if</span> <span class='ident'>entries</span>.<span class='ident'>len</span>() <span class='op'>&gt;</span> <span class='number'>0</span> {
+        <span class='macro'>try</span><span class='macro'>!</span>(<span class='ident'>toml</span>::<span class='ident'>ser</span>::<span class='ident'>to_string</span>(<span class='kw-2'>&amp;</span><span class='ident'>table</span>))
+    } <span class='kw'>else</span> {
+        <span class='string'>&quot;&quot;</span>.<span class='ident'>to_string</span>()
     };
 
     <span class='kw'>let</span> <span class='ident'>ebytes</span> <span class='op'>=</span> <span class='macro'>try</span><span class='macro'>!</span>(<span class='ident'>cryptor</span>.<span class='ident'>encrypt</span>(<span class='ident'>toml_string</span>.<span class='ident'>as_bytes</span>()));
@@ -860,12 +894,13 @@
 }
 
 <span class='doccomment'>/// Saves the specified Props to a toml file with the specified name</span>
+<span class='attribute'>#[<span class='ident'>allow</span>(<span class='ident'>dead_code</span>)]</span>
 <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>save_props</span>(<span class='ident'>props</span>: <span class='kw-2'>&amp;</span><span class='ident'>Props</span>, <span class='ident'>filename</span>: <span class='kw-2'>&amp;</span><span class='ident'>str</span>) <span class='op'>-&gt;</span> <span class='ident'>errors</span>::<span class='prelude-ty'>Result</span><span class='op'>&lt;</span>()<span class='op'>&gt;</span> {
-	<span class='macro'>info</span><span class='macro'>!</span>(<span class='string'>&quot;Saving Properties in {}&quot;</span>, <span class='ident'>filename</span>);
-	<span class='kw'>let</span> <span class='ident'>path_buf</span> <span class='op'>=</span> <span class='ident'>default_toml_path</span>(<span class='ident'>filename</span>);
-	<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>file</span> <span class='op'>=</span> <span class='macro'>try</span><span class='macro'>!</span>(<span class='ident'>File</span>::<span class='ident'>create</span>(<span class='ident'>path_buf</span>));
-	<span class='kw'>let</span> <span class='ident'>table</span> <span class='op'>=</span> <span class='ident'>props</span>.<span class='ident'>to_table</span>();
-    <span class='kw'>let</span> <span class='ident'>toml_string</span> <span class='op'>=</span> <span class='ident'>toml</span>::<span class='ident'>encode_str</span>(<span class='kw-2'>&amp;</span><span class='ident'>table</span>);
+    <span class='macro'>info</span><span class='macro'>!</span>(<span class='string'>&quot;Saving Properties in {}&quot;</span>, <span class='ident'>filename</span>);
+    <span class='kw'>let</span> <span class='ident'>path_buf</span> <span class='op'>=</span> <span class='ident'>default_toml_path</span>(<span class='ident'>filename</span>);
+    <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>file</span> <span class='op'>=</span> <span class='macro'>try</span><span class='macro'>!</span>(<span class='ident'>File</span>::<span class='ident'>create</span>(<span class='ident'>path_buf</span>));
+    <span class='kw'>let</span> <span class='ident'>table</span> <span class='op'>=</span> <span class='ident'>props</span>.<span class='ident'>to_table</span>();
+    <span class='kw'>let</span> <span class='ident'>toml_string</span> <span class='op'>=</span> <span class='macro'>try</span><span class='macro'>!</span>(<span class='ident'>toml</span>::<span class='ident'>ser</span>::<span class='ident'>to_string</span>(<span class='kw-2'>&amp;</span><span class='ident'>table</span>));
     <span class='macro'>try</span><span class='macro'>!</span>(<span class='ident'>file</span>.<span class='ident'>write_all</span>(<span class='ident'>toml_string</span>.<span class='ident'>as_bytes</span>()));
     <span class='macro'>info</span><span class='macro'>!</span>(<span class='string'>&quot;Properties saved in {}. Syncing...&quot;</span>, <span class='ident'>filename</span>);
     <span class='prelude-val'>Ok</span>(<span class='macro'>try</span><span class='macro'>!</span>(<span class='ident'>file</span>.<span class='ident'>sync_all</span>()))
@@ -873,9 +908,9 @@
 
 <span class='attribute'>#[<span class='ident'>cfg</span>(<span class='ident'>test</span>)]</span>
 <span class='kw'>mod</span> <span class='ident'>test_parser</span> {
-	<span class='kw'>use</span> <span class='kw'>super</span>::<span class='kw'>super</span>::{<span class='ident'>Entry</span>, <span class='ident'>Props</span>};
-	<span class='kw'>use</span> <span class='kw'>super</span>::<span class='kw'>super</span>::<span class='ident'>datacrypt</span>::<span class='ident'>NoCryptor</span>;
-    <span class='kw'>use</span> <span class='ident'>std</span>::<span class='ident'>io</span>::<span class='ident'>prelude</span>::<span class='op'>*</span>;
+    <span class='kw'>use</span> <span class='kw'>super</span>::<span class='kw'>super</span>::{<span class='ident'>Entry</span>, <span class='ident'>Props</span>};
+    <span class='kw'>use</span> <span class='kw'>super</span>::<span class='kw'>super</span>::<span class='ident'>datacrypt</span>::<span class='ident'>NoCryptor</span>;
+    <span class='kw'>use</span> <span class='ident'>std</span>::<span class='ident'>io</span>::<span class='ident'>prelude</span>::<span class='kw-2'>*</span>;
     <span class='kw'>use</span> <span class='ident'>std</span>::<span class='ident'>fs</span>;
     <span class='kw'>use</span> <span class='ident'>std</span>::<span class='ident'>fs</span>::<span class='ident'>File</span>;
     <span class='kw'>use</span> <span class='ident'>toml</span>;
@@ -908,17 +943,17 @@
         <span class='ident'>delete_file</span>(<span class='ident'>filename</span>);
     }
 
-	<span class='attribute'>#[<span class='ident'>test</span>]</span>
+    <span class='attribute'>#[<span class='ident'>test</span>]</span>
     <span class='kw'>fn</span> <span class='ident'>create_new_properties_file</span>() {
-    	<span class='kw'>let</span> <span class='ident'>filename</span> <span class='op'>=</span> <span class='string'>&quot;create_new_properties_file.toml&quot;</span>;
+        <span class='kw'>let</span> <span class='ident'>filename</span> <span class='op'>=</span> <span class='string'>&quot;create_new_properties_file.toml&quot;</span>;
         <span class='kw'>let</span> <span class='ident'>opt</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>load_properties</span>(<span class='ident'>filename</span>);
         <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>opt</span>.<span class='ident'>is_ok</span>());
         <span class='kw'>let</span> <span class='ident'>path_buf</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>default_toml_path</span>(<span class='ident'>filename</span>);
-		<span class='kw'>let</span> <span class='ident'>path</span> <span class='op'>=</span> <span class='ident'>path_buf</span>.<span class='ident'>to_str</span>().<span class='ident'>unwrap</span>();
+        <span class='kw'>let</span> <span class='ident'>path</span> <span class='op'>=</span> <span class='ident'>path_buf</span>.<span class='ident'>to_str</span>().<span class='ident'>unwrap</span>();
         <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>fs</span>::<span class='ident'>remove_file</span>(<span class='ident'>path</span>).<span class='ident'>is_err</span>());
     }
 
-	<span class='attribute'>#[<span class='ident'>test</span>]</span>
+    <span class='attribute'>#[<span class='ident'>test</span>]</span>
     <span class='kw'>fn</span> <span class='ident'>use_existing_properties_file</span>() {
         <span class='kw'>let</span> <span class='ident'>filename</span> <span class='op'>=</span> <span class='string'>&quot;use_existing_properties_file.toml&quot;</span>;
         <span class='ident'>create_props_file_with_toml_contents</span>(<span class='ident'>filename</span>);
@@ -928,19 +963,19 @@
         <span class='ident'>delete_file</span>(<span class='ident'>filename</span>);
     }
 
-	<span class='attribute'>#[<span class='ident'>test</span>]</span>
+    <span class='attribute'>#[<span class='ident'>test</span>]</span>
     <span class='kw'>fn</span> <span class='ident'>save_toml_to_properties_file</span>() {
         <span class='kw'>let</span> <span class='ident'>filename</span> <span class='op'>=</span> <span class='string'>&quot;save_toml_to_properties_file.toml&quot;</span>;
         <span class='ident'>create_props_file_with_toml_contents</span>(<span class='ident'>filename</span>);
 
         <span class='kw'>let</span> <span class='ident'>opt</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>load_properties</span>(<span class='ident'>filename</span>);
         <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>opt</span>.<span class='ident'>is_ok</span>());
-        <span class='macro'>assert</span><span class='macro'>!</span>(<span class='kw'>super</span>::<span class='ident'>save_props</span>(<span class='kw-2'>&amp;</span><span class='ident'>Props</span>::<span class='ident'>new</span>(<span class='string'>&quot;alasalas&quot;</span>.<span class='ident'>to_string</span>()), <span class='ident'>filename</span>).<span class='ident'>is_ok</span>());
+        <span class='macro'>assert</span><span class='macro'>!</span>(<span class='kw'>super</span>::<span class='ident'>save_props</span>(<span class='kw-2'>&amp;</span><span class='ident'>Props</span>::<span class='ident'>new</span>(<span class='number'>60</span>), <span class='ident'>filename</span>).<span class='ident'>is_ok</span>());
 
         <span class='kw'>let</span> <span class='ident'>new_opt</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>load_properties</span>(<span class='ident'>filename</span>);
         <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>new_opt</span>.<span class='ident'>is_ok</span>());
         <span class='kw'>let</span> <span class='ident'>new_props</span> <span class='op'>=</span> <span class='ident'>new_opt</span>.<span class='ident'>unwrap</span>();
-        <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>new_props</span>.<span class='ident'>salt</span> <span class='op'>==</span> <span class='string'>&quot;alasalas&quot;</span>);
+        <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>new_props</span>.<span class='ident'>idle_timeout_seconds</span> <span class='op'>==</span> <span class='number'>60</span>);
         <span class='ident'>delete_file</span>(<span class='ident'>filename</span>);
     }
 
@@ -959,7 +994,8 @@
 			desc = &quot;other description&quot;
 		&quot;#</span>;
 
-        <span class='kw'>let</span> <span class='ident'>table</span> <span class='op'>=</span> <span class='ident'>toml</span>::<span class='ident'>Parser</span>::<span class='ident'>new</span>(<span class='ident'>toml</span>).<span class='ident'>parse</span>().<span class='ident'>unwrap</span>();
+        <span class='kw'>let</span> <span class='ident'>value</span> <span class='op'>=</span> <span class='ident'>toml</span>.<span class='ident'>parse</span>::<span class='op'>&lt;</span><span class='ident'>toml</span>::<span class='ident'>value</span>::<span class='ident'>Value</span><span class='op'>&gt;</span>().<span class='ident'>unwrap</span>();
+        <span class='kw'>let</span> <span class='ident'>table</span> <span class='op'>=</span> <span class='ident'>value</span>.<span class='ident'>as_table</span>().<span class='ident'>unwrap</span>();
         <span class='kw'>let</span> <span class='ident'>res</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>transform_to_dtos</span>(<span class='ident'>table</span>, <span class='bool-val'>false</span>);
         <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>res</span>.<span class='ident'>is_ok</span>());
         <span class='kw'>let</span> <span class='ident'>vec</span> <span class='op'>=</span> <span class='ident'>res</span>.<span class='ident'>unwrap</span>();
@@ -974,9 +1010,9 @@
         <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>vec</span>[<span class='number'>1</span>].<span class='ident'>desc</span> <span class='op'>==</span> <span class='string'>&quot;other description&quot;</span>);
     }
 
-	<span class='attribute'>#[<span class='ident'>test</span>]</span>
+    <span class='attribute'>#[<span class='ident'>test</span>]</span>
     <span class='kw'>fn</span> <span class='ident'>transform_to_dtos_failure</span>() {
-    	<span class='comment'>// missing password from entry 1</span>
+        <span class='comment'>// missing password from entry 1</span>
         <span class='kw'>let</span> <span class='ident'>toml</span> <span class='op'>=</span> <span class='string'>r#&quot;
 		[[entry]]
 			name = &quot;name1&quot;
@@ -989,12 +1025,13 @@
 			desc = &quot;other description&quot;
 		&quot;#</span>;
 
-        <span class='kw'>let</span> <span class='ident'>table</span> <span class='op'>=</span> <span class='ident'>toml</span>::<span class='ident'>Parser</span>::<span class='ident'>new</span>(<span class='ident'>toml</span>).<span class='ident'>parse</span>().<span class='ident'>unwrap</span>();
+        <span class='kw'>let</span> <span class='ident'>value</span> <span class='op'>=</span> <span class='ident'>toml</span>.<span class='ident'>parse</span>::<span class='op'>&lt;</span><span class='ident'>toml</span>::<span class='ident'>value</span>::<span class='ident'>Value</span><span class='op'>&gt;</span>().<span class='ident'>unwrap</span>();
+        <span class='kw'>let</span> <span class='ident'>table</span> <span class='op'>=</span> <span class='ident'>value</span>.<span class='ident'>as_table</span>().<span class='ident'>unwrap</span>();
         <span class='kw'>let</span> <span class='ident'>res</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>transform_to_dtos</span>(<span class='ident'>table</span>, <span class='bool-val'>false</span>);
         <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>res</span>.<span class='ident'>is_err</span>());
     }
 
-	<span class='attribute'>#[<span class='ident'>test</span>]</span>
+    <span class='attribute'>#[<span class='ident'>test</span>]</span>
     <span class='kw'>fn</span> <span class='ident'>transform_to_dtos_recover_success</span>() {
         <span class='kw'>let</span> <span class='ident'>toml</span> <span class='op'>=</span> <span class='string'>r#&quot;
 		[[entry]]
@@ -1008,7 +1045,8 @@
 			desc = &quot;other description&quot;
 		&quot;#</span>;
 
-        <span class='kw'>let</span> <span class='ident'>table</span> <span class='op'>=</span> <span class='ident'>toml</span>::<span class='ident'>Parser</span>::<span class='ident'>new</span>(<span class='ident'>toml</span>).<span class='ident'>parse</span>().<span class='ident'>unwrap</span>();
+        <span class='kw'>let</span> <span class='ident'>value</span> <span class='op'>=</span> <span class='ident'>toml</span>.<span class='ident'>parse</span>::<span class='op'>&lt;</span><span class='ident'>toml</span>::<span class='ident'>value</span>::<span class='ident'>Value</span><span class='op'>&gt;</span>().<span class='ident'>unwrap</span>();
+        <span class='kw'>let</span> <span class='ident'>table</span> <span class='op'>=</span> <span class='ident'>value</span>.<span class='ident'>as_table</span>().<span class='ident'>unwrap</span>();
         <span class='kw'>let</span> <span class='ident'>res</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>transform_to_dtos</span>(<span class='ident'>table</span>, <span class='bool-val'>true</span>);
         <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>res</span>.<span class='ident'>is_ok</span>());
         <span class='kw'>let</span> <span class='ident'>vec</span> <span class='op'>=</span> <span class='ident'>res</span>.<span class='ident'>unwrap</span>();
@@ -1019,18 +1057,17 @@
         <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>vec</span>[<span class='number'>0</span>].<span class='ident'>desc</span> <span class='op'>==</span> <span class='string'>&quot;other description&quot;</span>);
     }
 
-	<span class='comment'>// TODO: Why it fails when all tests are running, whereas it passes once it runs alone?</span>
-	<span class='attribute'>#[<span class='ident'>test</span>]</span>
-	<span class='kw'>fn</span> <span class='ident'>create_encrypt_and_then_decrypt</span>() {
-		<span class='kw'>let</span> <span class='ident'>filename</span> <span class='op'>=</span> <span class='string'>&quot;create_encrypt_and_then_decrypt.toml&quot;</span>;
+    <span class='attribute'>#[<span class='ident'>test</span>]</span>
+    <span class='kw'>fn</span> <span class='ident'>create_encrypt_and_then_decrypt</span>() {
+        <span class='kw'>let</span> <span class='ident'>filename</span> <span class='op'>=</span> <span class='string'>&quot;create_encrypt_and_then_decrypt.toml&quot;</span>;
 
-		<span class='kw'>let</span> <span class='ident'>salt_position</span> <span class='op'>=</span> <span class='number'>0</span>;
-		<span class='kw'>let</span> <span class='ident'>password</span> <span class='op'>=</span> <span class='string'>&quot;123&quot;</span>.<span class='ident'>to_string</span>();
+        <span class='kw'>let</span> <span class='ident'>salt_position</span> <span class='op'>=</span> <span class='number'>0</span>;
+        <span class='kw'>let</span> <span class='ident'>password</span> <span class='op'>=</span> <span class='string'>&quot;123&quot;</span>.<span class='ident'>to_string</span>();
 
-		<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>entries</span> <span class='op'>=</span> <span class='ident'>Vec</span>::<span class='ident'>new</span>();
-	    <span class='ident'>entries</span>.<span class='ident'>push</span>(<span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='string'>&quot;1&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;1&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;1&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;1&quot;</span>.<span class='ident'>to_string</span>()));
+        <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>entries</span> <span class='op'>=</span> <span class='ident'>Vec</span>::<span class='ident'>new</span>();
+        <span class='ident'>entries</span>.<span class='ident'>push</span>(<span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='string'>&quot;1&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;1&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;1&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;1&quot;</span>.<span class='ident'>to_string</span>()));
 
-		<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>cryptor</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>create_bcryptor</span>(<span class='ident'>filename</span>, <span class='ident'>password</span>.<span class='ident'>clone</span>(), <span class='ident'>salt_position</span>, <span class='bool-val'>false</span>, <span class='bool-val'>true</span>);
+        <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>cryptor</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>create_bcryptor</span>(<span class='ident'>filename</span>, <span class='ident'>password</span>.<span class='ident'>clone</span>(), <span class='ident'>salt_position</span>, <span class='bool-val'>false</span>, <span class='bool-val'>true</span>);
         <span class='macro'>assert</span><span class='macro'>!</span>(<span class='kw'>super</span>::<span class='ident'>save</span>(<span class='kw-2'>&amp;</span><span class='ident'>entries</span>, <span class='ident'>filename</span>, <span class='kw-2'>&amp;</span><span class='ident'>cryptor</span>, <span class='bool-val'>true</span>).<span class='ident'>is_ok</span>());
         <span class='ident'>cryptor</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>create_bcryptor</span>(<span class='ident'>filename</span>, <span class='ident'>password</span>.<span class='ident'>clone</span>(), <span class='ident'>salt_position</span>, <span class='bool-val'>false</span>, <span class='bool-val'>true</span>);
 
@@ -1038,71 +1075,71 @@
         <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>entries</span> <span class='op'>==</span> <span class='ident'>m</span>.<span class='ident'>unwrap</span>());
         <span class='macro'>assert</span><span class='macro'>!</span>(<span class='kw'>super</span>::<span class='ident'>save</span>(<span class='kw-2'>&amp;</span><span class='ident'>entries</span>, <span class='ident'>filename</span>, <span class='kw-2'>&amp;</span><span class='ident'>cryptor</span>, <span class='bool-val'>true</span>).<span class='ident'>is_ok</span>());
 
-		<span class='ident'>delete_file</span>(<span class='ident'>filename</span>);
-	}
+        <span class='ident'>delete_file</span>(<span class='ident'>filename</span>);
+    }
 
-	<span class='attribute'>#[<span class='ident'>test</span>]</span>
-	<span class='kw'>fn</span> <span class='ident'>create_encrypt_and_import</span>() {
-		<span class='comment'>// Create the file to import</span>
-		<span class='kw'>let</span> <span class='ident'>import_filename</span> <span class='op'>=</span> <span class='string'>&quot;to_import.toml&quot;</span>;
-		<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>default_rustkeylock_dir_path_buf</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>default_rustkeylock_location</span>();
-		<span class='ident'>default_rustkeylock_dir_path_buf</span>.<span class='ident'>push</span>(<span class='ident'>import_filename</span>);
-		<span class='kw'>let</span> <span class='ident'>filename_import</span> <span class='op'>=</span> <span class='ident'>default_rustkeylock_dir_path_buf</span>.<span class='ident'>to_str</span>().<span class='ident'>unwrap</span>();
-		<span class='ident'>create_file_with_contents</span>(<span class='ident'>filename_import</span>, <span class='string'>&quot;&quot;</span>);
-		<span class='kw'>let</span> <span class='ident'>salt_position_import</span> <span class='op'>=</span> <span class='number'>0</span>;
-		<span class='kw'>let</span> <span class='ident'>password_import</span> <span class='op'>=</span> <span class='string'>&quot;333&quot;</span>.<span class='ident'>to_string</span>();
+    <span class='attribute'>#[<span class='ident'>test</span>]</span>
+    <span class='kw'>fn</span> <span class='ident'>create_encrypt_and_import</span>() {
+        <span class='comment'>// Create the file to import</span>
+        <span class='kw'>let</span> <span class='ident'>import_filename</span> <span class='op'>=</span> <span class='string'>&quot;to_import.toml&quot;</span>;
+        <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>default_rustkeylock_dir_path_buf</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>default_rustkeylock_location</span>();
+        <span class='ident'>default_rustkeylock_dir_path_buf</span>.<span class='ident'>push</span>(<span class='ident'>import_filename</span>);
+        <span class='kw'>let</span> <span class='ident'>filename_import</span> <span class='op'>=</span> <span class='ident'>default_rustkeylock_dir_path_buf</span>.<span class='ident'>to_str</span>().<span class='ident'>unwrap</span>();
+        <span class='ident'>create_file_with_contents</span>(<span class='ident'>filename_import</span>, <span class='string'>&quot;&quot;</span>);
+        <span class='kw'>let</span> <span class='ident'>salt_position_import</span> <span class='op'>=</span> <span class='number'>0</span>;
+        <span class='kw'>let</span> <span class='ident'>password_import</span> <span class='op'>=</span> <span class='string'>&quot;333&quot;</span>.<span class='ident'>to_string</span>();
 
-		<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>entries_import</span> <span class='op'>=</span> <span class='ident'>Vec</span>::<span class='ident'>new</span>();
-	    <span class='ident'>entries_import</span>.<span class='ident'>push</span>(<span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='string'>&quot;1_import&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;1_import&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;1_import&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;1_import&quot;</span>.<span class='ident'>to_string</span>()));
-		<span class='kw'>let</span> <span class='ident'>tmp_cryptor_import</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>create_bcryptor</span>(<span class='ident'>filename_import</span>, <span class='ident'>password_import</span>.<span class='ident'>clone</span>(), <span class='ident'>salt_position_import</span>, <span class='bool-val'>false</span>, <span class='bool-val'>false</span>);
-		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='kw'>super</span>::<span class='ident'>save</span>(<span class='kw-2'>&amp;</span><span class='ident'>entries_import</span>, <span class='ident'>filename_import</span>, <span class='kw-2'>&amp;</span><span class='ident'>tmp_cryptor_import</span>, <span class='bool-val'>false</span>).<span class='ident'>is_ok</span>());
+        <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>entries_import</span> <span class='op'>=</span> <span class='ident'>Vec</span>::<span class='ident'>new</span>();
+        <span class='ident'>entries_import</span>.<span class='ident'>push</span>(<span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='string'>&quot;1_import&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;1_import&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;1_import&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;1_import&quot;</span>.<span class='ident'>to_string</span>()));
+        <span class='kw'>let</span> <span class='ident'>tmp_cryptor_import</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>create_bcryptor</span>(<span class='ident'>filename_import</span>, <span class='ident'>password_import</span>.<span class='ident'>clone</span>(), <span class='ident'>salt_position_import</span>, <span class='bool-val'>false</span>, <span class='bool-val'>false</span>);
+        <span class='macro'>assert</span><span class='macro'>!</span>(<span class='kw'>super</span>::<span class='ident'>save</span>(<span class='kw-2'>&amp;</span><span class='ident'>entries_import</span>, <span class='ident'>filename_import</span>, <span class='kw-2'>&amp;</span><span class='ident'>tmp_cryptor_import</span>, <span class='bool-val'>false</span>).<span class='ident'>is_ok</span>());
 
-		<span class='comment'>// Create the normal file</span>
-		<span class='kw'>let</span> <span class='ident'>filename</span> <span class='op'>=</span> <span class='string'>&quot;create_encrypt_and_import.toml&quot;</span>;
-		<span class='kw'>let</span> <span class='ident'>salt_position</span> <span class='op'>=</span> <span class='number'>0</span>;
-		<span class='kw'>let</span> <span class='ident'>password</span> <span class='op'>=</span> <span class='string'>&quot;123&quot;</span>.<span class='ident'>to_string</span>();
+        <span class='comment'>// Create the normal file</span>
+        <span class='kw'>let</span> <span class='ident'>filename</span> <span class='op'>=</span> <span class='string'>&quot;create_encrypt_and_import.toml&quot;</span>;
+        <span class='kw'>let</span> <span class='ident'>salt_position</span> <span class='op'>=</span> <span class='number'>0</span>;
+        <span class='kw'>let</span> <span class='ident'>password</span> <span class='op'>=</span> <span class='string'>&quot;123&quot;</span>.<span class='ident'>to_string</span>();
 
-		<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>entries</span> <span class='op'>=</span> <span class='ident'>Vec</span>::<span class='ident'>new</span>();
-		<span class='ident'>entries</span>.<span class='ident'>push</span>(<span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='string'>&quot;1&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;1&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;1&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;1&quot;</span>.<span class='ident'>to_string</span>()));
-		<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>cryptor</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>create_bcryptor</span>(<span class='ident'>filename</span>, <span class='ident'>password</span>.<span class='ident'>clone</span>(), <span class='ident'>salt_position</span>, <span class='bool-val'>false</span>, <span class='bool-val'>true</span>);
-		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='kw'>super</span>::<span class='ident'>save</span>(<span class='kw-2'>&amp;</span><span class='ident'>entries</span>, <span class='ident'>filename</span>, <span class='kw-2'>&amp;</span><span class='ident'>cryptor</span>, <span class='bool-val'>true</span>).<span class='ident'>is_ok</span>());
+        <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>entries</span> <span class='op'>=</span> <span class='ident'>Vec</span>::<span class='ident'>new</span>();
+        <span class='ident'>entries</span>.<span class='ident'>push</span>(<span class='ident'>Entry</span>::<span class='ident'>new</span>(<span class='string'>&quot;1&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;1&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;1&quot;</span>.<span class='ident'>to_string</span>(), <span class='string'>&quot;1&quot;</span>.<span class='ident'>to_string</span>()));
+        <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>cryptor</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>create_bcryptor</span>(<span class='ident'>filename</span>, <span class='ident'>password</span>.<span class='ident'>clone</span>(), <span class='ident'>salt_position</span>, <span class='bool-val'>false</span>, <span class='bool-val'>true</span>);
+        <span class='macro'>assert</span><span class='macro'>!</span>(<span class='kw'>super</span>::<span class='ident'>save</span>(<span class='kw-2'>&amp;</span><span class='ident'>entries</span>, <span class='ident'>filename</span>, <span class='kw-2'>&amp;</span><span class='ident'>cryptor</span>, <span class='bool-val'>true</span>).<span class='ident'>is_ok</span>());
         <span class='ident'>cryptor</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>create_bcryptor</span>(<span class='ident'>filename</span>, <span class='ident'>password</span>.<span class='ident'>clone</span>(), <span class='ident'>salt_position</span>, <span class='bool-val'>false</span>, <span class='bool-val'>true</span>);
         <span class='macro'>assert</span><span class='macro'>!</span>(<span class='kw'>super</span>::<span class='ident'>load</span>(<span class='ident'>filename</span>, <span class='kw-2'>&amp;</span><span class='ident'>cryptor</span>, <span class='bool-val'>true</span>).<span class='ident'>is_ok</span>());
 
-		<span class='comment'>// Import the file by creating a new cryptor</span>
-		<span class='kw'>let</span> <span class='ident'>cryptor_import</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>create_bcryptor</span>(<span class='ident'>filename_import</span>, <span class='ident'>password_import</span>.<span class='ident'>clone</span>(), <span class='ident'>salt_position_import</span>, <span class='bool-val'>false</span>, <span class='bool-val'>false</span>);
-		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='kw'>super</span>::<span class='ident'>load</span>(<span class='ident'>filename_import</span>, <span class='kw-2'>&amp;</span><span class='ident'>cryptor_import</span>, <span class='bool-val'>false</span>).<span class='ident'>is_ok</span>());
+        <span class='comment'>// Import the file by creating a new cryptor</span>
+        <span class='kw'>let</span> <span class='ident'>cryptor_import</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>create_bcryptor</span>(<span class='ident'>filename_import</span>, <span class='ident'>password_import</span>.<span class='ident'>clone</span>(), <span class='ident'>salt_position_import</span>, <span class='bool-val'>false</span>, <span class='bool-val'>false</span>);
+        <span class='macro'>assert</span><span class='macro'>!</span>(<span class='kw'>super</span>::<span class='ident'>load</span>(<span class='ident'>filename_import</span>, <span class='kw-2'>&amp;</span><span class='ident'>cryptor_import</span>, <span class='bool-val'>false</span>).<span class='ident'>is_ok</span>());
 
-		<span class='ident'>delete_file</span>(<span class='ident'>filename</span>);
-		<span class='ident'>delete_file</span>(<span class='ident'>import_filename</span>);
-	}
+        <span class='ident'>delete_file</span>(<span class='ident'>filename</span>);
+        <span class='ident'>delete_file</span>(<span class='ident'>import_filename</span>);
+    }
 
-	<span class='attribute'>#[<span class='ident'>test</span>]</span>
-	<span class='kw'>fn</span> <span class='ident'>create_encrypt_and_then_decrypt_no_data</span>() {
-		<span class='kw'>let</span> <span class='ident'>filename</span> <span class='op'>=</span> <span class='string'>&quot;create_encrypt_and_then_decrypt_no_real_data.toml&quot;</span>;
+    <span class='attribute'>#[<span class='ident'>test</span>]</span>
+    <span class='kw'>fn</span> <span class='ident'>create_encrypt_and_then_decrypt_no_data</span>() {
+        <span class='kw'>let</span> <span class='ident'>filename</span> <span class='op'>=</span> <span class='string'>&quot;create_encrypt_and_then_decrypt_no_real_data.toml&quot;</span>;
 
-		<span class='kw'>let</span> <span class='ident'>salt_position</span> <span class='op'>=</span> <span class='number'>33</span>;
-		<span class='kw'>let</span> <span class='ident'>password</span> <span class='op'>=</span> <span class='string'>&quot;123&quot;</span>.<span class='ident'>to_string</span>();
+        <span class='kw'>let</span> <span class='ident'>salt_position</span> <span class='op'>=</span> <span class='number'>33</span>;
+        <span class='kw'>let</span> <span class='ident'>password</span> <span class='op'>=</span> <span class='string'>&quot;123&quot;</span>.<span class='ident'>to_string</span>();
 
-		<span class='kw'>let</span> <span class='ident'>entries</span> <span class='op'>=</span> <span class='ident'>Vec</span>::<span class='ident'>new</span>();
+        <span class='kw'>let</span> <span class='ident'>entries</span> <span class='op'>=</span> <span class='ident'>Vec</span>::<span class='ident'>new</span>();
 
-		<span class='kw'>let</span> <span class='ident'>cryptor</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>create_bcryptor</span>(<span class='ident'>filename</span>, <span class='ident'>password</span>.<span class='ident'>clone</span>(), <span class='ident'>salt_position</span>, <span class='bool-val'>false</span>, <span class='bool-val'>true</span>);
+        <span class='kw'>let</span> <span class='ident'>cryptor</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>create_bcryptor</span>(<span class='ident'>filename</span>, <span class='ident'>password</span>.<span class='ident'>clone</span>(), <span class='ident'>salt_position</span>, <span class='bool-val'>false</span>, <span class='bool-val'>true</span>);
         <span class='macro'>assert</span><span class='macro'>!</span>(<span class='kw'>super</span>::<span class='ident'>save</span>(<span class='kw-2'>&amp;</span><span class='ident'>entries</span>, <span class='ident'>filename</span>, <span class='kw-2'>&amp;</span><span class='ident'>cryptor</span>, <span class='bool-val'>true</span>).<span class='ident'>is_ok</span>());
 
         <span class='kw'>let</span> <span class='ident'>m</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>load</span>(<span class='ident'>filename</span>, <span class='kw-2'>&amp;</span><span class='ident'>cryptor</span>, <span class='bool-val'>true</span>);
         <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>entries</span> <span class='op'>==</span> <span class='ident'>m</span>.<span class='ident'>unwrap</span>());
         <span class='macro'>assert</span><span class='macro'>!</span>(<span class='kw'>super</span>::<span class='ident'>save</span>(<span class='kw-2'>&amp;</span><span class='ident'>entries</span>, <span class='ident'>filename</span>, <span class='kw-2'>&amp;</span><span class='ident'>cryptor</span>, <span class='bool-val'>true</span>).<span class='ident'>is_ok</span>());
 
-		<span class='ident'>delete_file</span>(<span class='ident'>filename</span>);
-	}
+        <span class='ident'>delete_file</span>(<span class='ident'>filename</span>);
+    }
 
-	<span class='attribute'>#[<span class='ident'>test</span>]</span>
-	<span class='kw'>fn</span> <span class='ident'>toml_path</span>() {
-		<span class='kw'>let</span> <span class='ident'>filename</span> <span class='op'>=</span> <span class='string'>&quot;/opt/data/my_toml.toml&quot;</span>;
-		<span class='kw'>let</span> <span class='ident'>pb</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>toml_path</span>(<span class='ident'>filename</span>);
-		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>pb</span>.<span class='ident'>to_str</span>().<span class='ident'>is_some</span>());
-		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>pb</span>.<span class='ident'>to_str</span>().<span class='ident'>unwrap</span>() <span class='op'>==</span> <span class='ident'>filename</span>);
-	}
+    <span class='attribute'>#[<span class='ident'>test</span>]</span>
+    <span class='kw'>fn</span> <span class='ident'>toml_path</span>() {
+        <span class='kw'>let</span> <span class='ident'>filename</span> <span class='op'>=</span> <span class='string'>&quot;/opt/data/my_toml.toml&quot;</span>;
+        <span class='kw'>let</span> <span class='ident'>pb</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>toml_path</span>(<span class='ident'>filename</span>);
+        <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>pb</span>.<span class='ident'>to_str</span>().<span class='ident'>is_some</span>());
+        <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>pb</span>.<span class='ident'>to_str</span>().<span class='ident'>unwrap</span>() <span class='op'>==</span> <span class='ident'>filename</span>);
+    }
 
     <span class='kw'>fn</span> <span class='ident'>create_file_with_toml_contents</span>(<span class='ident'>name</span>: <span class='kw-2'>&amp;</span><span class='ident'>str</span>) {
         <span class='comment'>// Create the file with some toml contents</span>
@@ -1113,32 +1150,32 @@
 			pass = &quot;123&quot;
 			desc = &quot;some description&quot;
         &quot;#</span>;
-		<span class='ident'>create_file_with_contents</span>(<span class='ident'>name</span>, <span class='ident'>contents</span>);
+        <span class='ident'>create_file_with_contents</span>(<span class='ident'>name</span>, <span class='ident'>contents</span>);
     }
 
-	<span class='kw'>fn</span> <span class='ident'>create_props_file_with_toml_contents</span>(<span class='ident'>name</span>: <span class='kw-2'>&amp;</span><span class='ident'>str</span>) {
+    <span class='kw'>fn</span> <span class='ident'>create_props_file_with_toml_contents</span>(<span class='ident'>name</span>: <span class='kw-2'>&amp;</span><span class='ident'>str</span>) {
         <span class='comment'>// Create the file with some toml contents</span>
-        <span class='kw'>let</span> <span class='ident'>contents</span> <span class='op'>=</span> <span class='string'>r#&quot;salt = &quot;alas&quot;&quot;#</span>;
-		<span class='ident'>create_file_with_contents</span>(<span class='ident'>name</span>, <span class='ident'>contents</span>);
+        <span class='kw'>let</span> <span class='ident'>contents</span> <span class='op'>=</span> <span class='string'>r#&quot;idle_timeout_seconds = 33&quot;#</span>;
+        <span class='ident'>create_file_with_contents</span>(<span class='ident'>name</span>, <span class='ident'>contents</span>);
     }
 
-	<span class='kw'>fn</span> <span class='ident'>create_file_with_contents</span>(<span class='ident'>filename</span>: <span class='kw-2'>&amp;</span><span class='ident'>str</span>, <span class='ident'>contents</span>: <span class='kw-2'>&amp;</span><span class='ident'>str</span>) {
-		<span class='kw'>let</span> <span class='ident'>default_rustkeylock_dir_path_buf</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>default_rustkeylock_location</span>();
-		<span class='kw'>let</span> <span class='ident'>default_rustkeylock_dir</span> <span class='op'>=</span> <span class='ident'>default_rustkeylock_dir_path_buf</span>.<span class='ident'>to_str</span>().<span class='ident'>unwrap</span>();
-		<span class='kw'>let</span> <span class='ident'>creation_result</span> <span class='op'>=</span> <span class='ident'>fs</span>::<span class='ident'>create_dir_all</span>(<span class='ident'>default_rustkeylock_dir</span>).<span class='ident'>map</span>(<span class='op'>|</span>_<span class='op'>|</span> {
-			<span class='kw'>let</span> <span class='ident'>path_buf</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>default_toml_path</span>(<span class='ident'>filename</span>);
-	        <span class='kw'>let</span> <span class='ident'>path</span> <span class='op'>=</span> <span class='ident'>path_buf</span>.<span class='ident'>to_str</span>().<span class='ident'>unwrap</span>();
-			<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>file</span> <span class='op'>=</span> <span class='ident'>File</span>::<span class='ident'>create</span>(<span class='ident'>path</span>).<span class='ident'>unwrap</span>();
-	        <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>file</span>.<span class='ident'>write_all</span>(<span class='ident'>contents</span>.<span class='ident'>as_bytes</span>()).<span class='ident'>is_ok</span>());
-		});
+    <span class='kw'>fn</span> <span class='ident'>create_file_with_contents</span>(<span class='ident'>filename</span>: <span class='kw-2'>&amp;</span><span class='ident'>str</span>, <span class='ident'>contents</span>: <span class='kw-2'>&amp;</span><span class='ident'>str</span>) {
+        <span class='kw'>let</span> <span class='ident'>default_rustkeylock_dir_path_buf</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>default_rustkeylock_location</span>();
+        <span class='kw'>let</span> <span class='ident'>default_rustkeylock_dir</span> <span class='op'>=</span> <span class='ident'>default_rustkeylock_dir_path_buf</span>.<span class='ident'>to_str</span>().<span class='ident'>unwrap</span>();
+        <span class='kw'>let</span> <span class='ident'>creation_result</span> <span class='op'>=</span> <span class='ident'>fs</span>::<span class='ident'>create_dir_all</span>(<span class='ident'>default_rustkeylock_dir</span>).<span class='ident'>map</span>(<span class='op'>|</span>_<span class='op'>|</span> {
+            <span class='kw'>let</span> <span class='ident'>path_buf</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>default_toml_path</span>(<span class='ident'>filename</span>);
+            <span class='kw'>let</span> <span class='ident'>path</span> <span class='op'>=</span> <span class='ident'>path_buf</span>.<span class='ident'>to_str</span>().<span class='ident'>unwrap</span>();
+            <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>file</span> <span class='op'>=</span> <span class='ident'>File</span>::<span class='ident'>create</span>(<span class='ident'>path</span>).<span class='ident'>unwrap</span>();
+            <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>file</span>.<span class='ident'>write_all</span>(<span class='ident'>contents</span>.<span class='ident'>as_bytes</span>()).<span class='ident'>is_ok</span>());
+        });
         <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>creation_result</span>.<span class='ident'>is_ok</span>());
-	}
+    }
 
-	<span class='kw'>fn</span> <span class='ident'>delete_file</span>(<span class='ident'>name</span>: <span class='kw-2'>&amp;</span><span class='ident'>str</span>) {
-		<span class='kw'>let</span> <span class='ident'>path_buf</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>default_toml_path</span>(<span class='ident'>name</span>);
-	    <span class='kw'>let</span> <span class='ident'>path</span> <span class='op'>=</span> <span class='ident'>path_buf</span>.<span class='ident'>to_str</span>().<span class='ident'>unwrap</span>();
-		<span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>fs</span>::<span class='ident'>remove_file</span>(<span class='ident'>path</span>).<span class='ident'>is_ok</span>());
-	}
+    <span class='kw'>fn</span> <span class='ident'>delete_file</span>(<span class='ident'>name</span>: <span class='kw-2'>&amp;</span><span class='ident'>str</span>) {
+        <span class='kw'>let</span> <span class='ident'>path_buf</span> <span class='op'>=</span> <span class='kw'>super</span>::<span class='ident'>default_toml_path</span>(<span class='ident'>name</span>);
+        <span class='kw'>let</span> <span class='ident'>path</span> <span class='op'>=</span> <span class='ident'>path_buf</span>.<span class='ident'>to_str</span>().<span class='ident'>unwrap</span>();
+        <span class='macro'>assert</span><span class='macro'>!</span>(<span class='ident'>fs</span>::<span class='ident'>remove_file</span>(<span class='ident'>path</span>).<span class='ident'>is_ok</span>());
+    }
 
 }
 </pre>

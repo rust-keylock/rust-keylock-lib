@@ -4,11 +4,12 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="generator" content="rustdoc">
-    <meta name="description" content="Source to the Rust file `/home/dimitris/.cargo/git/checkouts/rust-crypto-0031e8dd1c7c6e84/a7ed917/src/aes_gcm.rs`.">
+    <meta name="description" content="Source to the Rust file `/home/dimitris/.cargo/registry/src/github.com-1ecc6299db9ec823/rust-crypto-0.2.36/src/aes_gcm.rs`.">
     <meta name="keywords" content="rust, rustlang, rust-lang">
 
     <title>aes_gcm.rs.html -- source</title>
 
+    <link rel="stylesheet" type="text/css" href="../../normalize.css">
     <link rel="stylesheet" type="text/css" href="../../rustdoc.css">
     <link rel="stylesheet" type="text/css" href="../../main.css">
     
@@ -534,7 +535,7 @@
     <span class='kw'>use</span> <span class='ident'>aead</span>::{<span class='ident'>AeadEncryptor</span>, <span class='ident'>AeadDecryptor</span>};
 
     <span class='attribute'>#[<span class='ident'>bench</span>]</span>
-    <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>gsm_10</span>(<span class='ident'>bh</span>: <span class='kw-2'>&amp;</span> <span class='kw-2'>mut</span> <span class='ident'>Bencher</span>) {
+    <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>gsm_10</span>(<span class='ident'>bh</span>: <span class='op'>&amp;</span> <span class='kw-2'>mut</span> <span class='ident'>Bencher</span>) {
     	<span class='kw'>let</span> <span class='ident'>input</span> <span class='op'>=</span> [<span class='number'>1u8</span>; <span class='number'>10</span>];
     	<span class='kw'>let</span> <span class='ident'>aad</span> <span class='op'>=</span> [<span class='number'>3u8</span>; <span class='number'>10</span>];
     	<span class='ident'>bh</span>.<span class='ident'>iter</span>( <span class='op'>||</span> {
@@ -553,7 +554,7 @@
         
 
     <span class='attribute'>#[<span class='ident'>bench</span>]</span>
-    <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>gsm_1k</span>(<span class='ident'>bh</span>: <span class='kw-2'>&amp;</span> <span class='kw-2'>mut</span> <span class='ident'>Bencher</span>) {
+    <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>gsm_1k</span>(<span class='ident'>bh</span>: <span class='op'>&amp;</span> <span class='kw-2'>mut</span> <span class='ident'>Bencher</span>) {
     	<span class='kw'>let</span> <span class='ident'>input</span> <span class='op'>=</span> [<span class='number'>1u8</span>; <span class='number'>1024</span>];
     	<span class='kw'>let</span> <span class='ident'>aad</span> <span class='op'>=</span> [<span class='number'>3u8</span>; <span class='number'>1024</span>];
     	<span class='ident'>bh</span>.<span class='ident'>iter</span>( <span class='op'>||</span> {
@@ -572,7 +573,7 @@
     }
 
     <span class='attribute'>#[<span class='ident'>bench</span>]</span>
-    <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>gsm_64k</span>(<span class='ident'>bh</span>: <span class='kw-2'>&amp;</span> <span class='kw-2'>mut</span> <span class='ident'>Bencher</span>) {
+    <span class='kw'>pub</span> <span class='kw'>fn</span> <span class='ident'>gsm_64k</span>(<span class='ident'>bh</span>: <span class='op'>&amp;</span> <span class='kw-2'>mut</span> <span class='ident'>Bencher</span>) {
     	<span class='kw'>let</span> <span class='ident'>input</span> <span class='op'>=</span> [<span class='number'>1u8</span>; <span class='number'>65536</span>];
     	<span class='kw'>let</span> <span class='ident'>aad</span> <span class='op'>=</span> [<span class='number'>3u8</span>; <span class='number'>65536</span>];
     	  <span class='ident'>bh</span>.<span class='ident'>iter</span>( <span class='op'>||</span> {

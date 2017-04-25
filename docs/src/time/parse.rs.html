@@ -9,6 +9,7 @@
 
     <title>parse.rs.html -- source</title>
 
+    <link rel="stylesheet" type="text/css" href="../../normalize.css">
     <link rel="stylesheet" type="text/css" href="../../rustdoc.css">
     <link rel="stylesheet" type="text/css" href="../../main.css">
     
@@ -630,7 +631,7 @@
         <span class='string'>&#39;s&#39;</span> <span class='op'>=&gt;</span> {
             <span class='kw'>match</span> <span class='ident'>match_digits_i64</span>(<span class='ident'>s</span>, <span class='number'>1</span>, <span class='number'>18</span>, <span class='bool-val'>false</span>) {
                 <span class='prelude-val'>Some</span>(<span class='ident'>v</span>) <span class='op'>=&gt;</span> {
-                    <span class='op'>*</span><span class='ident'>tm</span> <span class='op'>=</span> <span class='ident'>at_utc</span>(<span class='ident'>Timespec</span>::<span class='ident'>new</span>(<span class='ident'>v</span>, <span class='number'>0</span>));
+                    <span class='kw-2'>*</span><span class='ident'>tm</span> <span class='op'>=</span> <span class='ident'>at_utc</span>(<span class='ident'>Timespec</span>::<span class='ident'>new</span>(<span class='ident'>v</span>, <span class='number'>0</span>));
                     <span class='prelude-val'>Ok</span>(())
                 },
                 <span class='prelude-val'>None</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Err</span>(<span class='ident'>ParseError</span>::<span class='ident'>InvalidSecondsSinceEpoch</span>)
@@ -692,11 +693,11 @@
                 <span class='comment'>// strptime we ignore the timezone.</span>
                 <span class='kw'>for</span> (<span class='ident'>i</span>, <span class='ident'>ch</span>) <span class='kw'>in</span> <span class='ident'>s</span>.<span class='ident'>char_indices</span>() {
                     <span class='kw'>if</span> <span class='ident'>ch</span> <span class='op'>==</span> <span class='string'>&#39; &#39;</span> {
-                        <span class='op'>*</span><span class='ident'>s</span> <span class='op'>=</span> <span class='kw-2'>&amp;</span><span class='ident'>s</span>[<span class='ident'>i</span>..];
+                        <span class='kw-2'>*</span><span class='ident'>s</span> <span class='op'>=</span> <span class='kw-2'>&amp;</span><span class='ident'>s</span>[<span class='ident'>i</span>..];
                         <span class='kw'>return</span> <span class='prelude-val'>Ok</span>(())
                     }
                 }
-                <span class='op'>*</span><span class='ident'>s</span> <span class='op'>=</span> <span class='string'>&quot;&quot;</span>;
+                <span class='kw-2'>*</span><span class='ident'>s</span> <span class='op'>=</span> <span class='string'>&quot;&quot;</span>;
                 <span class='prelude-val'>Ok</span>(())
             }
         }
@@ -738,7 +739,7 @@
 
 <span class='kw'>fn</span> <span class='ident'>match_str</span>(<span class='ident'>s</span>: <span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='kw-2'>&amp;</span><span class='ident'>str</span>, <span class='ident'>needle</span>: <span class='kw-2'>&amp;</span><span class='ident'>str</span>) <span class='op'>-&gt;</span> <span class='ident'>bool</span> {
     <span class='kw'>if</span> <span class='ident'>s</span>.<span class='ident'>starts_with</span>(<span class='ident'>needle</span>) {
-        <span class='op'>*</span><span class='ident'>s</span> <span class='op'>=</span> <span class='kw-2'>&amp;</span><span class='ident'>s</span>[<span class='ident'>needle</span>.<span class='ident'>len</span>()..];
+        <span class='kw-2'>*</span><span class='ident'>s</span> <span class='op'>=</span> <span class='kw-2'>&amp;</span><span class='ident'>s</span>[<span class='ident'>needle</span>.<span class='ident'>len</span>()..];
         <span class='bool-val'>true</span>
     } <span class='kw'>else</span> {
         <span class='bool-val'>false</span>
@@ -779,7 +780,7 @@
     }
 
     <span class='kw'>if</span> <span class='ident'>n</span> <span class='op'>&gt;=</span> <span class='ident'>min_digits</span> <span class='op'>&amp;&amp;</span> <span class='ident'>n</span> <span class='op'>&lt;=</span> <span class='ident'>max_digits</span> {
-        <span class='op'>*</span><span class='ident'>ss</span> <span class='op'>=</span> <span class='kw-2'>&amp;</span><span class='ident'>ss</span>[<span class='ident'>n</span>..];
+        <span class='kw-2'>*</span><span class='ident'>ss</span> <span class='op'>=</span> <span class='kw-2'>&amp;</span><span class='ident'>ss</span>[<span class='ident'>n</span>..];
         <span class='prelude-val'>Some</span>(<span class='ident'>value</span>)
     } <span class='kw'>else</span> {
         <span class='prelude-val'>None</span>
@@ -791,9 +792,9 @@
     <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>multiplier</span> <span class='op'>=</span> <span class='ident'>NSEC_PER_SEC</span> <span class='op'>/</span> <span class='number'>10</span>;
 
     <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>chars</span> <span class='op'>=</span> <span class='ident'>ss</span>.<span class='ident'>char_indices</span>();
-    <span class='kw'>let</span> <span class='ident'>orig</span> <span class='op'>=</span> <span class='op'>*</span><span class='ident'>ss</span>;
+    <span class='kw'>let</span> <span class='ident'>orig</span> <span class='op'>=</span> <span class='kw-2'>*</span><span class='ident'>ss</span>;
     <span class='kw'>for</span> (<span class='ident'>i</span>, <span class='ident'>ch</span>) <span class='kw'>in</span> <span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>chars</span> {
-        <span class='op'>*</span><span class='ident'>ss</span> <span class='op'>=</span> <span class='kw-2'>&amp;</span><span class='ident'>orig</span>[<span class='ident'>i</span>..];
+        <span class='kw-2'>*</span><span class='ident'>ss</span> <span class='op'>=</span> <span class='kw-2'>&amp;</span><span class='ident'>orig</span>[<span class='ident'>i</span>..];
         <span class='kw'>match</span> <span class='ident'>ch</span> {
             <span class='string'>&#39;0&#39;</span> ... <span class='string'>&#39;9&#39;</span> <span class='op'>=&gt;</span> {
                 <span class='comment'>// This will drop digits after the nanoseconds place</span>
@@ -811,10 +812,10 @@
 <span class='kw'>fn</span> <span class='ident'>match_digits_in_range</span>(<span class='ident'>ss</span>: <span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='kw-2'>&amp;</span><span class='ident'>str</span>,
                          <span class='ident'>min_digits</span> : <span class='ident'>usize</span>, <span class='ident'>max_digits</span> : <span class='ident'>usize</span>,
                          <span class='ident'>ws</span>: <span class='ident'>bool</span>, <span class='ident'>min</span>: <span class='ident'>i32</span>, <span class='ident'>max</span>: <span class='ident'>i32</span>) <span class='op'>-&gt;</span> <span class='prelude-ty'>Option</span><span class='op'>&lt;</span><span class='ident'>i32</span><span class='op'>&gt;</span> {
-    <span class='kw'>let</span> <span class='ident'>before</span> <span class='op'>=</span> <span class='op'>*</span><span class='ident'>ss</span>;
+    <span class='kw'>let</span> <span class='ident'>before</span> <span class='op'>=</span> <span class='kw-2'>*</span><span class='ident'>ss</span>;
     <span class='kw'>match</span> <span class='ident'>match_digits</span>(<span class='ident'>ss</span>, <span class='ident'>min_digits</span>, <span class='ident'>max_digits</span>, <span class='ident'>ws</span>) {
         <span class='prelude-val'>Some</span>(<span class='ident'>val</span>) <span class='kw'>if</span> <span class='ident'>val</span> <span class='op'>&gt;=</span> <span class='ident'>min</span> <span class='op'>&amp;&amp;</span> <span class='ident'>val</span> <span class='op'>&lt;=</span> <span class='ident'>max</span> <span class='op'>=&gt;</span> <span class='prelude-val'>Some</span>(<span class='ident'>val</span>),
-        _ <span class='op'>=&gt;</span> { <span class='op'>*</span><span class='ident'>ss</span> <span class='op'>=</span> <span class='ident'>before</span>; <span class='prelude-val'>None</span> }
+        _ <span class='op'>=&gt;</span> { <span class='kw-2'>*</span><span class='ident'>ss</span> <span class='op'>=</span> <span class='ident'>before</span>; <span class='prelude-val'>None</span> }
     }
 }
 
@@ -822,7 +823,7 @@
     <span class='kw'>match</span> <span class='ident'>s</span>.<span class='ident'>char_indices</span>().<span class='ident'>next</span>() {
         <span class='prelude-val'>Some</span>((<span class='ident'>i</span>, <span class='ident'>c2</span>)) <span class='op'>=&gt;</span> {
             <span class='kw'>if</span> <span class='ident'>c</span> <span class='op'>==</span> <span class='ident'>c2</span> {
-                <span class='op'>*</span><span class='ident'>s</span> <span class='op'>=</span> <span class='kw-2'>&amp;</span><span class='ident'>s</span>[<span class='ident'>i</span> <span class='op'>+</span> <span class='ident'>c2</span>.<span class='ident'>len_utf8</span>()..];
+                <span class='kw-2'>*</span><span class='ident'>s</span> <span class='op'>=</span> <span class='kw-2'>&amp;</span><span class='ident'>s</span>[<span class='ident'>i</span> <span class='op'>+</span> <span class='ident'>c2</span>.<span class='ident'>len_utf8</span>()..];
                 <span class='prelude-val'>Ok</span>(())
             } <span class='kw'>else</span> {
                 <span class='prelude-val'>Err</span>(<span class='ident'>ParseError</span>::<span class='ident'>UnexpectedCharacter</span>(<span class='ident'>c</span>, <span class='ident'>c2</span>))

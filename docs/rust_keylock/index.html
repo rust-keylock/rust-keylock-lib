@@ -9,6 +9,7 @@
 
     <title>rust_keylock - Rust</title>
 
+    <link rel="stylesheet" type="text/css" href="../normalize.css">
     <link rel="stylesheet" type="text/css" href="../rustdoc.css">
     <link rel="stylesheet" type="text/css" href="../main.css">
     
@@ -47,7 +48,7 @@
                    <a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">
                        [<span class='inner'>&#x2212;</span>]
                    </a>
-               </span><a class='srclink' href='../src/rust_keylock/lib.rs.html#1-991' title='goto source code'>[src]</a></span></h1>
+               </span><a class='srclink' href='../src/rust_keylock/lib.rs.html#1-1056' title='goto source code'>[src]</a></span></h1>
 <div class='docblock'>
 <h1 id='the-rust-keylock-library' class='section-header'><a href='#the-rust-keylock-library'>The <em>rust-keylock</em> library</a></h1>
 <p>Executes the logic of the <em>rust-keylock</em>.</p>
@@ -72,14 +73,11 @@ The position of the <em>salt</em> is actually defined by the user. Upon <em>rust
 
 <p>Having the salt inbetween the actual encrypted data gives two obvious benefits:</p>
 
-<ol>
-<li><p>Makes the encrypted file portable</p>
+<h3 id='makes-the-encrypted-file-portable' class='section-header'><a href='#makes-the-encrypted-file-portable'>Makes the encrypted file portable</a></h3>
+<p>All the information that is needed for encryption/decryption is in the file itself. Nothing additional is needed. Therefore, the encrypted file can just be copied in some location to be backed-up, or even be synchronized in other devices and be used there as well.</p>
 
-<p>All the information that is needed for encryption/decryption is in the file itself. Nothing additional is needed. Therefore, the encrypted file can just be copied in some location to be backed-up, or even be synchronized in other devices and be used there as well.</p></li>
-<li><p>Increases the security of the encryption</p>
-
-<p>The actual data bytes are &quot;interrupted&quot; by the salt and this potentially makes an adversary&#39;s job more difficult; more difficult to infer things about the data contents or the encryption key.</p></li>
-</ol>
+<h3 id='increases-the-security-of-the-encryption' class='section-header'><a href='#increases-the-security-of-the-encryption'>Increases the security of the encryption</a></h3>
+<p>The actual data bytes are &quot;interrupted&quot; by the salt and this potentially makes an adversary&#39;s job more difficult; more difficult to infer things about the data contents or the encryption key.</p>
 
 <h2 id='a-concrete-example' class='section-header'><a href='#a-concrete-example'>A concrete example</a></h2>
 <p>Let&#39;s assume that the user has set his <em>master password</em> and the number <strong>3</strong> as the <em>additional number</em> to the password.</p>
@@ -125,7 +123,8 @@ Let the <em>iv</em> be <code>0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x0
                            <td><a class='struct' href='struct.Props.html'
                                   title='rust_keylock::Props'>Props</a></td>
                            <td class='docblock-short'>
-                                <p>A struct that allows storing general configuration values.</p>
+                                <p>A struct that allows storing general configuration values.
+The configuration values are stored in plaintext.</p>
                            </td>
                        </tr>
                        <tr class=' module-item'>
