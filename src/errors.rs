@@ -4,7 +4,7 @@ use std::fmt;
 use crypto::symmetriccipher::SymmetricCipherError;
 use std::string::FromUtf8Error;
 use std::io;
-use rustc_serialize::base64::FromBase64Error;
+use base64::DecodeError;
 use toml;
 
 pub type Result<T> = result::Result<T, RustKeylockError>;
@@ -57,8 +57,8 @@ impl From<io::Error> for RustKeylockError {
     }
 }
 
-impl From<FromBase64Error> for RustKeylockError {
-    fn from(err: FromBase64Error) -> RustKeylockError {
+impl From<DecodeError> for RustKeylockError {
+    fn from(err: DecodeError) -> RustKeylockError {
         RustKeylockError::ParseError(format!("{:?}", err))
     }
 }

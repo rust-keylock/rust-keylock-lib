@@ -58,7 +58,7 @@
 extern crate log;
 extern crate toml;
 extern crate crypto;
-extern crate rustc_serialize;
+extern crate base64;
 extern crate rand;
 extern crate secstr;
 

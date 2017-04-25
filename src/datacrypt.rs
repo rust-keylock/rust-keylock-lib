@@ -8,7 +8,7 @@ use crypto::aes::KeySize;
 use crypto::buffer::{ReadBuffer, WriteBuffer, BufferResult};
 use crypto::symmetriccipher::{Encryptor, Decryptor, SynchronousStreamCipher};
 use super::errors::RustKeylockError;
-use rustc_serialize::base64::{FromBase64, ToBase64, STANDARD};
+use base64;
 use secstr::SecStr;
 use std::borrow::Borrow;
 
@@ -191,12 +191,12 @@ impl EntryPasswordCryptor {
     /// Gets a String input and returns it encrypted and Base64-encoded
     pub fn encrypt_str(&self, input: &str) -> Result<String, RustKeylockError> {
         let encrypted = try!(self.encrypt(input.as_bytes()));
-        Ok(encrypted.to_base64(STANDARD))
+        Ok(base64::encode(&encrypted))
     }
 
     /// Gets a Base64-encoded String input and returns it decrypted
     pub fn decrypt_str(&self, input: &str) -> Result<String, RustKeylockError> {
-        let encrypted = try!(input.from_base64());
+        let encrypted = try!(base64::decode(&input));
         let decrypted_bytes = try!(self.decrypt(&encrypted));
         Ok(try!(String::from_utf8(decrypted_bytes)))
     }

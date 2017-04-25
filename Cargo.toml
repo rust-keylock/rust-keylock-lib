@@ -21,7 +21,7 @@ crate-type = ["rlib", "dylib"]
 [dependencies]
 rust-crypto = "0.2"
 toml = "0.3"
-rustc-serialize = "0.3"
+base64 = "0.5"
 rand = "0.3"
 log = "0.3"
 secstr = "0.2"
