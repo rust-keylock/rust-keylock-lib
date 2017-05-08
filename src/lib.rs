@@ -255,10 +255,11 @@ Warning: Saving will discard all the entries that could not be recovered.
                 debug!("UserSelection::ImportFrom(path, pwd, salt_pos)");
                 match file_handler::load(&path, &cr, false) {
                     Ok(ents) => {
-                        debug!("Imported {} entries", &ents.len());
+                    	let message = format!("Imported {} entries!", &ents.len());
+                        debug!("{}", message);
                         contents_changed = true;
                         safe.merge(ents);
-                        let _ = editor.show_message("Passwords were successfully imported!");
+                        let _ = editor.show_message(&message);
                     }
                     Err(error) => {
                         let _ = editor.show_message("Could not import...");
