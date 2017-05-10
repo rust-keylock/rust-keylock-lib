@@ -9,8 +9,7 @@ use crypto::buffer::{ReadBuffer, WriteBuffer, BufferResult};
 use crypto::symmetriccipher::{Encryptor, Decryptor, SynchronousStreamCipher};
 use super::errors::RustKeylockError;
 use base64;
-use secstr::SecStr;
-use std::borrow::Borrow;
+use super::protected::RklSecret;
 
 const NUMBER_OF_SALT_KEY_PAIRS: usize = 10;
 
@@ -27,7 +26,7 @@ pub struct BcryptAes {
     /// The key to use for decryption. This is created using bcrypt during the initialization.
     ///
     /// This key is retrieved by parsing the passwords file, during the application startup.
-    key: SecStr,
+    key: RklSecret,
     /// The initialization vector for the AES.
     ///
     /// This iv is retrieved by parsing the passwords file, during the application startup.
@@ -38,7 +37,7 @@ pub struct BcryptAes {
     ///
     /// Each encryption process includes the creation of a new pseudo-random iv and the usage of one of the provided salt-key pairs.
     /// With these, the data is encrypted and the encrypted bytes are returned.
-    salt_key_pairs: Vec<(Vec<u8>, SecStr)>,
+    salt_key_pairs: Vec<(Vec<u8>, RklSecret)>,
 }
 
 impl BcryptAes {
@@ -64,11 +63,11 @@ impl BcryptAes {
         for _ in 0..NUMBER_OF_SALT_KEY_PAIRS {
             let s = create_random(16);
             let k = BcryptAes::create_new_bcrypt_key(&password, &s, cost);
-            salt_key_pairs.push((s, SecStr::from(k)));
+            salt_key_pairs.push((s, RklSecret::new(k)));
         }
 
         BcryptAes {
-            key: SecStr::from(key),
+            key: RklSecret::new(key),
             iv: iv,
             salt_position: salt_position,
             salt_key_pairs: salt_key_pairs,
@@ -164,7 +163,7 @@ impl Cryptor for BcryptAes {
 /// Encrypts and decrypts passwords of Entries in order not to be kept in the memory in plain.
 pub struct EntryPasswordCryptor {
     /// The encryption/decryption key
-    key: SecStr,
+    key: RklSecret,
     /// The initialization vector for the AES.
     iv: Vec<u8>,
 }
@@ -183,7 +182,7 @@ impl EntryPasswordCryptor {
         bcrypt(3, &salt, &password, &mut key);
         // Create and return the EntryPasswordCryptor
         EntryPasswordCryptor {
-            key: SecStr::from(key),
+            key: RklSecret::new(key),
             iv: iv,
         }
     }

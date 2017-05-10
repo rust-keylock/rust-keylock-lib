@@ -60,6 +60,7 @@ extern crate toml;
 extern crate crypto;
 extern crate base64;
 extern crate rand;
+#[cfg(not(target_os = "windows"))]
 extern crate secstr;
 
 use toml::value::Table;
@@ -68,6 +69,7 @@ use std::time::SystemTime;
 
 mod file_handler;
 mod errors;
+mod protected;
 pub mod datacrypt;
 
 /// Takes a reference of `Editor` implementation as argument and executes the _rust-keylock_ logic.
