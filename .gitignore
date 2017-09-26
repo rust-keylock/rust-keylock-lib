@@ -7,6 +7,12 @@
 Cargo.lock
 
 # Eclipse
+
 /.project
 /.settings/
 /.README.md.html
+
+# IntelliJ
+
+/.idea/
+/rust-keylock-lib.iml
