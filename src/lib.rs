@@ -346,7 +346,13 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
             debug!("Retrieved entries. Returning {:?} with {} entries ", &user_selection, safe.entries.len());
             (user_selection, cr)
         }
-        _ => {
+        UserSelection::GoTo(Menu::Exit) => {
+            debug!("UserSelection::GoTo(Menu::Exit) was called before providing credentials");
+            let cr = file_handler::create_bcryptor(filename, "dummy".to_string(), 33, false, true);
+            let exit_selection = UserSelection::GoTo(Menu::ForceExit);
+            (exit_selection, cr)
+        }
+        sel => {
             panic!("Wrong initialization sequence... The editor.show_password_enter must always return a UserSelection::ProvidedPassword. \
                     Please, consider opening a bug to the developers.")
         }
