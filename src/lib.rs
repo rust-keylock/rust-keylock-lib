@@ -142,9 +142,10 @@ pub fn execute<T: Editor>(editor: &T) {
                 cryptor = file_handler::create_bcryptor(filename, pwd, salt_pos, true, true);
                 UserSelection::GoTo(Menu::Main)
             }
-            UserSelection::GoTo(Menu::EntriesList) => {
-                debug!("UserSelection::GoTo(Menu::EntriesList)");
-                editor.show_menu(&Menu::EntriesList, &safe)
+            UserSelection::GoTo(Menu::EntriesList(filter)) => {
+                debug!("UserSelection::GoTo(Menu::EntriesList) with filter '{}'", &filter);
+                safe.set_filter(filter.clone());
+                editor.show_menu(&Menu::EntriesList(filter), &safe)
             }
             UserSelection::GoTo(Menu::NewEntry) => {
                 debug!("UserSelection::GoTo(Menu::NewEntry)");
@@ -188,19 +189,19 @@ pub fn execute<T: Editor>(editor: &T) {
                 debug!("UserSelection::NewEntry(entry)");
                 safe.add_entry(entry);
                 contents_changed = true;
-                UserSelection::GoTo(Menu::EntriesList)
+                UserSelection::GoTo(Menu::EntriesList("".to_string()))
             }
             UserSelection::ReplaceEntry(index, entry) => {
                 debug!("UserSelection::ReplaceEntry(index, entry)");
                 contents_changed = true;
                 safe.replace_entry(index, entry);
-                UserSelection::GoTo(Menu::EntriesList)
+                UserSelection::GoTo(Menu::EntriesList(safe.get_filter()))
             }
             UserSelection::DeleteEntry(index) => {
                 debug!("UserSelection::DeleteEntry(index)");
                 safe.remove_entry(index);
                 contents_changed = true;
-                UserSelection::GoTo(Menu::EntriesList)
+                UserSelection::GoTo(Menu::EntriesList("".to_string()))
             }
             UserSelection::GoTo(Menu::TryFileRecovery) => {
                 debug!("UserSelection::GoTo(Menu::TryFileRecovery)");
@@ -229,7 +230,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                 };
                 safe.entries.append(&mut rec_entries);
 
-                UserSelection::GoTo(Menu::EntriesList)
+                UserSelection::GoTo(Menu::EntriesList("".to_string()))
             }
             UserSelection::GoTo(Menu::ExportEntries) => {
                 debug!("UserSelection::GoTo(Menu::ExportEntries)");
@@ -257,7 +258,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                 debug!("UserSelection::ImportFrom(path, pwd, salt_pos)");
                 match file_handler::load(&path, &cr, false) {
                     Ok(ents) => {
-                    	let message = format!("Imported {} entries!", &ents.len());
+                        let message = format!("Imported {} entries!", &ents.len());
                         debug!("{}", message);
                         contents_changed = true;
                         safe.merge(ents);
@@ -352,7 +353,7 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
             let exit_selection = UserSelection::GoTo(Menu::ForceExit);
             (exit_selection, cr)
         }
-        sel => {
+        _ => {
             panic!("Wrong initialization sequence... The editor.show_password_enter must always return a UserSelection::ProvidedPassword. \
                     Please, consider opening a bug to the developers.")
         }
@@ -457,14 +458,18 @@ impl Entry {
 /// and decrypt them when needed (to be presented to the User)
 pub struct Safe {
     entries: Vec<Entry>,
+    filtered_entries: Vec<Entry>,
     password_cryptor: datacrypt::EntryPasswordCryptor,
+    filter: String,
 }
 
 impl Default for Safe {
     fn default() -> Self {
         Safe {
             entries: Vec::new(),
+            filtered_entries: Vec::new(),
             password_cryptor: datacrypt::EntryPasswordCryptor::new(),
+            filter: "".to_string(),
         }
     }
 }
@@ -473,24 +478,29 @@ impl Safe {
     pub fn new() -> Safe {
         Safe {
             entries: Vec::new(),
+            filtered_entries: Vec::new(),
             password_cryptor: datacrypt::EntryPasswordCryptor::new(),
+            filter: "".to_string(),
         }
     }
 
     /// Adds an Entry to the Safe, with the Entry password encrypted
     fn add_entry(&mut self, new_entry: Entry) {
         self.entries.push(new_entry.encrypted(&self.password_cryptor));
+        self.apply_filter();
     }
 
     /// Replaces an Entry in the Safe, with a new Entry that has the password encrypted
     fn replace_entry(&mut self, index: usize, entry: Entry) {
         self.entries.push(entry.encrypted(&self.password_cryptor));
         self.entries.swap_remove(index);
+        self.apply_filter();
     }
 
     /// Removes an Entry from the Safe
     fn remove_entry(&mut self, index: usize) {
         self.entries.remove(index);
+        self.apply_filter();
     }
 
     /// Merges the Entries, by appending the incoming elements that are not the same with some existing one in Safe
@@ -508,6 +518,7 @@ impl Safe {
         };
 
         self.entries.append(&mut to_add);
+        self.apply_filter();
     }
 
     /// Adds the Entrie in the Safe
@@ -519,11 +530,12 @@ impl Safe {
         };
 
         self.entries.append(&mut to_add);
+        self.apply_filter();
     }
 
-    /// Retrieves an Entry at a given index
+    /// Retrieves an Entry at a given index, after applying the filter to the Vector
     pub fn get_entry(&self, index: usize) -> &Entry {
-        &self.entries[index]
+        &self.get_entries()[index]
     }
 
     /// Retrieves an Entry at a given index with the password decrypted
@@ -531,17 +543,42 @@ impl Safe {
         self.get_entry(index).decrypted(&self.password_cryptor)
     }
 
-    /// Retrieves an Entry at a given index
+    /// Retrieves the existing entries, after applying the filter to the Vector
     pub fn get_entries(&self) -> &[Entry] {
-        &self.entries
+        &self.filtered_entries
     }
 
-    /// Retrieves all Entries with the passwords decrypted
+    /// Retrieves all Entries with the passwords decrypted, after applying the filter to the Vector
     fn get_entries_decrypted(&self) -> Vec<Entry> {
         self.get_entries()
             .into_iter()
             .map(|entry| entry.decrypted(&self.password_cryptor))
             .collect()
+    }
+
+    /// Sets a filter to be applied when retrieving the entries
+    pub fn set_filter(&mut self, filter: String) {
+        self.filter = filter;
+        self.apply_filter();
+    }
+
+    /// Gets the filter of the Safe
+    pub fn get_filter(&self) -> String {
+        self.filter.clone()
+    }
+
+    fn apply_filter(&mut self) {
+        let m: Vec<Entry> = if self.filter.len() > 0 {
+            self.entries
+                .clone()
+                .into_iter()
+                .filter(|entry| entry.name.contains(&self.filter) || entry.user.contains(&self.filter) || entry.desc.contains(&self.filter))
+                .collect()
+        } else {
+            self.entries.clone()
+        };
+
+        self.filtered_entries = m;
     }
 }
 
@@ -591,8 +628,8 @@ pub enum Menu {
     ChangePass,
     /// The User should be presented with the main menu.
     Main,
-    /// The User should be presented with a list of all the saved password `Entries`.
-    EntriesList,
+    /// The User should be presented with a list of all the saved password `Entries`, filtered by the string provided as argument
+    EntriesList(String),
     /// The User should create a new `Entry`
     NewEntry,
     /// The User should be presented with a selected `Entry`.
@@ -628,7 +665,7 @@ impl Menu {
             &Menu::TryPass => format!("{:?}", Menu::TryPass),
             &Menu::ChangePass => format!("{:?}", Menu::ChangePass),
             &Menu::Main => format!("{:?}", Menu::Main),
-            &Menu::EntriesList => format!("{:?}", Menu::EntriesList),
+            &Menu::EntriesList(_) => "EntriesList".to_string(),
             &Menu::NewEntry => format!("{:?}", Menu::NewEntry),
             &Menu::ShowEntry(_) => "ShowEntry".to_string(),
             &Menu::EditEntry(_) => "EditEntry".to_string(),
@@ -644,29 +681,30 @@ impl Menu {
 
     /// Parses a String and creates a `Menu`.
     ///
-    /// Menus that have additional `usize` arguments exist. Thus the existence of the `Option`al argument during parsing.
-    pub fn from(name: String, opt: Option<usize>) -> Menu {
-        debug!("Creating Menu from name {} and additional argument {:?}", &name, &opt);
-        match (name, opt) {
-            (ref n, None) if &Menu::TryPass.get_name() == n => Menu::TryPass,
-            (ref n, None) if &Menu::ChangePass.get_name() == n => Menu::ChangePass,
-            (ref n, None) if &Menu::Main.get_name() == n => Menu::Main,
-            (ref n, None) if &Menu::EntriesList.get_name() == n => Menu::EntriesList,
-            (ref n, None) if &Menu::NewEntry.get_name() == n => Menu::NewEntry,
-            (ref n, Some(arg)) if &Menu::ShowEntry(arg).get_name() == n => Menu::ShowEntry(arg),
-            (ref n, Some(arg)) if &Menu::EditEntry(arg).get_name() == n => Menu::EditEntry(arg),
-            (ref n, Some(arg)) if &Menu::DeleteEntry(arg).get_name() == n => Menu::DeleteEntry(arg),
-            (ref n, None) if &Menu::Save.get_name() == n => Menu::Save,
-            (ref n, None) if &Menu::Exit.get_name() == n => Menu::Exit,
-            (ref n, None) if &Menu::ForceExit.get_name() == n => Menu::ForceExit,
-            (ref n, None) if &Menu::TryFileRecovery.get_name() == n => Menu::TryFileRecovery,
-            (ref n, None) if &Menu::ImportEntries.get_name() == n => Menu::ImportEntries,
-            (ref n, None) if &Menu::ExportEntries.get_name() == n => Menu::ExportEntries,
-            (ref other, opt) => {
-                let message = format!("Cannot create Menu from String '{}' and argument '{:?}'. Please, consider opening a bug to the \
-                                       developers.",
+    /// Menus that have additional `usize` and `String` arguments exist. Thus the existence of the `Option`al arguments during parsing.
+    pub fn from(name: String, opt_num: Option<usize>, opt_string: Option<String>) -> Menu {
+        debug!("Creating Menu from name {} and additional arguments usize: {:?}, String: {:?}", &name, &opt_num, &opt_string);
+        match (name, opt_num, opt_string.clone()) {
+            (ref n, None, None) if &Menu::TryPass.get_name() == n => Menu::TryPass,
+            (ref n, None, None) if &Menu::ChangePass.get_name() == n => Menu::ChangePass,
+            (ref n, None, None) if &Menu::Main.get_name() == n => Menu::Main,
+            (ref n, None, Some(ref arg)) if &Menu::EntriesList(arg.clone()).get_name() == n => Menu::EntriesList(arg.clone()),
+            (ref n, None, None) if &Menu::NewEntry.get_name() == n => Menu::NewEntry,
+            (ref n, Some(arg), None) if &Menu::ShowEntry(arg).get_name() == n => Menu::ShowEntry(arg),
+            (ref n, Some(arg), None) if &Menu::EditEntry(arg).get_name() == n => Menu::EditEntry(arg),
+            (ref n, Some(arg), None) if &Menu::DeleteEntry(arg).get_name() == n => Menu::DeleteEntry(arg),
+            (ref n, None, None) if &Menu::Save.get_name() == n => Menu::Save,
+            (ref n, None, None) if &Menu::Exit.get_name() == n => Menu::Exit,
+            (ref n, None, None) if &Menu::ForceExit.get_name() == n => Menu::ForceExit,
+            (ref n, None, None) if &Menu::TryFileRecovery.get_name() == n => Menu::TryFileRecovery,
+            (ref n, None, None) if &Menu::ImportEntries.get_name() == n => Menu::ImportEntries,
+            (ref n, None, None) if &Menu::ExportEntries.get_name() == n => Menu::ExportEntries,
+            (ref other, _, _) => {
+                let message = format!("Cannot create Menu from String '{}' and arguments usize: '{:?}', String: '{:?}'. Please, consider \
+                                       opening a bug to the developers.",
                                       other,
-                                      opt);
+                                      opt_num,
+                                      opt_string);
                 error!("{}", message);
                 panic!(message);
             }
@@ -862,7 +900,7 @@ mod unit_tests {
     fn menu_get_name() {
         let m1 = Menu::TryPass.get_name();
         assert!(m1 == "TryPass");
-        let m2 = Menu::EntriesList.get_name();
+        let m2 = Menu::EntriesList("".to_string()).get_name();
         assert!(m2 == "EntriesList");
         let m3 = Menu::EditEntry(33).get_name();
         assert!(m3 == "EditEntry");
@@ -870,11 +908,11 @@ mod unit_tests {
 
     #[test]
     fn menu_from_name() {
-        let m1 = Menu::from("TryPass".to_string(), None);
+        let m1 = Menu::from("TryPass".to_string(), None, None);
         assert!(m1 == Menu::TryPass);
-        let m2 = Menu::from("EntriesList".to_string(), None);
-        assert!(m2 == Menu::EntriesList);
-        let m3 = Menu::from("ShowEntry".to_string(), Some(1));
+        let m2 = Menu::from("EntriesList".to_string(), None, Some("".to_string()));
+        assert!(m2 == Menu::EntriesList("".to_string()));
+        let m3 = Menu::from("ShowEntry".to_string(), Some(1), None);
         assert!(m3 == Menu::ShowEntry(1));
     }
 
@@ -1016,6 +1054,42 @@ mod unit_tests {
         assert!(got_entries.len() == 2);
         assert!(got_entries[0].pass == entry1.pass);
         assert!(got_entries[1].pass == entry2.pass);
+    }
+
+    #[test]
+    fn set_filter() {
+        let mut safe = super::Safe::new();
+        let entry1 = Entry::new("1".to_string(), "2".to_string(), "4".to_string(), "3".to_string());
+        let entry2 = Entry::new("11".to_string(), "12".to_string(), "14".to_string(), "13".to_string());
+        let entries = vec![entry1.clone(), entry2.clone()];
+        safe.add_all(entries);
+
+        // Assert that the filter can be applied on name, user and desc fields of Entries
+        safe.set_filter("1".to_string());
+        assert!(safe.get_entries().len() == 2);
+        safe.set_filter("11".to_string());
+        assert!(safe.get_entries().len() == 1);
+
+        safe.set_filter("2".to_string());
+        assert!(safe.get_entries().len() == 2);
+        safe.set_filter("12".to_string());
+        assert!(safe.get_entries().len() == 1);
+
+        safe.set_filter("3".to_string());
+        assert!(safe.get_entries().len() == 2);
+        safe.set_filter("13".to_string());
+        assert!(safe.get_entries().len() == 1);
+
+        // The filter cannot be applied on password
+        safe.set_filter("4".to_string());
+        assert!(safe.get_entries().len() == 0);
+    }
+
+    #[test]
+    fn get_filter() {
+        let mut safe = super::Safe::new();
+        safe.set_filter("33".to_string());
+        assert!(safe.get_filter() == "33".to_string());
     }
 
     #[test]
