@@ -569,10 +569,14 @@ impl Safe {
 
     fn apply_filter(&mut self) {
         let m: Vec<Entry> = if self.filter.len() > 0 {
+            let ref lower_filter = self.filter.to_lowercase();
             self.entries
                 .clone()
                 .into_iter()
-                .filter(|entry| entry.name.contains(&self.filter) || entry.user.contains(&self.filter) || entry.desc.contains(&self.filter))
+                .filter(|entry| {
+                    entry.name.to_lowercase().contains(lower_filter) || entry.user.to_lowercase().contains(lower_filter) ||
+                    entry.desc.to_lowercase().contains(lower_filter)
+                })
                 .collect()
         } else {
             self.entries.clone()
@@ -1061,7 +1065,7 @@ mod unit_tests {
         let mut safe = super::Safe::new();
         let entry1 = Entry::new("1".to_string(), "2".to_string(), "4".to_string(), "3".to_string());
         let entry2 = Entry::new("11".to_string(), "12".to_string(), "14".to_string(), "13".to_string());
-        let entries = vec![entry1.clone(), entry2.clone()];
+        let entries = vec![entry1, entry2];
         safe.add_all(entries);
 
         // Assert that the filter can be applied on name, user and desc fields of Entries
@@ -1083,6 +1087,12 @@ mod unit_tests {
         // The filter cannot be applied on password
         safe.set_filter("4".to_string());
         assert!(safe.get_entries().len() == 0);
+
+		// The filter should by applied ignoring the case
+		let entry3 = Entry::new("NAME".to_string(), "User".to_string(), "pass".to_string(), "Desc".to_string());
+		safe.add_entry(entry3);
+		safe.set_filter("name".to_string());
+        assert!(safe.get_entries().len() == 1);
     }
 
     #[test]
