@@ -55,53 +55,6 @@
 
 <p>This library is the executor of the <em>rust-keylock</em> logic. <code>Editor</code> references are used to interact with the <em>rust-keylock</em> users.</p>
 
-<h2 id='how-it-works' class='section-header'><a href='#how-it-works'>How it works</a></h2>
-<p>The library implements the functionality where a User stores password <code>Entries</code> in an encrypted toml file.
-Currently, <strong>AES</strong> with <strong>CTR</strong> is used and the encryption key is generated with <strong>Bcrypt</strong>, but more choices can be implemented in the future.</p>
-
-<p>The <em>iv</em> that is used for encyption/decryption and the <em>salt</em> for the generation of the encryption key are stored along with the rest of the encrypted data bytes in the same file.</p>
-
-<p>The 16-byte <em>iv</em> is always in the start of the file.</p>
-
-<p>The 16 bytes of <em>salt</em> are merged along with the encrypted actual data.
-The position of the <em>salt</em> is actually defined by the user. Upon <em>rust-keylock</em> initialization, the user sets up two things:</p>
-
-<ul>
-<li>A <em>master password</em>, which is combined with an initially pseudo-randomly generated 16-bytes array, the <em>salt</em>, in order to create the <code>Bcrypt</code> key that is used for the data encryption/decryption.</li>
-<li>A <em>number</em>,  which is the actual location of the salt among the encrypted data.</li>
-</ul>
-
-<p>Having the salt inbetween the actual encrypted data gives two obvious benefits:</p>
-
-<h3 id='makes-the-encrypted-file-portable' class='section-header'><a href='#makes-the-encrypted-file-portable'>Makes the encrypted file portable</a></h3>
-<p>All the information that is needed for encryption/decryption is in the file itself. Nothing additional is needed. Therefore, the encrypted file can just be copied in some location to be backed-up, or even be synchronized in other devices and be used there as well.</p>
-
-<h3 id='increases-the-security-of-the-encryption' class='section-header'><a href='#increases-the-security-of-the-encryption'>Increases the security of the encryption</a></h3>
-<p>The actual data bytes are &quot;interrupted&quot; by the salt and this potentially makes an adversary&#39;s job more difficult; more difficult to infer things about the data contents or the encryption key.</p>
-
-<h2 id='a-concrete-example' class='section-header'><a href='#a-concrete-example'>A concrete example</a></h2>
-<p>Let&#39;s assume that the user has set his <em>master password</em> and the number <strong>3</strong> as the <em>additional number</em> to the password.</p>
-
-<p>Let&#39;s also assume that the actual password <code>Entries</code> data gets encrypted as the following byte array:
-<code>0x11u8, 0x12u8, 0x13u8, 0x14u8, 0x15u8, 0x16u8, 0x17u8, 0x18u8, 0x19u8, 0x20u8, 0x21u8, 0x22u8, 0x23u8, 0x24u8, 0x25u8, 0x26u8, 0x27u8, 0x28u8, 0x29u8, 0x30u8, 0x31u8, 0x32u8, 0x33u8, 0x34u8, 0x35u8, 0x36u8, 0x37u8, 0x38u8, 0x39u8, 0x40u8, 0x41u8, 0x42u8</code></p>
-
-<p>Upon saving to the file, the <em>rust-keylock</em> will generate two pseudo-random byte arrays; one to be the <em>iv</em> and one to be the <em>salt</em>.
-Let the <em>iv</em> be <code>0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8</code>.</p>
-
-<p>Let the <em>salt</em> be <code>0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8</code>.</p>
-
-<p>All that makes the actual bytes that are saved in the file to be:</p>
-
-<ol>
-<li>The <em>iv</em></li>
-<li>Three bytes of real encrypted data</li>
-<li>The <em>salt</em></li>
-<li>The rest of the real encrypted data bytes</li>
-</ol>
-
-<p>Thus, the saved data should be looking like following:</p>
-
-<p><code>0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x11u8, 0x12u8, 0x13u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x14u8, 0x15u8, 0x16u8, 0x17u8, 0x18u8, 0x19u8, 0x20u8, 0x21u8, 0x22u8, 0x23u8, 0x24u8, 0x25u8, 0x26u8, 0x27u8, 0x28u8, 0x29u8, 0x30u8, 0x31u8, 0x32u8, 0x33u8, 0x34u8, 0x35u8, 0x36u8, 0x37u8, 0x38u8, 0x39u8, 0x40u8, 0x41u8, 0x42u8</code></p>
 </div><h2 id='modules' class='section-header'><a href="#modules">Modules</a></h2>
 <table>
                        <tr class=' module-item'>
