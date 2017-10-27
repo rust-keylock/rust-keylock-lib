@@ -58,6 +58,7 @@
 extern crate log;
 extern crate toml;
 extern crate crypto;
+extern crate sha3;
 extern crate base64;
 extern crate rand;
 #[cfg(not(target_os = "windows"))]
@@ -139,7 +140,7 @@ pub fn execute<T: Editor>(editor: &T) {
             }
             UserSelection::ProvidedPassword(pwd, salt_pos) => {
                 debug!("UserSelection::GoTo(Menu::ProvidedPassword)");
-                cryptor = file_handler::create_bcryptor(filename, pwd, salt_pos, true, true);
+                cryptor = file_handler::create_bcryptor(filename, pwd, salt_pos, true, true).unwrap();
                 UserSelection::GoTo(Menu::Main)
             }
             UserSelection::GoTo(Menu::EntriesList(filter)) => {
@@ -254,8 +255,9 @@ Warning: Saving will discard all the entries that could not be recovered.
                 editor.show_menu(&Menu::ImportEntries, &safe)
             }
             UserSelection::ImportFrom(path, pwd, salt_pos) => {
-                let cr = file_handler::create_bcryptor(&path, pwd, salt_pos, false, false);
+                let cr = file_handler::create_bcryptor(&path, pwd, salt_pos, false, false).unwrap();
                 debug!("UserSelection::ImportFrom(path, pwd, salt_pos)");
+
                 match file_handler::load(&path, &cr, false) {
                     Ok(ents) => {
                         let message = format!("Imported {} entries!", &ents.len());
@@ -316,7 +318,7 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
     match provided_password {
         UserSelection::ProvidedPassword(pwd, salt_pos) => {
             // New Cryptor here
-            let cr = file_handler::create_bcryptor(filename, pwd, salt_pos, false, true);
+            let cr = file_handler::create_bcryptor(filename, pwd, salt_pos, false, true).unwrap();
             // Try to decrypt and load the Entries
             let retrieved_entries = match file_handler::load(filename, &cr, true) {
                 // Success, go th the Main menu
@@ -349,7 +351,7 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
         }
         UserSelection::GoTo(Menu::Exit) => {
             debug!("UserSelection::GoTo(Menu::Exit) was called before providing credentials");
-            let cr = file_handler::create_bcryptor(filename, "dummy".to_string(), 33, false, true);
+            let cr = file_handler::create_bcryptor(filename, "dummy".to_string(), 33, false, true).unwrap();
             let exit_selection = UserSelection::GoTo(Menu::ForceExit);
             (exit_selection, cr)
         }
@@ -1088,10 +1090,10 @@ mod unit_tests {
         safe.set_filter("4".to_string());
         assert!(safe.get_entries().len() == 0);
 
-		// The filter should by applied ignoring the case
-		let entry3 = Entry::new("NAME".to_string(), "User".to_string(), "pass".to_string(), "Desc".to_string());
-		safe.add_entry(entry3);
-		safe.set_filter("name".to_string());
+        // The filter should by applied ignoring the case
+        let entry3 = Entry::new("NAME".to_string(), "User".to_string(), "pass".to_string(), "Desc".to_string());
+        safe.add_entry(entry3);
+        safe.set_filter("name".to_string());
         assert!(safe.get_entries().len() == 1);
     }
 

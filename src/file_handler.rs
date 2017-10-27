@@ -4,6 +4,7 @@ use super::errors::{self, RustKeylockError};
 use std::io::prelude::*;
 #[cfg(not(target_os = "android"))]
 use std::env;
+use std::io;
 use std::fs::{self, File};
 use std::path::PathBuf;
 use toml::value::{Table, Value};
@@ -14,7 +15,7 @@ pub fn create_bcryptor(filename: &str,
                        salt_position: usize,
                        reinitialize_randoms: bool,
                        use_default_location: bool)
-                       -> BcryptAes {
+                       -> Result<BcryptAes, io::Error> {
     debug!("Creating bcryptor");
     let full_path = if use_default_location {
         default_toml_path(filename)
@@ -22,58 +23,70 @@ pub fn create_bcryptor(filename: &str,
         toml_path(filename)
     };
     debug!("Full Path: {:?}", full_path);
-    let (iv, salt) = {
+    let (iv, salt, hash_bytes) = {
         match File::open(full_path) {
-            Ok(file) => {
-                debug!("Encrypted file found. Extracting salt and iv");
-                let bytes: Vec<_> = file.bytes().collect();
+            Ok(mut file) => {
+                debug!("Encrypted file found. Extracting salt, iv and hash");
+                let mut bytes: Vec<_> = Vec::new();
+                file.read_to_end(&mut bytes)?;
 
                 // The iv is always in the start of the file
-                // If the bytes are not more than 32 (iv+salt) it means that there is no data for entries
+                // If the bytes are not more than 32 (iv:16 + salt:16) it means that there is no data for entries
                 let iv = if bytes.len() > 32 && !reinitialize_randoms {
                     bytes.iter()
                         .take(16)
-                        .map(|b_res| {
-                            match b_res {
-                                &Ok(b) => b.clone(),
-                                &Err(ref error) => panic!("Could not read from File {:?}", error),
-                            }
-                        })
+                        .map(|b| b.clone())
                         .collect()
                 } else {
                     super::datacrypt::create_random(16)
                 };
                 // The actual salt position is the one selected by the user, plus 16 bytes because the first 16 bytes is the iv
                 let actual_salt_position = salt_position + 16;
-                // If the bytes are not more than 32 (iv+salt) it means that there is no data for entries
+                // If the bytes are not more than 32 (iv:16 + salt:16) it means that there is no data for entries
                 let salt = if bytes.len() > 32 && !reinitialize_randoms && bytes.len() >= actual_salt_position {
                     bytes.iter()
                         .skip(actual_salt_position)
                         .take(16)
-                        .map(|b_res| {
-                            match b_res {
-                                &Ok(b) => b.clone(),
-                                &Err(ref error) => panic!("Could not read from File {:?}", error),
-                            }
-                        })
+                        .map(|b| b.clone())
                         .collect()
                 } else {
                     super::datacrypt::create_random(16)
                 };
 
-                debug!("Salt and iv extracted");
-                (iv, salt)
+                // The hash position is right after the actual salt position
+                let hash_position = actual_salt_position + 16;
+                // If the bytes are more than 96, use the salt position in order to infer the hash position
+                let hash_bytes: Vec<u8> = if bytes.len() > 96 {
+                    bytes.iter()
+                        .skip(hash_position)
+                        .take(64)
+                        .map(|b| b.clone())
+                        .collect()
+                } else if bytes.len() == 96 {
+                    // If the bytes are 96, it means that there are no user data.
+                    // Thus, the hash is located right after the salt, which is in the position 16.
+                    // Skip 16 bytes (iv), 16 bytes (salt) and take 64 bytes (hash)
+                    bytes.iter()
+                        .skip(32)
+                        .take(64)
+                        .map(|b| b.clone())
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                debug!("Salt, iv and hash extracted");
+                (iv, salt, hash_bytes)
             }
             Err(_) => {
                 debug!("Encrypted file does not exist. Initializing salt and iv");
                 let salt = super::datacrypt::create_random(16);
                 let iv = super::datacrypt::create_random(16);
-                (iv, salt)
+                (iv, salt, Vec::new())
             }
         }
     };
     // TODO: Take the cost from the configuration
-    BcryptAes::new(password, salt, 3, iv, salt_position)
+    Ok(BcryptAes::new(password, salt, 3, iv, salt_position, hash_bytes))
 }
 
 /// Returns true if the passwords file exists in the Filesystem, flase otherwise
@@ -296,11 +309,21 @@ pub fn save_props(props: &Props, filename: &str) -> errors::Result<()> {
 #[cfg(test)]
 mod test_parser {
     use super::super::{Entry, Props};
-    use super::super::datacrypt::NoCryptor;
+    use super::super::datacrypt::{self, NoCryptor, Cryptor};
     use std::io::prelude::*;
     use std::fs;
     use std::fs::File;
     use toml;
+    use rand::{Rng, OsRng};
+    use std::iter::repeat;
+    use crypto::bcrypt::bcrypt;
+    use crypto::{buffer, aes, aessafe};
+    use crypto::blockmodes::CtrModeX8;
+    use crypto::aes::KeySize;
+    use crypto::buffer::{ReadBuffer, WriteBuffer, BufferResult};
+    use crypto::symmetriccipher::{Encryptor, Decryptor, SynchronousStreamCipher};
+    use super::super::errors::RustKeylockError;
+    use super::super::protected::RklSecret;
 
     #[test]
     fn use_existing_file() {
@@ -454,9 +477,9 @@ mod test_parser {
         let mut entries = Vec::new();
         entries.push(Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "1".to_string()));
 
-        let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true);
+        let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
         assert!(super::save(&entries, filename, &cryptor, true).is_ok());
-        cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true);
+        cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
 
         let m = super::load(filename, &cryptor, true);
         assert!(entries == m.unwrap());
@@ -478,7 +501,8 @@ mod test_parser {
 
         let mut entries_import = Vec::new();
         entries_import.push(Entry::new("1_import".to_string(), "1_import".to_string(), "1_import".to_string(), "1_import".to_string()));
-        let tmp_cryptor_import = super::create_bcryptor(filename_import, password_import.clone(), salt_position_import, false, false);
+        let tmp_cryptor_import = super::create_bcryptor(filename_import, password_import.clone(), salt_position_import, false, false)
+            .unwrap();
         assert!(super::save(&entries_import, filename_import, &tmp_cryptor_import, false).is_ok());
 
         // Create the normal file
@@ -488,13 +512,13 @@ mod test_parser {
 
         let mut entries = Vec::new();
         entries.push(Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "1".to_string()));
-        let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true);
+        let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
         assert!(super::save(&entries, filename, &cryptor, true).is_ok());
-        cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true);
+        cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
         assert!(super::load(filename, &cryptor, true).is_ok());
 
         // Import the file by creating a new cryptor
-        let cryptor_import = super::create_bcryptor(filename_import, password_import.clone(), salt_position_import, false, false);
+        let cryptor_import = super::create_bcryptor(filename_import, password_import.clone(), salt_position_import, false, false).unwrap();
         assert!(super::load(filename_import, &cryptor_import, false).is_ok());
 
         delete_file(filename);
@@ -510,12 +534,35 @@ mod test_parser {
 
         let entries = Vec::new();
 
-        let cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true);
+        let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
         assert!(super::save(&entries, filename, &cryptor, true).is_ok());
+
+        cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
 
         let m = super::load(filename, &cryptor, true);
         assert!(entries == m.unwrap());
         assert!(super::save(&entries, filename, &cryptor, true).is_ok());
+
+        delete_file(filename);
+    }
+
+	#[test]
+    fn create_v_0_2_1_encrypt_and_then_decrypt_with_v_0_3_0() {
+        let filename = "v_0_2_1_encrypt_to_v_0_3_0.toml";
+
+        let salt_position = 33;
+        let password = "123".to_string();
+
+        let entries = Vec::new();
+
+		// Create a v0.2.1 cryptor
+		let old_cryptor = CryptorV021::new(password.clone(), datacrypt::create_random(16), 3, datacrypt::create_random(16), salt_position);
+        assert!(super::save(&entries, filename, &old_cryptor, true).is_ok());
+        let new_cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
+
+        let m = super::load(filename, &new_cryptor, true);
+        assert!(entries == m.unwrap());
+        assert!(super::save(&entries, filename, &new_cryptor, true).is_ok());
 
         delete_file(filename);
     }
@@ -562,6 +609,192 @@ mod test_parser {
         let path_buf = super::default_toml_path(name);
         let path = path_buf.to_str().unwrap();
         assert!(fs::remove_file(path).is_ok());
+    }
+
+    #[derive(Debug, PartialEq)]
+    pub struct CryptorV021 {
+        key: RklSecret,
+        iv: Vec<u8>,
+        salt_position: usize,
+        salt_key_pairs: Vec<(Vec<u8>, RklSecret)>,
+    }
+
+    impl CryptorV021 {
+        fn create_new_bcrypt_key(password: &str, salt: &[u8], cost: u32) -> Vec<u8> {
+            let mut key: Vec<u8> = repeat(0u8).take(24).collect();
+            bcrypt(cost, &salt, password.as_bytes(), &mut key);
+            key
+        }
+
+        pub fn new(password: String, salt: Vec<u8>, cost: u32, iv: Vec<u8>, salt_position: usize) -> CryptorV021 {
+            // Create bcrypt password for the current encrypted data
+            let key = CryptorV021::create_new_bcrypt_key(&password, &salt, cost);
+
+            // Create 10 new salt-key pairs to use them for encryption
+            let mut salt_key_pairs = Vec::new();
+            for _ in 0..3 {
+                let s = datacrypt::create_random(16);
+                let k = CryptorV021::create_new_bcrypt_key(&password, &s, cost);
+                salt_key_pairs.push((s, RklSecret::new(k)));
+            }
+
+            CryptorV021 {
+                key: RklSecret::new(key),
+                iv: iv,
+                salt_position: salt_position,
+                salt_key_pairs: salt_key_pairs,
+            }
+        }
+
+        pub fn ctr(key_size: KeySize, key: &[u8], iv: &[u8]) -> Box<SynchronousStreamCipher + 'static> {
+            match key_size {
+                KeySize::KeySize128 => {
+                    let aes_dec = aessafe::AesSafe128EncryptorX8::new(key);
+                    let dec = Box::new(CtrModeX8::new(aes_dec, iv));
+                    dec
+                }
+                KeySize::KeySize192 => {
+                    let aes_dec = aessafe::AesSafe192EncryptorX8::new(key);
+                    let dec = Box::new(CtrModeX8::new(aes_dec, iv));
+                    dec
+                }
+                KeySize::KeySize256 => {
+                    let aes_dec = aessafe::AesSafe256EncryptorX8::new(key);
+                    let dec = Box::new(CtrModeX8::new(aes_dec, iv));
+                    dec
+                }
+            }
+        }
+    }
+
+    impl Cryptor for CryptorV021 {
+        fn decrypt(&self, input: &[u8]) -> Result<Vec<u8>, RustKeylockError> {
+            let bytes_to_decrypt = extract_bytes_to_decrypt(input, self.salt_position);
+
+            // Code taken from the rust-crypto example
+            let mut final_result = Vec::<u8>::new();
+            {
+                let mut decryptor = Self::ctr(aes::KeySize::KeySize256, &self.key.borrow(), &self.iv);
+
+                let mut read_buffer = buffer::RefReadBuffer::new(&bytes_to_decrypt);
+                let mut buffer = [0; 4096];
+                let mut write_buffer = buffer::RefWriteBuffer::new(&mut buffer);
+
+                loop {
+                    let result = try!(decryptor.decrypt(&mut read_buffer, &mut write_buffer, true));
+                    final_result.extend(write_buffer.take_read_buffer().take_remaining().iter().cloned());
+                    match result {
+                        BufferResult::BufferUnderflow => break,
+                        BufferResult::BufferOverflow => {}
+                    }
+                }
+            }
+            Ok(final_result)
+        }
+
+        fn encrypt(&self, input: &[u8]) -> Result<Vec<u8>, RustKeylockError> {
+            // Create a new iv
+            let iv = datacrypt::create_random(16);
+            // Choose randomly one of the salt-key pairs
+            let idx = {
+                let mut rng = OsRng::new().ok().unwrap();
+                rng.gen_range::<usize>(0, 3)
+            };
+            let ref salt_key_pair = self.salt_key_pairs[idx];
+
+            let bytes_to_save = {
+                // Create an encryptor instance of the best performing
+                // type available for the platform.
+                // Code taken from the rust-crypto example
+                let mut encryptor = Self::ctr(aes::KeySize::KeySize256, &salt_key_pair.1.borrow(), &iv);
+
+                let mut encryption_result = Vec::<u8>::new();
+                let mut read_buffer = buffer::RefReadBuffer::new(input);
+
+                let mut buffer = [0; 4096];
+                let mut write_buffer = buffer::RefWriteBuffer::new(&mut buffer);
+
+                loop {
+                    let result = try!(encryptor.encrypt(&mut read_buffer, &mut write_buffer, true));
+
+                    encryption_result.extend(write_buffer.take_read_buffer().take_remaining().iter().cloned());
+
+                    match result {
+                        BufferResult::BufferUnderflow => break,
+                        BufferResult::BufferOverflow => {}
+                    }
+                }
+                // Compose the encrypted bytes with the iv and salt
+                compose_bytes_to_save(&encryption_result, self.salt_position, &salt_key_pair.0, &iv)
+            };
+
+            Ok(bytes_to_save)
+        }
+    }
+
+    fn compose_bytes_to_save(data: &[u8], salt_position: usize, salt: &[u8], iv: &[u8]) -> Vec<u8> {
+        let mut bytes_to_save: Vec<u8> = Vec::new();
+
+        // Clone the iv in order to append it in the bytes_to_save
+        let mut mut_iv = Vec::from(iv);
+        // Calculate the correct salt_position according to the size of the data
+        let inferred_salt_position = {
+            if salt_position < data.len() {
+                salt_position
+            } else {
+                data.len()
+            }
+        };
+        // Append the iv. This goes always in the beginning of the bytes_to_save
+        bytes_to_save.append(&mut mut_iv);
+        // Push the data and the salt
+        // The bytes to return contain the iv, the salt and the actual data.
+        // However, since the iv is already appended from above, the length in question is data.len() + salt.len()
+        let length = data.len() + salt.len();
+
+        for index in 0..length {
+            // Push data bytes before the salt position
+            if index < inferred_salt_position {
+                bytes_to_save.push(data[index]);
+            }
+            // Start pushing the salt bytes after the position indicated by the user
+            else if index >= inferred_salt_position && index < inferred_salt_position + 16 {
+                bytes_to_save.push(salt[index - inferred_salt_position]);
+            }
+            // Push data bytes after the salt position
+            else {
+                bytes_to_save.push(data[index - 16]);
+            }
+        }
+
+        bytes_to_save
+    }
+
+    fn extract_bytes_to_decrypt(bytes: &[u8], salt_position: usize) -> Vec<u8> {
+        // Check whether the salt exists between the data
+        // The salt can generally exist either between the data, or at the end of the data
+        // To calculate this, we need to substract 16 bytes which is the iv and 16 bytes which is the salt
+        let salt_between_data = salt_position < (bytes.len() - 32);
+
+        // We need to extract the bytes to be decrypted in order to create correct toml data.
+        let bytes_to_decrypt: Vec<u8> = bytes
+		.iter()
+		// The first 16 bytes are the iv. Skip them.
+		.skip(16)
+		.enumerate()
+		// Filter out the 16 bytes of salt that are located after the user-selected position
+		.filter(|tup| {
+			if salt_between_data {
+				tup.0 < salt_position || tup.0 >= salt_position + 16
+			} else {
+				tup.0 < bytes.len() - 32
+			}
+		})
+		// The enumerate function created Tuples. Keep only the second tuple element, which is the actual byte.
+		.map(|tup| tup.1.clone())
+		.collect();
+
+        bytes_to_decrypt
     }
 
 }

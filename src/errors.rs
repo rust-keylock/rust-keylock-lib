@@ -15,6 +15,7 @@ pub enum RustKeylockError {
     ParseError(String),
     DecryptionError(String),
     EncryptionError(String),
+    IntegrityError(String),
 }
 
 impl fmt::Display for RustKeylockError {
@@ -24,6 +25,7 @@ impl fmt::Display for RustKeylockError {
             &RustKeylockError::ParseError(ref message) => write!(f, "Cannot parse: \n{}", message),
             &RustKeylockError::DecryptionError(ref message) => write!(f, "Could not decrypt: {}", message),
             &RustKeylockError::EncryptionError(ref message) => write!(f, "Could not encrypt: {}", message),
+            &RustKeylockError::IntegrityError(ref message) => write!(f, "Integrity check failed: {}", message),
         }
     }
 }
@@ -35,6 +37,7 @@ impl Error for RustKeylockError {
             RustKeylockError::ParseError(_) => ("Error during parsing"),
             RustKeylockError::DecryptionError(_) => ("Error during decryption"),
             RustKeylockError::EncryptionError(_) => ("Error during encryption"),
+            RustKeylockError::IntegrityError(_) => ("Error during integrity checking"),
         }
     }
 }
