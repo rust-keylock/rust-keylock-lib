@@ -110,8 +110,8 @@ impl BcryptAes {
 
 impl Cryptor for BcryptAes {
     fn decrypt(&self, input: &[u8]) -> Result<Vec<u8>, RustKeylockError> {
-		let extracted_bytes = extract_bytes_to_decrypt(input, self.salt_position);
-		let integrity_check_ok = self.hasher.validate_hash(&extracted_bytes, &self.hash.borrow());
+        let extracted_bytes = extract_bytes_to_decrypt(input, self.salt_position);
+        let integrity_check_ok = self.hasher.validate_hash(&extracted_bytes, &self.hash.borrow());
 
         let bytes_to_decrypt = if integrity_check_ok {
             debug!("Integrity check ok!");
@@ -123,7 +123,6 @@ impl Cryptor for BcryptAes {
 
         // Code taken from the rust-crypto example
         let mut final_result = Vec::<u8>::new();
-        let mut decryption_error_opt = None;
         {
             let mut decryptor = Self::ctr(aes::KeySize::KeySize256, &self.key.borrow(), &self.iv);
 
@@ -132,35 +131,22 @@ impl Cryptor for BcryptAes {
             let mut write_buffer = buffer::RefWriteBuffer::new(&mut buffer);
 
             loop {
-                match decryptor.decrypt(&mut read_buffer, &mut write_buffer, true) {
-                    Ok(result) => {
-                        final_result.extend(write_buffer.take_read_buffer().take_remaining().iter().cloned());
-                        match result {
-                            BufferResult::BufferUnderflow => break,
-                            BufferResult::BufferOverflow => {}
-                        }
-                    },
-                    Err(error) => {
-                    	error!("Error while decrypting: {:?}", error);
-                    	decryption_error_opt = Some(error);
-                    	break;
-                    },
-                };
+                let result = try!(decryptor.decrypt(&mut read_buffer, &mut write_buffer, true));
+                final_result.extend(write_buffer.take_read_buffer().take_remaining().iter().cloned());
+                match result {
+                    BufferResult::BufferUnderflow => break,
+                    BufferResult::BufferOverflow => {}
+                }
             }
         }
 
-		// If an error was encountered and integrity checks failed, then return an IntegrityError
-        if decryption_error_opt.is_some() && !integrity_check_ok {
-        	error!("Returning an IntegrityError");
-        	Err(RustKeylockError::IntegrityError("".to_string()))
-        } else if decryption_error_opt.is_some() && integrity_check_ok {
-        	// If an error was encountered and integrity checks succeeded, then return the error that was encountered
-        	let error = decryption_error_opt.unwrap();
-        	error!("Returning a {:?}", &error);
-        	Err(RustKeylockError::from(error))
+        // If an error was encountered and integrity checks failed, then return an IntegrityError.
+        // The integrity error contains the decrypted data as well and it is left to the caller to do actions because of the failure.
+        if !integrity_check_ok {
+            debug!("Returning an IntegrityError...");
+            Err(RustKeylockError::IntegrityError(final_result))
         } else {
-        	// Success for the rest of the cases
-	        Ok(final_result)
+            Ok(final_result)
         }
     }
 
@@ -357,19 +343,19 @@ pub fn create_random(size: usize) -> Vec<u8> {
     random
 }
 
-#[allow(unused_assignments)] 
+#[allow(unused_assignments)]
 fn extract_bytes_to_decrypt(input_bytes: &[u8], salt_position: usize) -> Vec<u8> {
-	// If the data bytes are less than 96, fill it with random data. This may happen only in the case of the upgrade to v0.3.0
-	let bytes = if input_bytes.len() < 96 {
-		let bytes_to_add = create_random(96 - input_bytes.len());
-		let mut input_vec = Vec::new();
-		let mut vec_to_add = Vec::from(bytes_to_add);
-		input_vec = Vec::from(input_bytes);
-		input_vec.append(&mut vec_to_add);
-		input_vec
-	} else {
-		Vec::from(input_bytes)
-	};
+    // If the data bytes are less than 96, fill it with random data. This may happen only in the case of the upgrade to v0.3.0
+    let bytes = if input_bytes.len() < 96 {
+        let bytes_to_add = create_random(96 - input_bytes.len());
+        let mut input_vec = Vec::new();
+        let mut vec_to_add = Vec::from(bytes_to_add);
+        input_vec = Vec::from(input_bytes);
+        input_vec.append(&mut vec_to_add);
+        input_vec
+    } else {
+        Vec::from(input_bytes)
+    };
     // Check whether the salt exists between the data.
     // The salt and hash are positioned one right after the other and can generally exist either between the data, or at the end of the data.
     // To calculate this, we need to substract from the overall bytes, 16 bytes which is the iv, 16 bytes which is the salt and 64 bytes which is the hash.
@@ -897,5 +883,34 @@ mod test_crypt {
         let hash = hasher.calculate_hash(&data);
         assert!(hash.len() == 64);
         assert!(hasher.validate_hash(&data, &hash));
+    }
+
+    #[test]
+    fn integrity_failure_on_bcrypt_aes() {
+        let iv = super::create_random(16);
+        let salt = super::create_random(16);
+        let hash = super::create_random(64);
+        let data = b"This is the data";
+        // Construct the bytes to pass to the decryptor
+        // Add the iv
+        let mut bytes: Vec<u8> = iv.iter().cloned().collect();
+        // Add the salt
+        let mut tmp = salt.iter().cloned().collect();
+        bytes.append(&mut tmp);
+        // Add a different hash than the one created earlier
+        tmp = super::create_random(64);
+        bytes.append(&mut tmp);
+        // Add the data
+        tmp = data.iter().cloned().collect();
+        bytes.append(&mut tmp);
+
+        // Create the cryptor
+        let cryptor = super::BcryptAes::new("password".to_string(), iv, 1, salt, 33, hash);
+        let result = cryptor.decrypt(&bytes);
+        assert!(result.is_err());
+        match result.err() {
+            Some(super::super::errors::RustKeylockError::IntegrityError(_)) => assert!(true),
+            _ => assert!(false),
+        }
     }
 }

@@ -338,7 +338,10 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
                         // In all the other cases, notify the User and retry
                         _ => {
                             error!("{}", error.description());
-                            let _ = editor.show_message("Wrong password or number");
+                            let _ =
+                                editor.show_message("Wrong password or nmumber! Please make sure that both the password and number that \
+                                                     you provide are correct. If this is the case, the rust-keylock data is corrupted \
+                                                     and nothing can be done about it.");
                             user_selection = UserSelection::GoTo(Menu::TryPass);
                             Vec::new()
                         }

@@ -256,8 +256,19 @@ fn load_existing_file<'a>(file_path: &PathBuf, cryptor_opt: Option<&Cryptor>) ->
         Some(cryptor) => {
             if bytes.len() > 0 {
                 debug!("Decrypting passwords file...");
-                let dbytes = try!(cryptor.decrypt(&bytes));
-                Ok(try!(String::from_utf8(dbytes)))
+                match cryptor.decrypt(&bytes) {
+                    Ok(dbytes) => Ok(try!(String::from_utf8(dbytes))),
+                    Err(errors::RustKeylockError::IntegrityError(dbytes)) => {
+                        match String::from_utf8(dbytes) {
+                            Ok(toml_string) => {
+                                warn!("Temporarily ignoring integrity error in order to be able to upgrade from v0.2.1 to v.0.3.0");
+                                Ok(toml_string)
+                            }
+                            Err(_) => Err(errors::RustKeylockError::IntegrityError(Vec::new())),
+                        }
+                    }
+                    Err(other) => Err(other),
+                }
             } else {
                 Ok("".to_string())
             }
@@ -546,7 +557,7 @@ mod test_parser {
         delete_file(filename);
     }
 
-	#[test]
+    #[test]
     fn create_v_0_2_1_encrypt_and_then_decrypt_with_v_0_3_0() {
         let filename = "v_0_2_1_encrypt_to_v_0_3_0.toml";
 
@@ -555,14 +566,39 @@ mod test_parser {
 
         let entries = Vec::new();
 
-		// Create a v0.2.1 cryptor
-		let old_cryptor = CryptorV021::new(password.clone(), datacrypt::create_random(16), 3, datacrypt::create_random(16), salt_position);
+        // Create a v0.2.1 cryptor
+        let old_cryptor = CryptorV021::new(password.clone(), datacrypt::create_random(16), 3, datacrypt::create_random(16), salt_position);
         assert!(super::save(&entries, filename, &old_cryptor, true).is_ok());
         let new_cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
 
         let m = super::load(filename, &new_cryptor, true);
         assert!(entries == m.unwrap());
         assert!(super::save(&entries, filename, &new_cryptor, true).is_ok());
+
+        delete_file(filename);
+    }
+
+	#[test]
+    fn integrity_error() {
+        let filename = "integrity_error.toml";
+
+        let salt_position = 33;
+        let password = "123".to_string();
+
+        let entries = vec![Entry::new("name".to_string(), "user".to_string(), "pass".to_string(), "desc".to_string())];
+
+		// Create a bcryptor
+        let cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
+        // Saving will change the hash, so reading with the same cryptor should result to an integrity error
+        assert!(super::save(&entries, filename, &cryptor, true).is_ok());
+
+        let result = super::load(filename, &cryptor, true);
+
+        assert!(result.is_err());
+        match result.err() {
+            Some(super::super::errors::RustKeylockError::IntegrityError(_)) => assert!(true),
+            _ => assert!(false),
+        }
 
         delete_file(filename);
     }
