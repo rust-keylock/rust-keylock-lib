@@ -18,6 +18,7 @@ The core logic is written in [Rust](https://www.rust-lang.org), but the presenta
 
  * The data is locked with a user-defined master password, using _bcrypt_ password hashing
  * Encryption using _AES_ with _CTR_ mode
+ * Data integrity checks with SHA3 (Keccak)
  * Encrypted bytes blending
  * Passwords are kept encrypted in memory
  * Encryption keys on runtime are stored in safe, non-swappable memory
