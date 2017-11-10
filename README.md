@@ -53,3 +53,5 @@ Currently, there are Editors and executables for:
 * [UI Desktops](https://github.com/rust-keylock/rust-keylock-ui)
 * [Terminals](https://github.com/rust-keylock/rust-keylock-shell)
 * [Android](https://github.com/rust-keylock/rust-keylock-android)
+
+See how to [download and install](https://rust-keylock.github.io/download/rkl/).
