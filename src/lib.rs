@@ -61,7 +61,6 @@ extern crate crypto;
 extern crate sha3;
 extern crate base64;
 extern crate rand;
-#[cfg(not(target_os = "windows"))]
 extern crate secstr;
 
 use toml::value::Table;
