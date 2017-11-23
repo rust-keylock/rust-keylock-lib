@@ -168,10 +168,11 @@ pub fn execute<T: Editor>(editor: &T) {
                 match file_handler::save(&safe.get_entries_decrypted(), filename, &cryptor, true) {
                     Ok(_) => {
                         contents_changed = false;
-                        let _ = editor.show_message("Encrypted and saved successfully!");
+                        let _ =
+                            editor.show_message("Encrypted and saved successfully!", vec![UserOption::ok()], MessageSeverity::default());
                     }
                     Err(error) => {
-                        let _ = editor.show_message("Could not save...");
+                        let _ = editor.show_message("Could not save...", vec![UserOption::ok()], MessageSeverity::default());
                         error!("Could not save... {:?}", error);
                     }
                 };
@@ -205,7 +206,9 @@ pub fn execute<T: Editor>(editor: &T) {
             }
             UserSelection::GoTo(Menu::TryFileRecovery) => {
                 debug!("UserSelection::GoTo(Menu::TryFileRecovery)");
-                let _ = editor.show_message("The password entries are corrupted.\n\nPress Enter to attempt recovery...");
+                let _ = editor.show_message("The password entries are corrupted.\n\nPress Enter to attempt recovery...",
+                                            vec![UserOption::ok()],
+                                            MessageSeverity::Error);
                 let mut rec_entries = match file_handler::recover(filename, &cryptor) {
                     Ok(recovered_entries) => {
                         let message = r#"
@@ -216,7 +219,7 @@ Press Enter to show the Recovered Entries and if you are ok with it, save them.
 
 Warning: Saving will discard all the entries that could not be recovered.
 "#;
-                        let _ = editor.show_message(message);
+                        let _ = editor.show_message(message, vec![UserOption::ok()], MessageSeverity::default());
                         contents_changed = true;
                         safe.entries.clear();
                         recovered_entries
@@ -224,7 +227,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                     Err(error) => {
                         let message = format!("Recovery failed... Reason {:?}", error);
                         error!("{}", &message);
-                        let _ = editor.show_message("Recovery failed...");
+                        let _ = editor.show_message("Recovery failed...", vec![UserOption::ok()], MessageSeverity::Error);
                         safe.entries.clone()
                     }
                 };
@@ -240,10 +243,10 @@ Warning: Saving will discard all the entries that could not be recovered.
                 debug!("UserSelection::ExportTo(path)");
                 match file_handler::save(&safe.get_entries_decrypted(), &path, &cryptor, false) {
                     Ok(_) => {
-                        let _ = editor.show_message("Export completed successfully!");
+                        let _ = editor.show_message("Export completed successfully!", vec![UserOption::ok()], MessageSeverity::default());
                     }
                     Err(error) => {
-                        let _ = editor.show_message("Could not export...");
+                        let _ = editor.show_message("Could not export...", vec![UserOption::ok()], MessageSeverity::Error);
                         error!("Could not export... {:?}", error);
                     }
                 };
@@ -263,10 +266,10 @@ Warning: Saving will discard all the entries that could not be recovered.
                         debug!("{}", message);
                         contents_changed = true;
                         safe.merge(ents);
-                        let _ = editor.show_message(&message);
+                        let _ = editor.show_message(&message, vec![UserOption::ok()], MessageSeverity::default());
                     }
                     Err(error) => {
-                        let _ = editor.show_message("Could not import...");
+                        let _ = editor.show_message("Could not import...", vec![UserOption::ok()], MessageSeverity::Error);
                         error!("Could not import... {:?}", error);
                     }
                 };
@@ -295,7 +298,7 @@ fn user_selection_after_idle_check(last_action_time: &SystemTime,
             if elapsed_seconds as i64 > timeout_seconds {
                 warn!("Idle time of {} seconds elapsed! Locking...", timeout_seconds);
                 let message = format!("Idle time of {} seconds elapsed! Locking...", timeout_seconds);
-                let _ = editor.show_message(&message);
+                let _ = editor.show_message(&message, vec![UserOption::ok()], MessageSeverity::default());
                 UserSelection::GoTo(Menu::TryPass)
             } else {
                 us
@@ -340,7 +343,9 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
                             let _ =
                                 editor.show_message("Wrong password or nmumber! Please make sure that both the password and number that \
                                                      you provide are correct. If this is the case, the rust-keylock data is corrupted \
-                                                     and nothing can be done about it.");
+                                                     and nothing can be done about it.",
+                                                    vec![UserOption::ok()],
+                                                    MessageSeverity::Error);
                             user_selection = UserSelection::GoTo(Menu::TryPass);
                             Vec::new()
                         }
@@ -667,6 +672,8 @@ pub enum Menu {
     ImportEntries,
     /// The user should be able to export password `Entries`.
     ExportEntries,
+    /// Perform Synchronization
+    Syncronize,
 }
 
 impl Menu {
@@ -687,6 +694,7 @@ impl Menu {
             &Menu::TryFileRecovery => format!("{:?}", Menu::TryFileRecovery),
             &Menu::ImportEntries => format!("{:?}", Menu::ImportEntries),
             &Menu::ExportEntries => format!("{:?}", Menu::ExportEntries),
+            &Menu::Syncronize => format!("{:?}", Menu::Syncronize),
         }
     }
 
@@ -710,6 +718,7 @@ impl Menu {
             (ref n, None, None) if &Menu::TryFileRecovery.get_name() == n => Menu::TryFileRecovery,
             (ref n, None, None) if &Menu::ImportEntries.get_name() == n => Menu::ImportEntries,
             (ref n, None, None) if &Menu::ExportEntries.get_name() == n => Menu::ExportEntries,
+            (ref n, None, None) if &Menu::Syncronize.get_name() == n => Menu::Syncronize,
             (ref other, _, _) => {
                 let message = format!("Cannot create Menu from String '{}' and arguments usize: '{:?}', String: '{:?}'. Please, consider \
                                        opening a bug to the developers.",
@@ -742,6 +751,95 @@ pub enum UserSelection {
     ExportTo(String),
     /// The User selected to import the password `Entries` from a path.
     ImportFrom(String, String, usize),
+    /// The User may be offered to select one of the Options.
+    UserOption(UserOption),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct UserOption {
+    pub label: String,
+    pub value: UserOptionType,
+    pub short_label: String,
+}
+
+impl<'a> From<&'a UserOption> for UserOption {
+    fn from(uo: &UserOption) -> Self {
+        UserOption {
+            label: uo.label.clone(),
+            value: uo.value.clone(),
+            short_label: uo.short_label.clone(),
+        }
+    }
+}
+
+impl From<(String, String, String)> for UserOption {
+    fn from(f: (String, String, String)) -> Self {
+        UserOption {
+            label: f.0,
+            value: UserOptionType::None, // FIXME: Implement From for the UserOptionType
+            short_label: f.2,
+        }
+    }
+}
+
+impl UserOption {
+    pub fn empty() -> UserOption {
+        UserOption {
+            label: "".to_string(),
+            value: UserOptionType::None,
+            short_label: "".to_string(),
+        }
+    }
+
+    pub fn ok() -> UserOption {
+        UserOption {
+            label: "Ok".to_string(),
+            value: UserOptionType::String("Ok".to_string()),
+            short_label: "o".to_string(),
+        }
+    }
+
+    pub fn cancel() -> UserOption {
+        UserOption {
+            label: "Cancel".to_string(),
+            value: UserOptionType::String("Cancel".to_string()),
+            short_label: "c".to_string(),
+        }
+    }
+}
+
+/// Represents a type for a `UserOption`
+#[derive(Debug, PartialEq, Clone)]
+pub enum UserOptionType {
+    Number(usize),
+    String(String),
+    None,
+}
+
+impl ToString for UserOptionType {
+    fn to_string(&self) -> String {
+        String::from(format!("{:?}", &self))
+    }
+}
+
+/// Severity for the messages presented to tthe Users
+#[derive(Debug, PartialEq)]
+pub enum MessageSeverity {
+    Info,
+    Warn,
+    Error,
+}
+
+impl Default for MessageSeverity {
+    fn default() -> Self {
+        MessageSeverity::Info
+    }
+}
+
+impl ToString for MessageSeverity {
+    fn to_string(&self) -> String {
+        String::from(format!("{:?}", &self))
+    }
 }
 
 /// Trait to be implemented by various different `Editor`s (Shell, Web, Android, other...).
@@ -757,7 +855,8 @@ pub trait Editor {
     /// Shows the Exit `Menu` to the User.
     fn exit(&self, contents_changed: bool) -> UserSelection;
     /// Shows a message to the User.
-    fn show_message(&self, message: &str) -> UserSelection;
+    /// Along with the message, the user should select one of the offered `UserOption`s.
+    fn show_message(&self, message: &str, options: Vec<UserOption>, severity: MessageSeverity) -> UserSelection;
 
     /// Sorts the supplied entries.
     fn sort_entries(&self, entries: &mut [Entry]) {
@@ -1124,6 +1223,24 @@ mod unit_tests {
         assert!(user_selection == UserSelection::GoTo(Menu::Main));
     }
 
+    #[test]
+    fn user_option_constructors() {
+        let opt1 = super::UserOption::cancel();
+        assert!(&opt1.label == "Cancel");
+        assert!(opt1.value == super::UserOptionType::String("Cancel".to_string()));
+        assert!(&opt1.short_label == "c");
+
+        let opt2 = super::UserOption::empty();
+        assert!(&opt2.label == "");
+        assert!(opt2.value == super::UserOptionType::None);
+        assert!(&opt2.short_label == "");
+
+        let opt3 = super::UserOption::ok();
+        assert!(&opt3.label == "Ok");
+        assert!(opt3.value == super::UserOptionType::String("Ok".to_string()));
+        assert!(&opt3.short_label == "o");
+    }
+
     struct DummyEditor;
 
     impl DummyEditor {
@@ -1149,7 +1266,7 @@ mod unit_tests {
             UserSelection::Ack
         }
 
-        fn show_message(&self, _: &str) -> UserSelection {
+        fn show_message(&self, _: &str, _: Vec<super::UserOption>, _: super::MessageSeverity) -> UserSelection {
             UserSelection::Ack
         }
     }
