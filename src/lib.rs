@@ -3,56 +3,6 @@
 //! Executes the logic of the _rust-keylock_.
 //!
 //! This library is the executor of the _rust-keylock_ logic. `Editor` references are used to interact with the _rust-keylock_ users.
-//!
-//! ## How it works
-//!
-//! The library implements the functionality where a User stores password `Entries` in an encrypted toml file.
-//! Currently, __AES__ with __CTR__ is used and the encryption key is generated with __Bcrypt__, but more choices can be implemented in the future.
-//!
-//! The _iv_ that is used for encyption/decryption and the _salt_ for the generation of the encryption key are stored along with the rest of the encrypted data bytes in the same file.
-//!
-//! The 16-byte _iv_ is always in the start of the file.
-//!
-//! The 16 bytes of _salt_ are merged along with the encrypted actual data.
-//! The position of the _salt_ is actually defined by the user. Upon _rust-keylock_ initialization, the user sets up two things:
-//!
-//! * A _master password_, which is combined with an initially pseudo-randomly generated 16-bytes array, the _salt_, in order to create the `Bcrypt` key that is used for the data encryption/decryption.
-//! * A _number_,  which is the actual location of the salt among the encrypted data.
-//!
-//! Having the salt inbetween the actual encrypted data gives two obvious benefits:
-//!
-//! ### Makes the encrypted file portable
-//!
-//! All the information that is needed for encryption/decryption is in the file itself. Nothing additional is needed. Therefore, the encrypted file can just be copied in some location to be backed-up, or even be synchronized in other devices and be used there as well.
-//!
-//! ### Increases the security of the encryption
-//!
-//! The actual data bytes are "interrupted" by the salt and this potentially makes an adversary's job more difficult; more difficult to infer things about the data contents or the encryption key.
-//!
-//! ## A concrete example
-//!
-//! Let's assume that the user has set his _master password_ and the number __3__ as the _additional number_ to the password.
-//!
-//! Let's also assume that the actual password `Entries` data gets encrypted as the following byte array:
-//! `0x11u8, 0x12u8, 0x13u8, 0x14u8, 0x15u8, 0x16u8, 0x17u8, 0x18u8, 0x19u8, 0x20u8, 0x21u8, 0x22u8, 0x23u8, 0x24u8, 0x25u8, 0x26u8, 0x27u8, 0x28u8, 0x29u8, 0x30u8, 0x31u8, 0x32u8, 0x33u8, 0x34u8, 0x35u8, 0x36u8, 0x37u8, 0x38u8, 0x39u8, 0x40u8, 0x41u8, 0x42u8`
-//!
-//! Upon saving to the file, the _rust-keylock_ will generate two pseudo-random byte arrays; one to be the _iv_ and one to be the _salt_.
-//! Let the _iv_ be `0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8`.
-//!
-//! Let the _salt_ be `0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8`.
-//!
-//! All that makes the actual bytes that are saved in the file to be:
-//!
-//! 1. The _iv_
-//! 2. Three bytes of real encrypted data
-//! 3. The _salt_
-//! 4. The rest of the real encrypted data bytes
-//!
-//! Thus, the saved data should be looking like following:
-//!
-//! `0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x01u8, 0x11u8, 0x12u8, 0x13u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x02u8, 0x14u8, 0x15u8, 0x16u8, 0x17u8, 0x18u8, 0x19u8, 0x20u8, 0x21u8, 0x22u8, 0x23u8, 0x24u8, 0x25u8, 0x26u8, 0x27u8, 0x28u8, 0x29u8, 0x30u8, 0x31u8, 0x32u8, 0x33u8, 0x34u8, 0x35u8, 0x36u8, 0x37u8, 0x38u8, 0x39u8, 0x40u8, 0x41u8, 0x42u8`
-//!
-//!
 
 #[macro_use]
 extern crate log;
@@ -341,7 +291,7 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
                         _ => {
                             error!("{}", error.description());
                             let _ =
-                                editor.show_message("Wrong password or nmumber! Please make sure that both the password and number that \
+                                editor.show_message("Wrong password or number! Please make sure that both the password and number that \
                                                      you provide are correct. If this is the case, the rust-keylock data is corrupted \
                                                      and nothing can be done about it.",
                                                     vec![UserOption::ok()],
