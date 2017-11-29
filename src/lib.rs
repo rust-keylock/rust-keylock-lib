@@ -12,15 +12,25 @@ extern crate sha3;
 extern crate base64;
 extern crate rand;
 extern crate secstr;
+extern crate futures;
+extern crate hyper;
+extern crate tokio_core;
+extern crate hyper_tls;
+extern crate native_tls;
+extern crate xml;
+extern crate httpdate;
 
 use toml::value::Table;
 use std::error::Error;
-use std::time::SystemTime;
+use std::time::{self, SystemTime};
+use std::sync::mpsc::{self, Sender, Receiver};
+pub use async::nextcloud;
 
 mod file_handler;
 mod errors;
 mod protected;
 pub mod datacrypt;
+mod async;
 
 /// Takes a reference of `Editor` implementation as argument and executes the _rust-keylock_ logic.
 /// The `Editor` is responsible for the interaction with the user. Currently there are `Editor` implementations for __shell__ and for __Android__.
@@ -42,8 +52,14 @@ pub fn execute<T: Editor>(editor: &T) {
         }
     };
 
+    // Keeps the sensitive data
     let mut safe = Safe::new();
+    // Keeps the configuration data
+    let mut configuration = RklConfiguration::from(async::nextcloud::NextcloudConfiguration::default());
+    // Signals changes that are not saved
     let mut contents_changed = false;
+    let mut nextcloud_rx: Option<Receiver<errors::Result<async::nextcloud::SyncStatus>>> = None;
+    let mut nextcloud_loop_ctrl_tx: Option<Sender<bool>> = None;
 
     // Create a Cryptor
     let mut cryptor = {
@@ -55,7 +71,13 @@ pub fn execute<T: Editor>(editor: &T) {
         };
 
         // Take the provided password and do the initialization
-        let (us, cr) = handle_provided_password_for_init(provided_password, filename, &mut safe, editor);
+        let (us, cr) = handle_provided_password_for_init(provided_password, filename, &mut safe, &mut configuration, editor);
+        // If a valid nextcloud configuration is in place, spawn the background async execution
+        if configuration.nextcloud.is_filled() {
+            let (nc_rx, loop_ctrl_tx) = spawn_nextcloud_async_task(&filename, &configuration, &nextcloud_loop_ctrl_tx);
+            nextcloud_rx = Some(nc_rx);
+            nextcloud_loop_ctrl_tx = Some(loop_ctrl_tx);
+        }
         // Set the UserSelection
         user_selection = us;
         // Set the time of the action
@@ -63,8 +85,13 @@ pub fn execute<T: Editor>(editor: &T) {
         cr
     };
 
+    // Start the backround async tasks
+    //    let rx_async_tasks = start_async_tasks(&filename);
+
     loop {
         editor.sort_entries(&mut safe.entries);
+        // Check reception of async message
+        async_channel_check(&nextcloud_rx, editor, filename, &mut user_selection);
         // Idle time check
         user_selection = user_selection_after_idle_check(&last_action_time, props.idle_timeout_seconds, user_selection, editor);
         // Update the action time
@@ -72,13 +99,23 @@ pub fn execute<T: Editor>(editor: &T) {
         // Handle
         user_selection = match user_selection {
             UserSelection::GoTo(Menu::TryPass) => {
-                let (user_selection, cr) = handle_provided_password_for_init(editor.show_password_enter(), filename, &mut safe, editor);
+            	// Cancel any pending background tasks
+            	let _ = nextcloud_loop_ctrl_tx.as_ref().and_then(|tx| Some(tx.send(true)));
+                let (user_selection, cr) =
+                    handle_provided_password_for_init(editor.show_password_enter(), filename, &mut safe, &mut configuration, editor);
+                // If a valid nextcloud configuration is in place, spawn the background async execution
+                if configuration.nextcloud.is_filled() {
+                    debug!("A valid configuration for Nextcloud synchronization was found. Spawning async tasks");
+                    let (nc_rx, loop_ctrl_tx) = spawn_nextcloud_async_task(&filename, &configuration, &nextcloud_loop_ctrl_tx);
+                    nextcloud_rx = Some(nc_rx);
+                    nextcloud_loop_ctrl_tx = Some(loop_ctrl_tx);
+                }
                 cryptor = cr;
                 user_selection
             }
             UserSelection::GoTo(Menu::Main) => {
                 debug!("UserSelection::GoTo(Menu::Main)");
-                let m = editor.show_menu(&Menu::Main, &safe);
+                let m = editor.show_menu(&Menu::Main, &safe, &configuration);
                 debug!("UserSelection::GoTo(Menu::Main) returns {:?}", &m);
                 m
             }
@@ -95,34 +132,36 @@ pub fn execute<T: Editor>(editor: &T) {
             UserSelection::GoTo(Menu::EntriesList(filter)) => {
                 debug!("UserSelection::GoTo(Menu::EntriesList) with filter '{}'", &filter);
                 safe.set_filter(filter.clone());
-                editor.show_menu(&Menu::EntriesList(filter), &safe)
+                editor.show_menu(&Menu::EntriesList(filter), &safe, &configuration)
             }
             UserSelection::GoTo(Menu::NewEntry) => {
                 debug!("UserSelection::GoTo(Menu::NewEntry)");
-                editor.show_menu(&Menu::NewEntry, &safe)
+                editor.show_menu(&Menu::NewEntry, &safe, &configuration)
             }
             UserSelection::GoTo(Menu::ShowEntry(index)) => {
                 debug!("UserSelection::GoTo(Menu::ShowEntry(index))");
-                editor.show_menu(&Menu::ShowEntry(index), &safe)
+                editor.show_menu(&Menu::ShowEntry(index), &safe, &configuration)
             }
             UserSelection::GoTo(Menu::EditEntry(index)) => {
                 debug!("UserSelection::GoTo(Menu::EditEntry(index))");
-                editor.show_menu(&Menu::EditEntry(index), &safe)
+                editor.show_menu(&Menu::EditEntry(index), &safe, &configuration)
             }
             UserSelection::GoTo(Menu::DeleteEntry(index)) => {
                 debug!("UserSelection::GoTo(Menu::DeleteEntry(index))");
-                editor.show_menu(&Menu::DeleteEntry(index), &safe)
+                editor.show_menu(&Menu::DeleteEntry(index), &safe, &configuration)
             }
             UserSelection::GoTo(Menu::Save) => {
                 debug!("UserSelection::GoTo(Menu::Save)");
-                match file_handler::save(&safe.get_entries_decrypted(), filename, &cryptor, true) {
+                let rkl_content = RklContent::from((&safe, &configuration.nextcloud));
+                let res = rkl_content.and_then(|c| file_handler::save(c, filename, &cryptor, true));
+                match res {
                     Ok(_) => {
                         contents_changed = false;
                         let _ =
                             editor.show_message("Encrypted and saved successfully!", vec![UserOption::ok()], MessageSeverity::default());
                     }
                     Err(error) => {
-                        let _ = editor.show_message("Could not save...", vec![UserOption::ok()], MessageSeverity::default());
+                        let _ = editor.show_message("Could not save...", vec![UserOption::ok()], MessageSeverity::Error);
                         error!("Could not save... {:?}", error);
                     }
                 };
@@ -187,11 +226,13 @@ Warning: Saving will discard all the entries that could not be recovered.
             }
             UserSelection::GoTo(Menu::ExportEntries) => {
                 debug!("UserSelection::GoTo(Menu::ExportEntries)");
-                editor.show_menu(&Menu::ExportEntries, &safe)
+                editor.show_menu(&Menu::ExportEntries, &safe, &configuration)
             }
             UserSelection::ExportTo(path) => {
                 debug!("UserSelection::ExportTo(path)");
-                match file_handler::save(&safe.get_entries_decrypted(), &path, &cryptor, false) {
+                let rkl_content = RklContent::from((&safe, &configuration.nextcloud));
+                let res = rkl_content.and_then(|c| file_handler::save(c, &path, &cryptor, false));
+                match res {
                     Ok(_) => {
                         let _ = editor.show_message("Export completed successfully!", vec![UserOption::ok()], MessageSeverity::default());
                     }
@@ -204,18 +245,18 @@ Warning: Saving will discard all the entries that could not be recovered.
             }
             UserSelection::GoTo(Menu::ImportEntries) => {
                 debug!("UserSelection::GoTo(Menu::ImportEntries)");
-                editor.show_menu(&Menu::ImportEntries, &safe)
+                editor.show_menu(&Menu::ImportEntries, &safe, &configuration)
             }
             UserSelection::ImportFrom(path, pwd, salt_pos) => {
                 let cr = file_handler::create_bcryptor(&path, pwd, salt_pos, false, false).unwrap();
                 debug!("UserSelection::ImportFrom(path, pwd, salt_pos)");
 
                 match file_handler::load(&path, &cr, false) {
-                    Ok(ents) => {
-                        let message = format!("Imported {} entries!", &ents.len());
+                    Ok(rkl_content) => {
+                        let message = format!("Imported {} entries!", &rkl_content.entries.len());
                         debug!("{}", message);
                         contents_changed = true;
-                        safe.merge(ents);
+                        safe.merge(rkl_content.entries);
                         let _ = editor.show_message(&message, vec![UserOption::ok()], MessageSeverity::default());
                     }
                     Err(error) => {
@@ -223,6 +264,23 @@ Warning: Saving will discard all the entries that could not be recovered.
                         error!("Could not import... {:?}", error);
                     }
                 };
+                UserSelection::GoTo(Menu::Main)
+            }
+            UserSelection::GoTo(Menu::ShowConfiguration) => {
+                debug!("UserSelection::GoTo(Menu::ShowConfiguration)");
+                editor.show_menu(&Menu::ShowConfiguration, &safe, &configuration)
+            }
+            UserSelection::UpdateConfiguration(new_conf) => {
+                debug!("UserSelection::UpdateConfiguration");
+                configuration = new_conf;
+                if configuration.nextcloud.is_filled() {
+                    debug!("A valid configuration for Nextcloud synchronization was found after being updated by the User. Spawning \
+                            async tasks");
+                    let (nc_rx, loop_ctrl_tx) = spawn_nextcloud_async_task(&filename, &configuration, &nextcloud_loop_ctrl_tx);
+                    nextcloud_rx = Some(nc_rx);
+                    nextcloud_loop_ctrl_tx = Some(loop_ctrl_tx);
+                    contents_changed = true;
+                }
                 UserSelection::GoTo(Menu::Main)
             }
             other => {
@@ -235,6 +293,46 @@ Warning: Saving will discard all the entries that could not be recovered.
         }
     }
     info!("Exiting rust-keylock...");
+}
+
+fn async_channel_check(nextcloud_rx: &Option<Receiver<errors::Result<async::nextcloud::SyncStatus>>>,
+                       editor: &Editor,
+                       filename: &str,
+                       user_selection: &mut UserSelection) {
+    match nextcloud_rx.as_ref() {
+        Some(rx) => {
+            match rx.try_recv() {
+                Ok(sync_status) => {
+                    match sync_status {
+                        Ok(async::nextcloud::SyncStatus::UploadSuccess) => {
+                            let _ = editor.show_message("The nextcloud server was updated with the local data",
+                                                        vec![UserOption::ok()],
+                                                        MessageSeverity::Info);
+                        }
+                        Ok(async::nextcloud::SyncStatus::NewAvailable(downloaded_filename)) => {
+                            let selection =
+                                editor.show_message("Downloaded new data from the nextcloud server. Do you want to apply them locally now?",
+                                                  vec![UserOption::yes(), UserOption::no()],
+                                                  MessageSeverity::Info);
+                            if selection == UserSelection::UserOption(UserOption::yes()) {
+                                let _ = file_handler::replace(&downloaded_filename, filename);
+                                *user_selection = UserSelection::GoTo(Menu::TryPass);
+                            }
+                        }
+                        _ => {
+                            // ignore
+                        }
+                    }
+                }
+                _ => {
+                    // ignore
+                }
+            }
+        }
+        _ => {
+            // ignore
+        }
+    }
 }
 
 fn user_selection_after_idle_check(last_action_time: &SystemTime,
@@ -264,6 +362,7 @@ fn user_selection_after_idle_check(last_action_time: &SystemTime,
 fn handle_provided_password_for_init(provided_password: UserSelection,
                                      filename: &str,
                                      safe: &mut Safe,
+                                     configuration: &mut RklConfiguration,
                                      editor: &Editor)
                                      -> (UserSelection, datacrypt::BcryptAes) {
     let user_selection: UserSelection;
@@ -273,10 +372,13 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
             let cr = file_handler::create_bcryptor(filename, pwd, salt_pos, false, true).unwrap();
             // Try to decrypt and load the Entries
             let retrieved_entries = match file_handler::load(filename, &cr, true) {
-                // Success, go th the Main menu
-                Ok(ents) => {
+                // Success, go to the Main menu
+                Ok(rkl_content) => {
                     user_selection = UserSelection::GoTo(Menu::Main);
-                    ents
+                    // Set the retrieved configuration
+                    let new_rkl_conf = RklConfiguration::from(rkl_content.nextcloud_conf);
+                    *configuration = new_rkl_conf;
+                    rkl_content.entries
                 }
                 // Failure cases
                 Err(error) => {
@@ -291,17 +393,19 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
                         _ => {
                             error!("{}", error.description());
                             let _ =
-                                editor.show_message("Wrong password or number! Please make sure that both the password and number that \
-                                                     you provide are correct. If this is the case, the rust-keylock data is corrupted \
-                                                     and nothing can be done about it.",
-                                                    vec![UserOption::ok()],
-                                                    MessageSeverity::Error);
+                                editor.show_message("Wrong password or number! Please make sure that both the password and number that you \
+                                                   provide are correct. If this is the case, the rust-keylock data is corrupted and \
+                                                   nothing can be done about it.",
+                                                  vec![UserOption::ok()],
+                                                  MessageSeverity::Error);
                             user_selection = UserSelection::GoTo(Menu::TryPass);
                             Vec::new()
                         }
                     }
                 }
             };
+
+            safe.clear();
             safe.add_all(retrieved_entries);
             debug!("Retrieved entries. Returning {:?} with {} entries ", &user_selection, safe.entries.len());
             (user_selection, cr)
@@ -316,6 +420,67 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
             panic!("Wrong initialization sequence... The editor.show_password_enter must always return a UserSelection::ProvidedPassword. \
                     Please, consider opening a bug to the developers.")
         }
+    }
+}
+
+fn spawn_nextcloud_async_task(filename: &str,
+                              configuration: &RklConfiguration,
+                              async_task_control_tx_opt: &Option<Sender<bool>>)
+                              -> (Receiver<errors::Result<async::nextcloud::SyncStatus>>, Sender<bool>) {
+
+    match async_task_control_tx_opt.as_ref() {
+        Some(ctrl_tx) => {
+            debug!("Stopping a previously spawned nextcloud async task");
+            let _ = ctrl_tx.send(true);
+        }
+        None => {
+            // ignore
+        }
+    }
+    debug!("Spawning nextcloud async task");
+    // Create a new channel
+    let (tx, rx): (Sender<errors::Result<async::nextcloud::SyncStatus>>, Receiver<errors::Result<async::nextcloud::SyncStatus>>) =
+        mpsc::channel();
+    let every = time::Duration::from_millis(10000);
+    let nc = async::nextcloud::Synchronizer::new(&configuration.nextcloud, tx, filename).unwrap();
+    let async_task_control_tx = async::execute_task(Box::new(nc), every);
+    (rx, async_task_control_tx)
+}
+
+/// Struct to use for retrieving and saving data from/to the file
+pub struct RklContent {
+    entries: Vec<Entry>,
+    nextcloud_conf: async::nextcloud::NextcloudConfiguration,
+}
+
+impl RklContent {
+    pub fn new(entries: Vec<Entry>, nextcloud_conf: async::nextcloud::NextcloudConfiguration) -> RklContent {
+        RklContent {
+            entries: entries,
+            nextcloud_conf: nextcloud_conf,
+        }
+    }
+
+    pub fn from(tup: (&Safe, &async::nextcloud::NextcloudConfiguration)) -> errors::Result<RklContent> {
+        let entries = tup.0.get_entries_decrypted();
+        let nextcloud_conf = async::nextcloud::NextcloudConfiguration::new(tup.1.server_url.clone(),
+                                                                           tup.1.username.clone(),
+                                                                           tup.1.decrypted_password()?,
+                                                                           tup.1.self_signed_der_certificate_location.clone());
+
+        Ok(RklContent::new(entries, nextcloud_conf.unwrap()))
+    }
+}
+
+/// Keeps the Configuration
+#[derive(Debug, PartialEq)]
+pub struct RklConfiguration {
+    pub nextcloud: async::nextcloud::NextcloudConfiguration,
+}
+
+impl From<async::nextcloud::NextcloudConfiguration> for RklConfiguration {
+    fn from(ncc: async::nextcloud::NextcloudConfiguration) -> Self {
+        RklConfiguration { nextcloud: ncc }
     }
 }
 
@@ -483,7 +648,7 @@ impl Safe {
         self.apply_filter();
     }
 
-    /// Adds the Entrie in the Safe
+    /// Adds the Entries in the Safe
     fn add_all(&mut self, incoming: Vec<Entry>) {
         let mut to_add = {
             incoming.into_iter()
@@ -546,6 +711,12 @@ impl Safe {
 
         self.filtered_entries = m;
     }
+
+    pub fn clear(&mut self) {
+        self.filtered_entries = Vec::new();
+        self.entries = Vec::new();
+        self.filter = "".to_string();
+    }
 }
 
 /// A struct that allows storing general configuration values.
@@ -558,7 +729,7 @@ pub struct Props {
 
 impl Default for Props {
     fn default() -> Self {
-        Props { idle_timeout_seconds: 60 }
+        Props { idle_timeout_seconds: 180 }
     }
 }
 
@@ -622,6 +793,8 @@ pub enum Menu {
     ImportEntries,
     /// The user should be able to export password `Entries`.
     ExportEntries,
+    /// The user should be presented with the configuration menu
+    ShowConfiguration,
     /// Perform Synchronization
     Syncronize,
 }
@@ -644,6 +817,7 @@ impl Menu {
             &Menu::TryFileRecovery => format!("{:?}", Menu::TryFileRecovery),
             &Menu::ImportEntries => format!("{:?}", Menu::ImportEntries),
             &Menu::ExportEntries => format!("{:?}", Menu::ExportEntries),
+            &Menu::ShowConfiguration => format!("{:?}", Menu::ShowConfiguration),
             &Menu::Syncronize => format!("{:?}", Menu::Syncronize),
         }
     }
@@ -668,6 +842,7 @@ impl Menu {
             (ref n, None, None) if &Menu::TryFileRecovery.get_name() == n => Menu::TryFileRecovery,
             (ref n, None, None) if &Menu::ImportEntries.get_name() == n => Menu::ImportEntries,
             (ref n, None, None) if &Menu::ExportEntries.get_name() == n => Menu::ExportEntries,
+            (ref n, None, None) if &Menu::ShowConfiguration.get_name() == n => Menu::ShowConfiguration,
             (ref n, None, None) if &Menu::Syncronize.get_name() == n => Menu::Syncronize,
             (ref other, _, _) => {
                 let message = format!("Cannot create Menu from String '{}' and arguments usize: '{:?}', String: '{:?}'. Please, consider \
@@ -703,6 +878,8 @@ pub enum UserSelection {
     ImportFrom(String, String, usize),
     /// The User may be offered to select one of the Options.
     UserOption(UserOption),
+    /// The User updates the configuration
+    UpdateConfiguration(RklConfiguration),
 }
 
 #[derive(Debug, PartialEq)]
@@ -756,6 +933,22 @@ impl UserOption {
             short_label: "c".to_string(),
         }
     }
+
+    pub fn yes() -> UserOption {
+        UserOption {
+            label: "Yes".to_string(),
+            value: UserOptionType::String("Yes".to_string()),
+            short_label: "y".to_string(),
+        }
+    }
+
+    pub fn no() -> UserOption {
+        UserOption {
+            label: "No".to_string(),
+            value: UserOptionType::String("No".to_string()),
+            short_label: "n".to_string(),
+        }
+    }
 }
 
 /// Represents a type for a `UserOption`
@@ -801,7 +994,7 @@ pub trait Editor {
     /// Shows the interface for changing a Password and/or a Number.
     fn show_change_password(&self) -> UserSelection;
     /// Shows the specified `Menu` to the User.
-    fn show_menu(&self, menu: &Menu, safe: &Safe) -> UserSelection;
+    fn show_menu(&self, menu: &Menu, safe: &Safe, configuration: &RklConfiguration) -> UserSelection;
     /// Shows the Exit `Menu` to the User.
     fn exit(&self, contents_changed: bool) -> UserSelection;
     /// Shows a message to the User.
@@ -1159,6 +1352,20 @@ mod unit_tests {
     }
 
     #[test]
+    fn clear() {
+        let mut safe = super::Safe::new();
+        let entry = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
+        safe.add_entry(entry.clone());
+        safe.set_filter("a_filter".to_string());
+
+        safe.clear();
+
+        assert!(safe.entries.len() == 0);
+        assert!(safe.filtered_entries.len() == 0);
+        assert!(safe.filter.len() == 0);
+    }
+
+    #[test]
     fn user_selection_after_idle_check_timed_out() {
         let time = SystemTime::now();
         std::thread::sleep(std::time::Duration::new(2, 0));
@@ -1208,7 +1415,7 @@ mod unit_tests {
             self.show_password_enter()
         }
 
-        fn show_menu(&self, _: &Menu, _: &super::Safe) -> UserSelection {
+        fn show_menu(&self, _: &Menu, _: &super::Safe, _: &super::RklConfiguration) -> UserSelection {
             UserSelection::GoTo(Menu::Main)
         }
 

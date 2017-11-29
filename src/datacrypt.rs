@@ -191,6 +191,7 @@ impl Cryptor for BcryptAes {
 }
 
 /// Encrypts and decrypts passwords of Entries in order not to be kept in the memory in plain.
+#[derive(Debug, PartialEq)]
 pub struct EntryPasswordCryptor {
     /// The encryption/decryption key
     key: RklSecret,
@@ -208,7 +209,7 @@ impl EntryPasswordCryptor {
         // Create a salt
         let salt = create_random(16);
         // Generate a key
-        let mut key: Vec<u8> = repeat(0u8).take(24).collect();
+        let mut key: Vec<u8> = create_random(24);
         bcrypt(3, &salt, &password, &mut key);
         // Create and return the EntryPasswordCryptor
         EntryPasswordCryptor {

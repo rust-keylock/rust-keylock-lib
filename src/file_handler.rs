@@ -1,6 +1,7 @@
-use super::{Entry, Props};
+use super::{RklContent, Entry, Props};
 use super::datacrypt::{Cryptor, BcryptAes};
 use super::errors::{self, RustKeylockError};
+use super::async::nextcloud::NextcloudConfiguration;
 use std::io::prelude::*;
 #[cfg(not(target_os = "android"))]
 use std::env;
@@ -97,7 +98,7 @@ pub fn is_first_run(filename: &str) -> bool {
 
 /// Loads a toml file with the specified name
 /// If the file does not exist, it is created.
-pub fn load(filename: &str, cryptor: &Cryptor, use_default_location: bool) -> Result<Vec<Entry>, RustKeylockError> {
+pub fn load(filename: &str, cryptor: &Cryptor, use_default_location: bool) -> Result<RklContent, RustKeylockError> {
     debug!("Loading {}", filename);
     let full_path = if use_default_location {
         default_toml_path(filename)
@@ -107,11 +108,49 @@ pub fn load(filename: &str, cryptor: &Cryptor, use_default_location: bool) -> Re
     debug!("Full Path to load: {:?}", full_path);
     let toml = try!(load_existing_file(&full_path, Some(cryptor)));
     let value = try!(toml.as_str().parse::<Value>());
-
     match value.as_table() {
-        Some(table) => transform_to_dtos(table, false),
+        Some(table) => {
+            let entries = transform_to_dtos(table, false)?;
+            let nextcloud_conf = retrieve_nextcloud_conf(table)?;
+            Ok(RklContent {
+                entries: entries,
+                nextcloud_conf: nextcloud_conf,
+            })
+        }
         None => Err(RustKeylockError::ParseError("No Table found in the toml.".to_string())),
     }
+}
+
+/// Creates a `File` using a given file name, searching in the default directory
+pub fn get_file(filename: &str) -> errors::Result<File> {
+    let full_path = default_toml_path(filename);
+    debug!("Loading File from {:?}", full_path);
+    Ok(File::open(full_path)?)
+}
+
+/// Saves a File with a given name in the default directory
+pub fn save_bytes(filename: &str, bytes: &[u8]) -> errors::Result<()> {
+    let full_path = default_toml_path(filename);
+    let mut file = try!(File::create(full_path));
+    try!(file.write_all(&bytes));
+    info!("File saved in {}. Syncing...", filename);
+    Ok(try!(file.sync_all()))
+}
+
+pub fn replace(source: &str, target: &str) -> errors::Result<()> {
+    let mut source_file = get_file(source)?;
+    let mut file_bytes: Vec<_> = Vec::new();
+    source_file.read_to_end(&mut file_bytes)?;
+
+    save_bytes(target, &file_bytes)?;
+    delete_file(source)
+}
+
+fn delete_file(name: &str) -> errors::Result<()> {
+    let path_buf = default_toml_path(name);
+    let path = path_buf.to_str().unwrap();
+    fs::remove_file(path)?;
+    Ok(())
 }
 
 /// Loads a toml file with the specified name
@@ -150,7 +189,7 @@ pub fn recover(filename: &str, cryptor: &Cryptor) -> Result<Vec<Entry>, RustKeyl
 
 /// Returns a PathBuf representing the path of the default location of the toml file.
 /// home/$USER/.rust-keylock/rk.toml
-fn default_toml_path(filename: &str) -> PathBuf {
+pub fn default_toml_path(filename: &str) -> PathBuf {
     let mut default_rustkeylock_location = default_rustkeylock_location();
     default_rustkeylock_location.push(filename);
     default_rustkeylock_location
@@ -162,14 +201,14 @@ fn toml_path(filename: &str) -> PathBuf {
 }
 
 #[cfg(target_os = "android")]
-fn default_rustkeylock_location() -> PathBuf {
+pub fn default_rustkeylock_location() -> PathBuf {
     let mut home_dir = PathBuf::from("/data/data/org.astonbitecode.rustkeylock/files");
     home_dir.push(".rust-keylock");
     home_dir
 }
 
 #[cfg(not(target_os = "android"))]
-fn default_rustkeylock_location() -> PathBuf {
+pub fn default_rustkeylock_location() -> PathBuf {
     let mut home_dir = match env::home_dir() {
         Some(pb) => pb,
         None => env::current_dir().unwrap(),
@@ -226,6 +265,17 @@ fn transform_to_dtos(table: &Table, recover: bool) -> Result<Vec<Entry>, RustKey
     }
 }
 
+/// Retrieves the configuration for the nextcloud
+fn retrieve_nextcloud_conf(table: &Table) -> Result<NextcloudConfiguration, RustKeylockError> {
+    match table.get("nextcloud") {
+        Some(value) => {
+            let table = value.as_table().unwrap();
+            NextcloudConfiguration::from_table(table)
+        }
+        None => Ok(NextcloudConfiguration::default()),
+    }
+}
+
 /// Loads a file that contains a toml String and returns this String
 fn load_existing_file<'a>(file_path: &PathBuf, cryptor_opt: Option<&Cryptor>) -> Result<String, RustKeylockError> {
     let bytes = {
@@ -278,22 +328,28 @@ fn load_existing_file<'a>(file_path: &PathBuf, cryptor_opt: Option<&Cryptor>) ->
 }
 
 /// Saves the specified entries to a toml file with the specified name
-pub fn save(entries: &Vec<Entry>, filename: &str, cryptor: &Cryptor, use_default_location: bool) -> errors::Result<()> {
-    info!("Saving Entries in {}", filename);
+pub fn save(rkl_content: RklContent, filename: &str, cryptor: &Cryptor, use_default_location: bool) -> errors::Result<()> {
+    info!("Saving rust-keylock content in {}", filename);
     let path_buf = if use_default_location {
         default_toml_path(filename)
     } else {
         toml_path(filename)
     };
-    let tables_vec = entries.iter()
+
+    let tables_vec = rkl_content.entries
+        .iter()
         .map(|entry| Value::Table(entry.to_table()))
         .collect();
     let mut table = Table::new();
+    // Insert the nextcloud configuration
+    table.insert("nextcloud".to_string(), Value::Table(rkl_content.nextcloud_conf.to_table()?));
+    // Insert the entries
     table.insert("entry".to_string(), Value::Array(tables_vec));
-    let toml_string = if entries.len() > 0 {
-        try!(toml::ser::to_string(&table))
-    } else {
+
+    let toml_string = if rkl_content.entries.len() == 0 && !rkl_content.nextcloud_conf.is_filled() {
         "".to_string()
+    } else {
+        try!(toml::ser::to_string(&table))
     };
 
     let ebytes = try!(cryptor.encrypt(toml_string.as_bytes()));
@@ -321,6 +377,7 @@ pub fn save_props(props: &Props, filename: &str) -> errors::Result<()> {
 mod test_parser {
     use super::super::{Entry, Props};
     use super::super::datacrypt::{self, NoCryptor, Cryptor};
+    use super::super::async::nextcloud::NextcloudConfiguration;
     use std::io::prelude::*;
     use std::fs;
     use std::fs::File;
@@ -351,16 +408,26 @@ mod test_parser {
         let filename = "save_toml_to_file.toml";
         create_file_with_toml_contents(filename);
 
-        let opt = super::load(filename, &NoCryptor::new(), true);
-        assert!(opt.is_ok());
-        let mut vec = opt.unwrap();
+        let res = super::load(filename, &NoCryptor::new(), true);
+        assert!(res.is_ok());
+        let rkl_content = res.unwrap();
+        let mut vec = rkl_content.entries;
         vec.push(Entry::new("name".to_string(), "user".to_string(), "pass".to_string(), "desc".to_string()));
-        assert!(super::save(&vec, filename, &NoCryptor::new(), true).is_ok());
+        let nc_conf = NextcloudConfiguration::new("nc_url", "nc_user".to_string(), "nc_pass".to_string(), "").unwrap();
 
-        let new_opt = super::load(filename, &NoCryptor::new(), true);
-        assert!(new_opt.is_ok());
-        let new_vec = new_opt.unwrap();
+        assert!(super::save(super::RklContent::new(vec, nc_conf), filename, &NoCryptor::new(), true).is_ok());
+
+        let new_res = super::load(filename, &NoCryptor::new(), true);
+        assert!(new_res.is_ok());
+        let new_rkl_content = new_res.unwrap();
+        let new_vec = new_rkl_content.entries;
+        let new_nc_conf = new_rkl_content.nextcloud_conf;
+
         assert!(new_vec.contains(&Entry::new("name".to_string(), "user".to_string(), "pass".to_string(), "desc".to_string())));
+
+        assert!(new_nc_conf.server_url == "nc_url");
+        assert!(new_nc_conf.username == "nc_user");
+        assert!(new_nc_conf.self_signed_der_certificate_location == "");
         delete_file(filename);
     }
 
@@ -487,14 +554,20 @@ mod test_parser {
 
         let mut entries = Vec::new();
         entries.push(Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "1".to_string()));
+        let nc_conf = NextcloudConfiguration::new("nc_url", "nc_user".to_string(), "nc_pass".to_string(), "").unwrap();
 
         let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
-        assert!(super::save(&entries, filename, &cryptor, true).is_ok());
+        assert!(super::save(super::RklContent::new(entries.clone(), nc_conf), filename, &cryptor, true).is_ok());
         cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
 
         let m = super::load(filename, &cryptor, true);
-        assert!(entries == m.unwrap());
-        assert!(super::save(&entries, filename, &cryptor, true).is_ok());
+        let rkl_content = m.unwrap();
+        assert!(entries == rkl_content.entries);
+        assert!("nc_url" == rkl_content.nextcloud_conf.server_url);
+        assert!("nc_user" == rkl_content.nextcloud_conf.username);
+        assert!("" == rkl_content.nextcloud_conf.self_signed_der_certificate_location);
+        let new_nc_conf = NextcloudConfiguration::new("nc_url", "nc_user".to_string(), "nc_pass".to_string(), "").unwrap();
+        assert!(super::save(super::RklContent::new(entries, new_nc_conf), filename, &cryptor, true).is_ok());
 
         delete_file(filename);
     }
@@ -512,9 +585,13 @@ mod test_parser {
 
         let mut entries_import = Vec::new();
         entries_import.push(Entry::new("1_import".to_string(), "1_import".to_string(), "1_import".to_string(), "1_import".to_string()));
+        let nc_conf_import =
+            NextcloudConfiguration::new("nc_url_import", "nc_user_import".to_string(), "nc_pass_import".to_string(), "empty_import")
+                .unwrap();
+
         let tmp_cryptor_import = super::create_bcryptor(filename_import, password_import.clone(), salt_position_import, false, false)
             .unwrap();
-        assert!(super::save(&entries_import, filename_import, &tmp_cryptor_import, false).is_ok());
+        assert!(super::save(super::RklContent::new(entries_import, nc_conf_import), filename_import, &tmp_cryptor_import, false).is_ok());
 
         // Create the normal file
         let filename = "create_encrypt_and_import.toml";
@@ -523,8 +600,10 @@ mod test_parser {
 
         let mut entries = Vec::new();
         entries.push(Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "1".to_string()));
+        let nc_conf = NextcloudConfiguration::new("nc_url", "nc_user".to_string(), "nc_pass".to_string(), "").unwrap();
+
         let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
-        assert!(super::save(&entries, filename, &cryptor, true).is_ok());
+        assert!(super::save(super::RklContent::new(entries, nc_conf), filename, &cryptor, true).is_ok());
         cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
         assert!(super::load(filename, &cryptor, true).is_ok());
 
@@ -544,15 +623,48 @@ mod test_parser {
         let password = "123".to_string();
 
         let entries = Vec::new();
+        let nc_conf = NextcloudConfiguration::default();
 
         let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
-        assert!(super::save(&entries, filename, &cryptor, true).is_ok());
+        assert!(super::save(super::RklContent::new(entries.clone(), nc_conf), filename, &cryptor, true).is_ok());
 
         cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
 
         let m = super::load(filename, &cryptor, true);
-        assert!(entries == m.unwrap());
-        assert!(super::save(&entries, filename, &cryptor, true).is_ok());
+        let rkl_content = m.unwrap();
+        assert!(entries == rkl_content.entries);
+        assert!("" == rkl_content.nextcloud_conf.server_url);
+        assert!("" == rkl_content.nextcloud_conf.username);
+        assert!("" == rkl_content.nextcloud_conf.self_signed_der_certificate_location);
+
+        assert!(super::save(super::RklContent::new(entries, NextcloudConfiguration::default()), filename, &cryptor, true).is_ok());
+
+        delete_file(filename);
+    }
+
+    #[test]
+    fn create_encrypt_and_then_decrypt_only_nextcloud_data() {
+        let filename = "create_encrypt_and_then_decrypt_only_nextcloud_data.toml";
+
+        let salt_position = 33;
+        let password = "123".to_string();
+
+        let entries = Vec::new();
+        let nc_conf = NextcloudConfiguration::new("nc_url", "nc_user".to_string(), "nc_pass".to_string(), "").unwrap();
+
+        let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
+        assert!(super::save(super::RklContent::new(entries.clone(), nc_conf), filename, &cryptor, true).is_ok());
+
+        cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
+
+        let m = super::load(filename, &cryptor, true);
+        let rkl_content = m.unwrap();
+        assert!(entries.len() == 0);
+        assert!("nc_url" == rkl_content.nextcloud_conf.server_url);
+        assert!("nc_user" == rkl_content.nextcloud_conf.username);
+        assert!("" == rkl_content.nextcloud_conf.self_signed_der_certificate_location);
+
+        assert!(super::save(super::RklContent::new(entries, NextcloudConfiguration::default()), filename, &cryptor, true).is_ok());
 
         delete_file(filename);
     }
@@ -565,20 +677,26 @@ mod test_parser {
         let password = "123".to_string();
 
         let entries = Vec::new();
+        let nc_conf = NextcloudConfiguration::default();
 
         // Create a v0.2.1 cryptor
         let old_cryptor = CryptorV021::new(password.clone(), datacrypt::create_random(16), 3, datacrypt::create_random(16), salt_position);
-        assert!(super::save(&entries, filename, &old_cryptor, true).is_ok());
+        assert!(super::save(super::RklContent::new(entries.clone(), nc_conf), filename, &old_cryptor, true).is_ok());
         let new_cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
 
         let m = super::load(filename, &new_cryptor, true);
-        assert!(entries == m.unwrap());
-        assert!(super::save(&entries, filename, &new_cryptor, true).is_ok());
+        let rkl_content = m.unwrap();
+        assert!(entries == rkl_content.entries);
+        assert!("" == rkl_content.nextcloud_conf.server_url);
+        assert!("" == rkl_content.nextcloud_conf.username);
+        assert!("" == rkl_content.nextcloud_conf.self_signed_der_certificate_location);
+
+        assert!(super::save(super::RklContent::new(entries, NextcloudConfiguration::default()), filename, &new_cryptor, true).is_ok());
 
         delete_file(filename);
     }
 
-	#[test]
+    #[test]
     fn integrity_error() {
         let filename = "integrity_error.toml";
 
@@ -586,11 +704,12 @@ mod test_parser {
         let password = "123".to_string();
 
         let entries = vec![Entry::new("name".to_string(), "user".to_string(), "pass".to_string(), "desc".to_string())];
+        let nc_conf = NextcloudConfiguration::default();
 
-		// Create a bcryptor
+        // Create a bcryptor
         let cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
         // Saving will change the hash, so reading with the same cryptor should result to an integrity error
-        assert!(super::save(&entries, filename, &cryptor, true).is_ok());
+        assert!(super::save(super::RklContent::new(entries, nc_conf), filename, &cryptor, true).is_ok());
 
         let result = super::load(filename, &cryptor, true);
 
@@ -614,6 +733,11 @@ mod test_parser {
     fn create_file_with_toml_contents(name: &str) {
         // Create the file with some toml contents
         let contents = r#"
+        [nextcloud]
+			url = "http://127.0.0.1/nextcloud"
+			user = "user"
+			pass = "123"
+			self_signed_cert = ""
         [[entry]]
 			name = "name"
 			user = "user"
