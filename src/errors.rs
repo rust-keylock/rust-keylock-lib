@@ -7,8 +7,9 @@ use base64::DecodeError;
 use toml;
 use hyper;
 use native_tls;
-use httpdate;
 use std::num::ParseIntError;
+#[cfg(target_os = "android")]
+use openssl;
 
 pub type Result<T> = result::Result<T, RustKeylockError>;
 
@@ -102,12 +103,6 @@ impl From<native_tls::Error> for RustKeylockError {
     }
 }
 
-impl From<httpdate::Error> for RustKeylockError {
-    fn from(err: httpdate::Error) -> RustKeylockError {
-        RustKeylockError::GeneralError(format!("{:?}", err))
-    }
-}
-
 impl From<time::SystemTimeError> for RustKeylockError {
     fn from(err: time::SystemTimeError) -> RustKeylockError {
         RustKeylockError::GeneralError(format!("{:?}", err))
@@ -117,5 +112,12 @@ impl From<time::SystemTimeError> for RustKeylockError {
 impl From<ParseIntError> for RustKeylockError {
     fn from(err: ParseIntError) -> RustKeylockError {
         RustKeylockError::ParseError(format!("{:?}", err))
+    }
+}
+
+#[cfg(target_os = "android")]
+impl From<openssl::error::ErrorStack> for RustKeylockError {
+    fn from(err: openssl::error::ErrorStack) -> RustKeylockError {
+        RustKeylockError::GeneralError(format!("{:?}", err))
     }
 }

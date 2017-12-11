@@ -3,7 +3,6 @@ use std::time::UNIX_EPOCH;
 use std::str::FromStr;
 use super::super::{errors, file_handler};
 use super::super::datacrypt::EntryPasswordCryptor;
-use std::io::Write;
 use std::fs::File;
 use std::io::prelude::*;
 use futures::{Future, Stream};
@@ -18,6 +17,10 @@ use toml::value::Table;
 use hyper::header::{Headers, Authorization, Basic};
 use xml::reader::{EventReader, XmlEvent};
 use native_tls;
+#[cfg(target_os = "android")]
+use openssl;
+#[cfg(target_os = "android")]
+use std::fs;
 
 /// A (Next/Own)cloud synchronizer
 pub struct Synchronizer {
@@ -56,15 +59,19 @@ impl Synchronizer {
             // Use HTTP
             debug!("The Nextcloud async task uses HTTP connector");
             Self::connect_with_http(&handle)
+        } else if cfg!(target_os = "android") && self.conf.server_url.starts_with("https://") {
+            // Use HTTPS in Android
+            debug!("The Nextcloud async task uses HTTPS connector in Android");
+            Self::connect_with_https_android(&handle)?
         } else if self.conf.self_signed_der_certificate_location.len() > 0 {
             // Use HTTPS with a self signed certificate
             debug!("The Nextcloud async task uses HTTPS connector with a self-signed certificate located at {}",
                    &self.conf.self_signed_der_certificate_location);
-            Self::connect_with_https_self_signed(&handle, &self.conf.self_signed_der_certificate_location)
+            Self::connect_with_https_self_signed(&handle, &self.conf.self_signed_der_certificate_location)?
         } else {
             // Use HTTPS
             debug!("The Nextcloud async task uses HTTPS connector");
-            Self::connect_with_https(&handle)
+            Self::connect_with_https(&handle)?
         };
 
         let uri = format!("{}/remote.php/dav/files/{}/.rust-keylock/{}", self.conf.server_url, self.conf.username, self.file_name).parse()?;
@@ -412,30 +419,152 @@ impl Synchronizer {
         Box::new(HttpRequestClient { client: Client::new(&handle) }) as Box<RequestClient>
     }
 
-    fn connect_with_https(handle: &Handle) -> Box<RequestClient> {
+    fn connect_with_https(handle: &Handle) -> errors::Result<Box<RequestClient>> {
         let client = Client::configure()
-            .connector(HttpsConnector::new(4, &handle).unwrap())
+            .connector(HttpsConnector::new(4, &handle)?)
             .build(&handle);
 
-        Box::new(HttpsRequestClient { client: client }) as Box<RequestClient>
+        Ok(Box::new(HttpsRequestClient { client: client }) as Box<RequestClient>)
     }
 
-    fn connect_with_https_self_signed(handle: &Handle, der_path: &str) -> Box<RequestClient> {
-        let mut f = File::open(der_path).unwrap();
+    //        fn connect_with_https_android_2(handle: &Handle) -> errors::Result<Box<RequestClient>> {
+    //            let mut http = HttpConnector::new(4, &handle);
+    //            http.enforce_http(false);
+    //
+    //            let mut tls = native_tls::TlsConnector::builder().unwrap();
+    //            match fs::read_dir("/data/misc/keystore/") {
+    //            	Ok(certs) => {
+    //     	            for entry in certs.filter_map(|r| r.ok()).filter(|e| e.path().is_file()) {
+    //     	                debug!("========Adding file {:?}", entry.path());
+    //     	                let mut buffer = vec![];
+    //     	                match fs::File::open(entry.path()).and_then(|mut f| f.read_to_end(&mut buffer)) {
+    //     	                    Ok(_) => {
+    //     	                        debug!("File read");
+    //     	                        match openssl::x509::X509::from_pem(buffer.as_slice()) {
+    //     	                            Ok(cert_x509) => {
+    //     	                                let der_bytes = cert_x509.to_der().unwrap();
+    //     	                                debug!("Transformed to DER");
+    //     	                                let cert = native_tls::Certificate::from_der(&der_bytes).unwrap();
+    //     	                                tls.add_root_certificate(cert).unwrap();
+    //     	                                debug!("Added!");
+    //     	                            }
+    //     	                            Err(error) => {
+    //     	                                error!("Could not transform to DER: {:?}", error);
+    //     	                            }
+    //     	                        }
+    //     	                    }
+    //     	                    Err(error) => {
+    //     	                        error!("Could not retrieve certificate data: {:?}", error);
+    //     	                    }
+    //     	                }
+    //     	            }
+    //     	            debug!("Certificates added");
+    //            	}
+    //            	Err(error) => {
+    //            		error!("Could not read certificates directory: {:?}", error);
+    //            	}
+    //            }
+    //
+    //            let tls = tls.build().unwrap();
+    //
+    //            let ct = HttpsConnector::from((http, tls));
+    //
+    //            Ok(Box::new(HttpsRequestClientSelfSignedCertificate {
+    //                client: Client::configure().connector(ct).build(&handle),
+    //            }) as Box<RequestClient>)
+    //        }
+
+    #[cfg(not(target_os = "android"))]
+    fn connect_with_https_android(_: &Handle) -> errors::Result<Box<RequestClient>> {
+        Err(errors::RustKeylockError::GeneralError("Cannot call the connect_with_https_android function in non-android environment"
+            .to_string()))
+    }
+
+    #[cfg(target_os = "android")]
+    fn connect_with_https_android(handle: &Handle) -> errors::Result<Box<RequestClient>> {
+        let mut ssl_connector_builder = openssl::ssl::SslConnectorBuilder::new(openssl::ssl::SslMethod::tls())?;
+        {
+            let ref mut ssl_context_builder = *ssl_connector_builder;
+
+            let cert_store = ssl_context_builder.cert_store_mut();
+
+            if let Ok(certs) = fs::read_dir("/data/misc/keychain/cacerts-added") {
+                for entry in certs.filter_map(|r| r.ok()).filter(|e| e.path().is_file()) {
+                    debug!("Adding Certificate file {:?}", entry.path());
+                    let mut cert_str = String::new();
+                    if let Ok(_) = fs::File::open(entry.path()).and_then(|mut f| f.read_to_string(&mut cert_str)) {
+                        match openssl::x509::X509::from_pem(cert_str.as_bytes()) {
+                            Ok(cert) => {
+                                let m = cert_store.add_cert(cert);
+                                debug!("Added certificate: {:?}", m);
+                            }
+                            Err(error) => error!("Could not parse certificate: {:?}", error),
+                        }
+                    } else {
+                        error!("Could not retrieve certificate data");
+                    }
+                }
+            }
+            debug!("Certificates added");
+        }
+
+        let tls_connector_builder: native_tls::TlsConnectorBuilder =
+            native_tls::backend::openssl::TlsConnectorBuilderExt::from_openssl(ssl_connector_builder);
+        let tls_connector = tls_connector_builder.build()?;
+        let client = Client::configure()
+            .connector(HttpsConnector::from((HttpsConnector::new(4, &handle)?, tls_connector)))
+            .build(&handle);
+
+        Ok(Box::new(AndroidHttpsRequestClient { client: client }) as Box<RequestClient>)
+
+    }
+
+    // 	fn connect_with_https_android(handle: &Handle) -> errors::Result<Box<RequestClient>> {
+    //        let mut ssl_connector_builder = openssl::ssl::SslConnectorBuilder::new(openssl::ssl::SslMethod::tls()).unwrap();
+    //        {
+    //            let ref mut ssl_context_builder = *ssl_connector_builder;
+    //            let path = Path::new("/data/misc/keystore/gtca.pem");
+    //            match ssl_context_builder.set_ca_file(&path) {
+    //            	Ok(_) => debug!("CACERT WAS SET"),
+    //            	Err(error) => error!("Could not set CACERT: {:?}", error),
+    //            };
+    //            debug!("Certificates added");
+    //        }
+    //
+    //        let tls_connector_builder: native_tls::TlsConnectorBuilder =
+    //            native_tls::backend::openssl::TlsConnectorBuilderExt::from_openssl(ssl_connector_builder);
+    //        let tls_connector = tls_connector_builder.build()?;
+    //        let client = Client::configure()
+    //            .connector(HttpsConnector::from((HttpsConnector::new(4, &handle)?, tls_connector)))
+    //            .build(&handle);
+    //
+    //        Ok(Box::new(AndroidHttpsRequestClient { client: client }) as Box<RequestClient>)
+    //
+    //    }
+
+    fn connect_with_https_self_signed(handle: &Handle, der_path: &str) -> errors::Result<Box<RequestClient>> {
+        debug!("---{:?}", der_path);
+        let mut f = File::open(der_path)?;
+        debug!("---2");
         let mut buffer = vec![];
-        f.read_to_end(&mut buffer).unwrap();
-        let cert = native_tls::Certificate::from_der(buffer.as_slice()).unwrap();
+        f.read_to_end(&mut buffer)?;
+        debug!("---3");
+        let cert = native_tls::Certificate::from_der(buffer.as_slice())?;
+        debug!("---4");
 
         let mut http = HttpConnector::new(4, &handle);
         http.enforce_http(false);
 
-        let mut tls = native_tls::TlsConnector::builder().unwrap();
-        tls.add_root_certificate(cert).unwrap();
-        let tls = tls.build().unwrap();
+        let mut tls = native_tls::TlsConnector::builder()?;
+        tls.add_root_certificate(cert)?;
+        let tls = tls.build()?;
 
-        let ct = HttpsConnector::from((http, tls));
+        let mut ct = HttpsConnector::from((http, tls));
+        ct.danger_disable_hostname_verification(true);
 
-        Box::new(HttpsRequestClientSelfSignedCertificate { client: Client::configure().connector(ct).build(&handle) }) as Box<RequestClient>
+        Ok(Box::new(HttpsRequestClientSelfSignedCertificate {
+            client: Client::configure().connector(ct).build(&handle),
+        }) as Box<RequestClient>)
     }
 }
 
@@ -493,6 +622,18 @@ struct HttpsRequestClient {
 }
 
 impl RequestClient for HttpsRequestClient {
+    fn request(&self, req: Request) -> FutureResponse {
+        self.client.request(req)
+    }
+}
+
+/// A client that executes HTTPS requests in Android
+#[allow(dead_code)]
+struct AndroidHttpsRequestClient {
+    client: hyper::Client<hyper_tls::HttpsConnector<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>>,
+}
+
+impl RequestClient for AndroidHttpsRequestClient {
     fn request(&self, req: Request) -> FutureResponse {
         self.client.request(req)
     }
@@ -710,7 +851,8 @@ mod nextcloud_tests {
         let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8080".to_string(),
                                                      "username".to_string(),
                                                      password.clone(),
-                                                     "".to_string()).unwrap();
+                                                     "".to_string())
+            .unwrap();
         let nc = super::Synchronizer::new(&ncc, tx, filename).unwrap();
         thread::spawn(move || {
             nc.execute();
@@ -751,7 +893,8 @@ mod nextcloud_tests {
         let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8081".to_string(),
                                                      "username".to_string(),
                                                      password.clone(),
-                                                     "".to_string()).unwrap();
+                                                     "".to_string())
+            .unwrap();
         let nc = super::Synchronizer::new(&ncc, tx, filename).unwrap();
         thread::spawn(move || {
             nc.execute();
@@ -790,7 +933,8 @@ mod nextcloud_tests {
         let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8082".to_string(),
                                                      "username".to_string(),
                                                      password.clone(),
-                                                     "".to_string()).unwrap();
+                                                     "".to_string())
+            .unwrap();
         let nc = super::Synchronizer::new(&ncc, tx, filename).unwrap();
         thread::spawn(move || {
             nc.execute();
@@ -825,7 +969,8 @@ mod nextcloud_tests {
         let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8083".to_string(),
                                                      "username".to_string(),
                                                      password.clone(),
-                                                     "".to_string()).unwrap();
+                                                     "".to_string())
+            .unwrap();
         let nc = super::Synchronizer::new(&ncc, tx, filename).unwrap();
         thread::spawn(move || {
             nc.execute();
@@ -862,7 +1007,8 @@ mod nextcloud_tests {
         let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8084".to_string(),
                                                      "username".to_string(),
                                                      password.clone(),
-                                                     "".to_string()).unwrap();
+                                                     "".to_string())
+            .unwrap();
         let nc = super::Synchronizer::new(&ncc, tx, filename).unwrap();
         thread::spawn(move || {
             nc.execute();
@@ -901,7 +1047,8 @@ mod nextcloud_tests {
         let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8085".to_string(),
                                                      "username".to_string(),
                                                      password.clone(),
-                                                     "".to_string()).unwrap();
+                                                     "".to_string())
+            .unwrap();
         let nc = super::Synchronizer::new(&ncc, tx, filename).unwrap();
         thread::spawn(move || {
             nc.execute();
@@ -930,10 +1077,9 @@ mod nextcloud_tests {
         // Execute the synchronizer
         let password = "password".to_string();
         let (tx, rx): (Sender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::channel();
-        let ncc = super::NextcloudConfiguration::new("http://127.0.0.1".to_string(),
-                                                     "username".to_string(),
-                                                     password.clone(),
-                                                     "".to_string()).unwrap();
+        let ncc =
+            super::NextcloudConfiguration::new("http://127.0.0.1".to_string(), "username".to_string(), password.clone(), "".to_string())
+                .unwrap();
         let nc = super::Synchronizer::new(&ncc, tx, filename).unwrap();
         thread::spawn(move || {
             nc.execute();
@@ -1057,7 +1203,7 @@ mod nextcloud_tests {
         let filename = "parse_web_dav_response";
         create_file_with_contents(filename, "This is a test file");
 
-		// Seconds after Unix Epoch time are 1512950400 for Monday, December 11, 2017 12:00:00 AM
+        // Seconds after Unix Epoch time are 1512950400 for Monday, December 11, 2017 12:00:00 AM
         let wdr1 = super::WebDavResponse {
             href: "not needed".to_string(),
             last_modified: "1512950400".to_string(),
@@ -1067,7 +1213,7 @@ mod nextcloud_tests {
         assert!(res1.is_ok());
         assert!(res1.as_ref().unwrap() == &isize::from(1 as i8));
 
-		// Seconds after Unix Epoch time are 4667760000 for Wednesday, December 1, 2117 12:00:00 AM
+        // Seconds after Unix Epoch time are 4667760000 for Wednesday, December 1, 2117 12:00:00 AM
         let wdr2 = super::WebDavResponse {
             href: "not needed".to_string(),
             last_modified: "4667760000".to_string(),

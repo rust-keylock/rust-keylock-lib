@@ -32,7 +32,8 @@ hyper-tls = "0.1"
 native-tls = "0.1"
 tokio-core = "0.1"
 xml-rs = "0.7"
-httpdate = "0.3"
+[target.arm-linux-androideabi.dependencies]
+openssl = "0.9"
 
 [profile.dev]
 panic = "abort"

@@ -18,12 +18,14 @@ extern crate tokio_core;
 extern crate hyper_tls;
 extern crate native_tls;
 extern crate xml;
-extern crate httpdate;
+#[cfg(target_os = "android")]
+extern crate openssl;
 
 use toml::value::Table;
 use std::error::Error;
 use std::time::{self, SystemTime};
 use std::sync::mpsc::{self, Sender, Receiver};
+use std::iter::FromIterator;
 pub use async::nextcloud;
 
 mod file_handler;
@@ -35,6 +37,7 @@ mod async;
 /// Takes a reference of `Editor` implementation as argument and executes the _rust-keylock_ logic.
 /// The `Editor` is responsible for the interaction with the user. Currently there are `Editor` implementations for __shell__ and for __Android__.
 pub fn execute<T: Editor>(editor: &T) {
+    // 	openssl_probe::init_ssl_cert_env_vars();
     info!("Starting rust-keylock...");
 
     let filename = ".sec";
@@ -99,8 +102,8 @@ pub fn execute<T: Editor>(editor: &T) {
         // Handle
         user_selection = match user_selection {
             UserSelection::GoTo(Menu::TryPass) => {
-            	// Cancel any pending background tasks
-            	let _ = nextcloud_loop_ctrl_tx.as_ref().and_then(|tx| Some(tx.send(true)));
+                // Cancel any pending background tasks
+                let _ = nextcloud_loop_ctrl_tx.as_ref().and_then(|tx| Some(tx.send(true)));
                 let (user_selection, cr) =
                     handle_provided_password_for_init(editor.show_password_enter(), filename, &mut safe, &mut configuration, editor);
                 // If a valid nextcloud configuration is in place, spawn the background async execution
@@ -314,7 +317,10 @@ fn async_channel_check(nextcloud_rx: &Option<Receiver<errors::Result<async::next
                                 editor.show_message("Downloaded new data from the nextcloud server. Do you want to apply them locally now?",
                                                   vec![UserOption::yes(), UserOption::no()],
                                                   MessageSeverity::Info);
+
+                            debug!("The user selected {:?} as an answer for applying the downloaded data locally", &selection);
                             if selection == UserSelection::UserOption(UserOption::yes()) {
+                                debug!("Replacing the local file with the one downloaded from the server");
                                 let _ = file_handler::replace(&downloaded_filename, filename);
                                 *user_selection = UserSelection::GoTo(Menu::TryPass);
                             }
@@ -903,7 +909,7 @@ impl From<(String, String, String)> for UserOption {
     fn from(f: (String, String, String)) -> Self {
         UserOption {
             label: f.0,
-            value: UserOptionType::None, // FIXME: Implement From for the UserOptionType
+            value: UserOptionType::from(f.1.as_ref()),
             short_label: f.2,
         }
     }
@@ -954,14 +960,70 @@ impl UserOption {
 /// Represents a type for a `UserOption`
 #[derive(Debug, PartialEq, Clone)]
 pub enum UserOptionType {
-    Number(usize),
+    Number(isize),
     String(String),
     None,
+}
+
+impl UserOptionType {
+    fn extract_value_from_string(str: &str) -> errors::Result<String> {
+        let s = str.clone();
+        let start = s.find("(");
+        if s.ends_with(")") {
+            match start {
+                Some(st) => {
+                    let i = s.chars().skip(st + 1).take(str.len() - st - 2);
+                    Ok(String::from_iter(i))
+                }
+                _ => {
+                    Err(errors::RustKeylockError::ParseError(format!("Could not extract UserOptionType value from {}. The \
+                                                                      UserOptionType can be extracted from strings like String(value)",
+                                                                     str)))
+                }
+            }
+        } else {
+            Err(errors::RustKeylockError::ParseError(format!("Could not extract UserOptionType value from {}. The UserOptionType can be \
+                                                              extracted from strings like String(value)",
+                                                             str)))
+        }
+    }
 }
 
 impl ToString for UserOptionType {
     fn to_string(&self) -> String {
         String::from(format!("{:?}", &self))
+    }
+}
+
+impl<'a> From<&'a str> for UserOptionType {
+    fn from(string: &str) -> Self {
+        match string {
+            ref s if s.starts_with("String") => {
+                match Self::extract_value_from_string(s) {
+                    Ok(value) => UserOptionType::String(value),
+                    Err(error) => {
+                        error!("Could not create UserOptionType from {}: {:?}. Please consider opening a bug to the developers.", s, error);
+                        UserOptionType::None
+                    }
+                }
+            }
+            ref s if s.starts_with("Number") => {
+                let m = Self::extract_value_from_string(s).and_then(|value| {
+                    value.parse::<i64>().map_err(|_| errors::RustKeylockError::ParseError(format!("Could not parse {} to i64", value)))
+                });
+                match m {
+                    Ok(num) => UserOptionType::Number(num as isize),
+                    Err(error) => {
+                        error!("Could not create UserOptionType from {}: {:?}. Please consider opening a bug to the developers.", s, error);
+                        UserOptionType::None
+                    }
+                }
+            }
+            other => {
+                error!("Could not create UserOptionType from {}. Please consider opening a bug to the developers.", other);
+                UserOptionType::None
+            }
+        }
     }
 }
 
@@ -1396,6 +1458,30 @@ mod unit_tests {
         assert!(&opt3.label == "Ok");
         assert!(opt3.value == super::UserOptionType::String("Ok".to_string()));
         assert!(&opt3.short_label == "o");
+    }
+
+    #[test]
+    fn user_option_type_extract_value_from_string() {
+        let s1 = "String(my string)";
+        let sr1 = super::UserOptionType::extract_value_from_string(&s1).unwrap();
+        assert!(sr1 == "my string");
+
+        let s2 = "String(wrong";
+        assert!(super::UserOptionType::extract_value_from_string(&s2).is_err());
+
+        let s3 = "String wrong)";
+        assert!(super::UserOptionType::extract_value_from_string(&s3).is_err());
+
+        let s4 = "String((my string))";
+        let sr4 = super::UserOptionType::extract_value_from_string(&s4).unwrap();
+        assert!(sr4 == "(my string)");
+    }
+
+    #[test]
+    fn user_option_type_from_string() {
+        assert!(super::UserOptionType::from("String(my string)") == super::UserOptionType::String("my string".to_string()));
+        assert!(super::UserOptionType::from("Number(33)") == super::UserOptionType::Number(33));
+        assert!(super::UserOptionType::from("Other(33)") == super::UserOptionType::None);
     }
 
     struct DummyEditor;
