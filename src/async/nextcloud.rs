@@ -1,12 +1,12 @@
 use std::sync::mpsc::Sender;
 use std::time::UNIX_EPOCH;
+use std::str::FromStr;
 use super::super::{errors, file_handler};
 use super::super::datacrypt::EntryPasswordCryptor;
 use std::io::Write;
 use std::fs::File;
 use std::io::prelude::*;
 use futures::{Future, Stream};
-use httpdate;
 use hyper::Client;
 use hyper::client::{Request, HttpConnector, FutureResponse};
 use hyper;
@@ -67,7 +67,7 @@ impl Synchronizer {
             Self::connect_with_https(&handle)
         };
 
-        let uri = format!("{}/remote.php/dav/files/{}/.rust-keylock", self.conf.server_url, self.conf.username).parse()?;
+        let uri = format!("{}/remote.php/dav/files/{}/.rust-keylock/{}", self.conf.server_url, self.conf.username, self.file_name).parse()?;
         debug!("Syncing with {}", uri);
 
         let mut headers = Headers::new();
@@ -78,6 +78,9 @@ impl Synchronizer {
 
         let mut req: Request = Request::new(hyper::Method::Extension("PROPFIND".to_string()), uri);
         *req.headers_mut() = headers;
+        // Set the body of the request so that it returns the oc:savedat property
+        let xml_body = r#"<d:propfind xmlns:d="DAV:"><d:prop xmlns:oc="http://owncloud.org/ns"><oc:savedat/></d:prop></d:propfind>"#;
+        req.set_body(xml_body.as_bytes());
 
         let mut resp_bytes: Vec<u8> = Vec::new();
         let mut http_status = None;
@@ -142,15 +145,10 @@ impl Synchronizer {
     /// -1 if the server last modified time is greater than the local last modified time
     /// 1 if the server last modified time is less than the local last modified time
     /// 0 if the server last modified time is equal to the local last modified time
-    /// All with an accepted deviation of 1 minute
     fn parse_web_dav_response(web_dav_response: &WebDavResponse, filename: &str) -> errors::Result<isize> {
-        let server_time = httpdate::parse_http_date(&web_dav_response.last_modified)?;
-        let server_time_seconds = server_time.duration_since(UNIX_EPOCH)?.as_secs();
 
-        debug!("The file '{}' on the server was last modified at {}. The derived seconds are {:?}",
-               filename,
-               web_dav_response.last_modified,
-               server_time_seconds);
+        debug!("The file '{}' on the server was last modified at {}", filename, web_dav_response.last_modified);
+        let server_time_seconds = u64::from_str(&web_dav_response.last_modified)?;
 
         let file = file_handler::get_file(filename)?;
         let file_metadata = file.metadata()?;
@@ -159,21 +157,9 @@ impl Synchronizer {
         debug!("The file '{}' locally was last modified seconds {:?}", filename, local_time_seconds);
 
         if server_time_seconds > local_time_seconds {
-            let diff_seconds = server_time_seconds - local_time_seconds;
-            if diff_seconds > 60 {
-                debug!("The server time is after the local time");
-                Ok(-1)
-            } else {
-                Ok(0)
-            }
-        } else if server_time < local_time {
-            let diff_seconds = local_time_seconds - server_time_seconds;
-            if diff_seconds > 60 {
-                debug!("The server time is before the local time");
-                Ok(1)
-            } else {
-                Ok(0)
-            }
+            Ok(-1)
+        } else if server_time_seconds < local_time_seconds {
+            Ok(1)
         } else {
             Ok(0)
         }
@@ -203,7 +189,7 @@ impl Synchronizer {
                     debug!("Parsing element {} that has characters {}", curr_elem_name, string);
                     match curr_elem_name.as_ref() {
                         "{DAV:}d:href" => web_dav_resp.href = string,
-                        "{DAV:}d:getlastmodified" => web_dav_resp.last_modified = string,
+                        "{http://owncloud.org/ns}oc:savedat" => web_dav_resp.last_modified = string,
                         "{DAV:}d:status" => web_dav_resp.status = string,
                         _ => {
                             // ignore
@@ -275,7 +261,7 @@ impl Synchronizer {
         }
 
         let stat = status_opt.unwrap_or(hyper::StatusCode::BadRequest);
-        if stat.is_client_error() {
+        if stat.is_client_error() || stat.is_server_error() || stat.is_strange_status() {
             Err(errors::RustKeylockError::SyncError(format!("{:?}", stat)))
         } else {
             Ok(())
@@ -319,7 +305,7 @@ impl Synchronizer {
         }
 
         let stat = status_opt.unwrap_or(hyper::StatusCode::BadRequest);
-        if stat.is_client_error() {
+        if stat.is_client_error() || stat.is_server_error() || stat.is_strange_status() {
             Err(errors::RustKeylockError::SyncError(format!("{:?}", stat)))
         } else {
             let tmp_file_name = format!("tmp_{}", filename);
@@ -328,6 +314,7 @@ impl Synchronizer {
         }
     }
 
+    /// Put the file and update the property with the file creation seconds using PROPPATCH
     fn put(username: &str,
            password: String,
            server_url: &str,
@@ -347,7 +334,7 @@ impl Synchronizer {
 
         let uri = format!("{}/remote.php/dav/files/{}/.rust-keylock/{}", server_url, username, filename).parse()?;
         let mut req: Request = Request::new(hyper::Method::Put, uri);
-        *req.headers_mut() = headers;
+        *req.headers_mut() = headers.clone();
         req.headers_mut().set(header::ContentType::octet_stream());
         req.set_body(file_bytes);
 
@@ -367,10 +354,54 @@ impl Synchronizer {
 
             core.run(work)?;
         }
-
         let stat = status_opt.unwrap_or(hyper::StatusCode::BadRequest);
-        if stat.is_client_error() {
+
+        // PROPPATCH starts here
+        let uri_pp = format!("{}/remote.php/dav/files/{}/.rust-keylock/{}", server_url, username, filename).parse()?;
+        let mut req_pp: Request = Request::new(hyper::Method::Extension("PROPPATCH".to_string()), uri_pp);
+
+        *req_pp.headers_mut() = headers;
+        req_pp.headers_mut().set(header::ContentType::octet_stream());
+
+        // Get the seconds since UNIX_EPOCH and set them in the savedat property
+        let file_metadata = file.metadata()?;
+        let local_time = file_metadata.modified()?;
+        let local_time_seconds = local_time.duration_since(UNIX_EPOCH)?.as_secs();
+        let xml_body: String = format!(r#"<?xml version="1.0" encoding="UTF-8"?>
+<d:propertyupdate xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">
+  <d:set>
+    <d:prop>
+      <oc:savedat>{}</oc:savedat>
+    </d:prop>
+  </d:set>
+</d:propertyupdate>"#,
+                                       local_time_seconds);
+        req_pp.set_body(xml_body);
+
+        let mut resp_bytes_pp: Vec<u8> = Vec::new();
+        let mut status_opt_pp = None;
+        {
+            let work = client.request(req_pp).and_then(|res| {
+                status_opt_pp = Some(res.status());
+                debug!("Response for PROPPATCH: {}", res.status());
+
+                res.body().for_each(|chunk| {
+                    resp_bytes_pp.write_all(&chunk)
+                        .map(|_| ())
+                        .map_err(From::from)
+                })
+            });
+
+            core.run(work)?;
+        }
+
+        let stat_pp = status_opt_pp.unwrap_or(hyper::StatusCode::BadRequest);
+
+        // Check the two statuses
+        if stat.is_client_error() || stat.is_server_error() || stat.is_strange_status() {
             Err(errors::RustKeylockError::SyncError(format!("{:?}", stat)))
+        } else if stat_pp.is_client_error() || stat_pp.is_server_error() || stat_pp.is_strange_status() {
+            Err(errors::RustKeylockError::SyncError(format!("{:?}", stat_pp)))
         } else {
             Ok(())
         }
@@ -588,35 +619,26 @@ mod nextcloud_tests {
     fn synchronizer_stores_encrypted_password() {
         let password = "password".to_string();
         let (tx, _rx): (Sender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::channel();
-        let nc = super::Synchronizer::new("https://localhost/nextcloud", "username".to_string(), password.clone(), "", tx, "filename")
+        let ncc = super::NextcloudConfiguration::new("https://localhost/nextcloud".to_string(),
+                                                     "username".to_string(),
+                                                     password.clone(),
+                                                     "".to_string())
             .unwrap();
+        let nc = super::Synchronizer::new(&ncc, tx, "filename").unwrap();
 
-        assert!(nc.password != password)
+        assert!(nc.conf.decrypted_password().unwrap() == password)
     }
 
     #[test]
     fn nextcloud_configuration_stores_encrypted_password() {
         let password = "password".to_string();
-        let ncc = super::NextcloudConfiguration::new("https://localhost/nextcloud", "username".to_string(), password.clone(), "path")
+        let ncc = super::NextcloudConfiguration::new("https://localhost/nextcloud".to_string(),
+                                                     "username".to_string(),
+                                                     password.clone(),
+                                                     "path".to_string())
             .unwrap();
 
         assert!(ncc.password != password)
-    }
-
-    #[test]
-    fn apply_a_nextcloud_configuration() {
-        let password = "password".to_string();
-        let ncc = super::NextcloudConfiguration::new("https://localhost/nextcloud", "username".to_string(), password.clone(), "path")
-            .unwrap();
-        let mut ncc_new = super::NextcloudConfiguration::default();
-
-        ncc_new.apply(&ncc);
-
-        assert!(ncc_new.self_signed_der_certificate_location == ncc.self_signed_der_certificate_location);
-        assert!(ncc_new.server_url == ncc.server_url);
-        assert!(ncc_new.username == ncc.username);
-        // The passwords should not be the same as they are encrypted using different keys
-        assert!(ncc_new.password != ncc.password);
     }
 
     #[test]
@@ -633,7 +655,7 @@ mod nextcloud_tests {
         let ncc_res = super::NextcloudConfiguration::from_table(&table);
         assert!(ncc_res.is_ok());
         let ncc = ncc_res.unwrap();
-        let new_table = ncc.to_table();
+        let new_table = ncc.to_table().unwrap();
         assert!(table == &new_table);
     }
 
@@ -660,9 +682,11 @@ mod nextcloud_tests {
 
     #[test]
     fn nextcloud_configuration_is_filled() {
-        let ncc1 =
-            super::NextcloudConfiguration::new("https://localhost/nextcloud", "username".to_string(), "password".to_string(), "path")
-                .unwrap();
+        let ncc1 = super::NextcloudConfiguration::new("https://localhost/nextcloud".to_string(),
+                                                      "username".to_string(),
+                                                      "password".to_string(),
+                                                      "path".to_string())
+            .unwrap();
         assert!(ncc1.is_filled());
         let ncc2 = super::NextcloudConfiguration::default();
         assert!(!ncc2.is_filled());
@@ -683,7 +707,11 @@ mod nextcloud_tests {
         // Execute the synchronizer
         let password = "password".to_string();
         let (tx, rx): (Sender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::channel();
-        let nc = super::Synchronizer::new("http://127.0.0.1:8080", "username".to_string(), password.clone(), "", tx, filename).unwrap();
+        let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8080".to_string(),
+                                                     "username".to_string(),
+                                                     password.clone(),
+                                                     "".to_string()).unwrap();
+        let nc = super::Synchronizer::new(&ncc, tx, filename).unwrap();
         thread::spawn(move || {
             nc.execute();
         });
@@ -694,6 +722,8 @@ mod nextcloud_tests {
         // Assert the MKCOL that creates the collection
         assert!(rx_assert.recv_timeout(timeout).unwrap());
         // Assert the PUT that creates the file
+        assert!(rx_assert.recv_timeout(timeout).unwrap());
+        // Assert the PROPPATCH for the oc:savedat
         assert!(rx_assert.recv_timeout(timeout).unwrap());
 
         // Assert that the file is ready to be downloaded
@@ -718,7 +748,11 @@ mod nextcloud_tests {
         // Execute the synchronizer
         let password = "password".to_string();
         let (tx, rx): (Sender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::channel();
-        let nc = super::Synchronizer::new("http://127.0.0.1:8081", "username".to_string(), password.clone(), "", tx, filename).unwrap();
+        let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8081".to_string(),
+                                                     "username".to_string(),
+                                                     password.clone(),
+                                                     "".to_string()).unwrap();
+        let nc = super::Synchronizer::new(&ncc, tx, filename).unwrap();
         thread::spawn(move || {
             nc.execute();
         });
@@ -753,7 +787,11 @@ mod nextcloud_tests {
         // Execute the synchronizer
         let password = "password".to_string();
         let (tx, rx): (Sender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::channel();
-        let nc = super::Synchronizer::new("http://127.0.0.1:8082", "username".to_string(), password.clone(), "", tx, filename).unwrap();
+        let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8082".to_string(),
+                                                     "username".to_string(),
+                                                     password.clone(),
+                                                     "".to_string()).unwrap();
+        let nc = super::Synchronizer::new(&ncc, tx, filename).unwrap();
         thread::spawn(move || {
             nc.execute();
         });
@@ -784,7 +822,11 @@ mod nextcloud_tests {
         // Execute the synchronizer
         let password = "password".to_string();
         let (tx, rx): (Sender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::channel();
-        let nc = super::Synchronizer::new("http://127.0.0.1:8083", "username".to_string(), password.clone(), "", tx, filename).unwrap();
+        let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8083".to_string(),
+                                                     "username".to_string(),
+                                                     password.clone(),
+                                                     "".to_string()).unwrap();
+        let nc = super::Synchronizer::new(&ncc, tx, filename).unwrap();
         thread::spawn(move || {
             nc.execute();
         });
@@ -817,7 +859,11 @@ mod nextcloud_tests {
         // Execute the synchronizer
         let password = "password".to_string();
         let (tx, rx): (Sender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::channel();
-        let nc = super::Synchronizer::new("http://127.0.0.1:8084", "username".to_string(), password.clone(), "", tx, filename).unwrap();
+        let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8084".to_string(),
+                                                     "username".to_string(),
+                                                     password.clone(),
+                                                     "".to_string()).unwrap();
+        let nc = super::Synchronizer::new(&ncc, tx, filename).unwrap();
         thread::spawn(move || {
             nc.execute();
         });
@@ -852,7 +898,11 @@ mod nextcloud_tests {
         // Execute the synchronizer
         let password = "password".to_string();
         let (tx, rx): (Sender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::channel();
-        let nc = super::Synchronizer::new("http://127.0.0.1:8085", "username".to_string(), password.clone(), "", tx, filename).unwrap();
+        let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8085".to_string(),
+                                                     "username".to_string(),
+                                                     password.clone(),
+                                                     "".to_string()).unwrap();
+        let nc = super::Synchronizer::new(&ncc, tx, filename).unwrap();
         thread::spawn(move || {
             nc.execute();
         });
@@ -880,7 +930,11 @@ mod nextcloud_tests {
         // Execute the synchronizer
         let password = "password".to_string();
         let (tx, rx): (Sender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::channel();
-        let nc = super::Synchronizer::new("http://127.0.0.1:8081", "username".to_string(), password.clone(), "", tx, filename).unwrap();
+        let ncc = super::NextcloudConfiguration::new("http://127.0.0.1".to_string(),
+                                                     "username".to_string(),
+                                                     password.clone(),
+                                                     "".to_string()).unwrap();
+        let nc = super::Synchronizer::new(&ncc, tx, filename).unwrap();
         thread::spawn(move || {
             nc.execute();
         });
@@ -898,50 +952,31 @@ mod nextcloud_tests {
     #[test]
     fn parse_xml_success() {
         let filename = "afilename";
-        let xml = r#"
+        let xml = format!(r#"
 	    	<?xml version="1.0"?>
 			<d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">
 			 <d:response>
-			  <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/</d:href>
+			  <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/{}</d:href>
 			  <d:propstat>
 			   <d:prop>
-			    <d:getlastmodified>Thu, 30 Nov 2017 14:09:58 GMT</d:getlastmodified>
-			    <d:resourcetype>
-			     <d:collection/>
-			    </d:resourcetype>
-			    <d:quota-used-bytes>205</d:quota-used-bytes>
-			    <d:quota-available-bytes>-3</d:quota-available-bytes>
-			    <d:getetag>&quot;5a201136966e1&quot;</d:getetag>
-			   </d:prop>
-			   <d:status>HTTP/1.1 200 OK</d:status>
-			  </d:propstat>
-			 </d:response>
-			 <d:response>
-			  <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/afilename</d:href>
-			  <d:propstat>
-			   <d:prop>
-			    <d:getlastmodified>Thu, 30 Nov 2017 14:09:58 GMT</d:getlastmodified>
-			    <d:getcontentlength>205</d:getcontentlength>
-			    <d:resourcetype/>
-			    <d:getetag>&quot;6ec537df6db0d41af34c14c527a1c6d9&quot;</d:getetag>
-			    <d:getcontenttype>application/octet-stream</d:getcontenttype>
+			    <oc:savedat>1234567</oc:savedat>
 			   </d:prop>
 			   <d:status>HTTP/1.1 200 OK</d:status>
 			  </d:propstat>
 			 </d:response>
 			</d:multistatus>
-    	"#;
+    	"#, filename);
 
         let res = super::Synchronizer::parse_xml(xml.as_bytes(), filename);
 
         assert!(res.is_ok());
         assert!(res.as_ref().unwrap().href == "/nextcloud/remote.php/dav/files/user/.rust-keylock/afilename");
-        assert!(res.as_ref().unwrap().last_modified == "Thu, 30 Nov 2017 14:09:58 GMT");
+        assert!(res.as_ref().unwrap().last_modified == "1234567");
         assert!(res.as_ref().unwrap().status == "HTTP/1.1 200 OK");
     }
 
     #[test]
-    fn parse_xml_error_no_file_element_is_present() {
+    fn parse_xml_error_no_file_is_present() {
         let filename = "afilename";
         // The file element is not present
         let xml = r#"
@@ -973,25 +1008,20 @@ mod nextcloud_tests {
     #[test]
     fn parse_xml_error_not_all_elements_are_present() {
         let filename = "afilename";
-        // The file element is not present (getLastModified)
-        let xml = r#"
+        // The oc:savedat element is not present
+        let xml = format!(r#"
 	    	<?xml version="1.0"?>
 			<d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">
 			 <d:response>
-			  <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/afilename</d:href>
+			  <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/{}</d:href>
 			  <d:propstat>
 			   <d:prop>
-			    <!-- <d:getlastmodified>Thu, 30 Nov 2017 14:09:58 GMT</d:getlastmodified> -->
-			    <d:getcontentlength>205</d:getcontentlength>
-			    <d:resourcetype/>
-			    <d:getetag>&quot;6ec537df6db0d41af34c14c527a1c6d9&quot;</d:getetag>
-			    <d:getcontenttype>application/octet-stream</d:getcontenttype>
 			   </d:prop>
 			   <d:status>HTTP/1.1 200 OK</d:status>
 			  </d:propstat>
 			 </d:response>
 			</d:multistatus>
-    	"#;
+    	"#, filename);
 
         let res = super::Synchronizer::parse_xml(xml.as_bytes(), filename);
 
@@ -1001,25 +1031,20 @@ mod nextcloud_tests {
     #[test]
     fn parse_xml_error_in_web_dav_response() {
         let filename = "afilename";
-        // The file element is not present (getLastModified)
-        let xml = r#"
+        let xml = format!(r#"
 	    	<?xml version="1.0"?>
 			<d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">
 			 <d:response>
-			  <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/afilename</d:href>
+			  <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/{}</d:href>
 			  <d:propstat>
 			   <d:prop>
-			    <d:getlastmodified>Thu, 30 Nov 2017 14:09:58 GMT</d:getlastmodified>
-			    <d:getcontentlength>205</d:getcontentlength>
-			    <d:resourcetype/>
-			    <d:getetag>&quot;6ec537df6db0d41af34c14c527a1c6d9&quot;</d:getetag>
-			    <d:getcontenttype>application/octet-stream</d:getcontenttype>
+			    <oc:savedat>1234567</oc:savedat>
 			   </d:prop>
 			   <d:status>HTTP/1.1 400 Bad Request</d:status>
 			  </d:propstat>
 			 </d:response>
 			</d:multistatus>
-    	"#;
+    	"#, filename);
 
         let res = super::Synchronizer::parse_xml(xml.as_bytes(), filename);
 
@@ -1032,18 +1057,20 @@ mod nextcloud_tests {
         let filename = "parse_web_dav_response";
         create_file_with_contents(filename, "This is a test file");
 
+		// Seconds after Unix Epoch time are 1512950400 for Monday, December 11, 2017 12:00:00 AM
         let wdr1 = super::WebDavResponse {
             href: "not needed".to_string(),
-            last_modified: "Thu, 30 Nov 2017 14:09:58 GMT".to_string(),
+            last_modified: "1512950400".to_string(),
             status: "not needed".to_string(),
         };
         let res1 = super::Synchronizer::parse_web_dav_response(&wdr1, filename);
         assert!(res1.is_ok());
         assert!(res1.as_ref().unwrap() == &isize::from(1 as i8));
 
+		// Seconds after Unix Epoch time are 4667760000 for Wednesday, December 1, 2117 12:00:00 AM
         let wdr2 = super::WebDavResponse {
             href: "not needed".to_string(),
-            last_modified: "Thu, 30 Nov 2117 14:09:58 GMT".to_string(),
+            last_modified: "4667760000".to_string(),
             status: "not needed".to_string(),
         };
         let res2 = super::Synchronizer::parse_web_dav_response(&wdr2, filename);
@@ -1094,6 +1121,9 @@ mod nextcloud_tests {
                     } else if req.method() == &hyper::Method::Put {
                         let _ = self.tx_assert.send(true);
                         Box::new(futures::future::ok(Response::new().with_status(hyper::StatusCode::Ok)))
+                    } else if req.method() == &hyper::Method::Extension("PROPPATCH".to_string()) {
+                        let _ = self.tx_assert.send(true);
+                        Box::new(futures::future::ok(Response::new().with_status(hyper::StatusCode::Ok)))
                     } else {
                         let _ = self.tx_assert.send(false);
                         Box::new(futures::future::ok(Response::new().with_status(hyper::StatusCode::BadRequest)))
@@ -1109,11 +1139,7 @@ mod nextcloud_tests {
 							  <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/download_a_file_from_the_server</d:href>
 							  <d:propstat>
 							   <d:prop>
-							    <d:getlastmodified>Thu, 30 Nov 2117 14:09:58 GMT</d:getlastmodified>
-							    <d:getcontentlength>205</d:getcontentlength>
-							    <d:resourcetype/>
-							    <d:getetag>&quot;6ec537df6db0d41af34c14c527a1c6d9&quot;</d:getetag>
-							    <d:getcontenttype>application/octet-stream</d:getcontenttype>
+							    <oc:savedat>4667760000</oc:savedat>
 							   </d:prop>
 							   <d:status>HTTP/1.1 200 OK</d:status>
 							  </d:propstat>
@@ -1176,11 +1202,7 @@ mod nextcloud_tests {
 							  <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/http_error_response_on_get</d:href>
 							  <d:propstat>
 							   <d:prop>
-							    <d:getlastmodified>Thu, 30 Nov 2117 14:09:58 GMT</d:getlastmodified>
-							    <d:getcontentlength>205</d:getcontentlength>
-							    <d:resourcetype/>
-							    <d:getetag>&quot;6ec537df6db0d41af34c14c527a1c6d9&quot;</d:getetag>
-							    <d:getcontenttype>application/octet-stream</d:getcontenttype>
+							    <oc:savedat>4667760000</oc:savedat>
 							   </d:prop>
 							   <d:status>HTTP/1.1 200 OK</d:status>
 							  </d:propstat>

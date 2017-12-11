@@ -8,6 +8,7 @@ use toml;
 use hyper;
 use native_tls;
 use httpdate;
+use std::num::ParseIntError;
 
 pub type Result<T> = result::Result<T, RustKeylockError>;
 
@@ -110,5 +111,11 @@ impl From<httpdate::Error> for RustKeylockError {
 impl From<time::SystemTimeError> for RustKeylockError {
     fn from(err: time::SystemTimeError) -> RustKeylockError {
         RustKeylockError::GeneralError(format!("{:?}", err))
+    }
+}
+
+impl From<ParseIntError> for RustKeylockError {
+    fn from(err: ParseIntError) -> RustKeylockError {
+        RustKeylockError::ParseError(format!("{:?}", err))
     }
 }

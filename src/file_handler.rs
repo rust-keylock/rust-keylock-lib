@@ -413,7 +413,8 @@ mod test_parser {
         let rkl_content = res.unwrap();
         let mut vec = rkl_content.entries;
         vec.push(Entry::new("name".to_string(), "user".to_string(), "pass".to_string(), "desc".to_string()));
-        let nc_conf = NextcloudConfiguration::new("nc_url", "nc_user".to_string(), "nc_pass".to_string(), "").unwrap();
+        let nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), "".to_string())
+            .unwrap();
 
         assert!(super::save(super::RklContent::new(vec, nc_conf), filename, &NoCryptor::new(), true).is_ok());
 
@@ -554,7 +555,8 @@ mod test_parser {
 
         let mut entries = Vec::new();
         entries.push(Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "1".to_string()));
-        let nc_conf = NextcloudConfiguration::new("nc_url", "nc_user".to_string(), "nc_pass".to_string(), "").unwrap();
+        let nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), "".to_string())
+            .unwrap();
 
         let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
         assert!(super::save(super::RklContent::new(entries.clone(), nc_conf), filename, &cryptor, true).is_ok());
@@ -566,7 +568,8 @@ mod test_parser {
         assert!("nc_url" == rkl_content.nextcloud_conf.server_url);
         assert!("nc_user" == rkl_content.nextcloud_conf.username);
         assert!("" == rkl_content.nextcloud_conf.self_signed_der_certificate_location);
-        let new_nc_conf = NextcloudConfiguration::new("nc_url", "nc_user".to_string(), "nc_pass".to_string(), "").unwrap();
+        let new_nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), "".to_string())
+            .unwrap();
         assert!(super::save(super::RklContent::new(entries, new_nc_conf), filename, &cryptor, true).is_ok());
 
         delete_file(filename);
@@ -586,7 +589,7 @@ mod test_parser {
         let mut entries_import = Vec::new();
         entries_import.push(Entry::new("1_import".to_string(), "1_import".to_string(), "1_import".to_string(), "1_import".to_string()));
         let nc_conf_import =
-            NextcloudConfiguration::new("nc_url_import", "nc_user_import".to_string(), "nc_pass_import".to_string(), "empty_import")
+            NextcloudConfiguration::new("nc_url_import".to_string(), "nc_user_import".to_string(), "nc_pass_import".to_string(), "empty_import".to_string())
                 .unwrap();
 
         let tmp_cryptor_import = super::create_bcryptor(filename_import, password_import.clone(), salt_position_import, false, false)
@@ -600,7 +603,7 @@ mod test_parser {
 
         let mut entries = Vec::new();
         entries.push(Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "1".to_string()));
-        let nc_conf = NextcloudConfiguration::new("nc_url", "nc_user".to_string(), "nc_pass".to_string(), "").unwrap();
+        let nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), "".to_string()).unwrap();
 
         let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
         assert!(super::save(super::RklContent::new(entries, nc_conf), filename, &cryptor, true).is_ok());
@@ -650,7 +653,7 @@ mod test_parser {
         let password = "123".to_string();
 
         let entries = Vec::new();
-        let nc_conf = NextcloudConfiguration::new("nc_url", "nc_user".to_string(), "nc_pass".to_string(), "").unwrap();
+        let nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), "".to_string()).unwrap();
 
         let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
         assert!(super::save(super::RklContent::new(entries.clone(), nc_conf), filename, &cryptor, true).is_ok());
