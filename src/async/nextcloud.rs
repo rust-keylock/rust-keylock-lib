@@ -17,6 +17,8 @@ use toml::value::Table;
 use hyper::header::{Headers, Authorization, Basic};
 use xml::reader::{EventReader, XmlEvent};
 use native_tls;
+#[allow(unused_imports)]
+use native_tls::backend::openssl::TlsConnectorBuilderExt;
 #[cfg(target_os = "android")]
 use openssl;
 #[cfg(target_os = "android")]
@@ -114,7 +116,7 @@ impl Synchronizer {
                 Ok(SyncStatus::UploadSuccess)
             }
             Some(hyper::StatusCode::MultiStatus) => {
-                info!("Parsing nextcoud response");
+                debug!("Parsing nextcoud response");
                 let web_dav_resp = Self::parse_xml(resp_bytes.as_slice(), &self.file_name)?;
                 match Self::parse_web_dav_response(&web_dav_resp, &self.file_name)? {
                     -1 => {
@@ -505,6 +507,23 @@ impl Synchronizer {
                     }
                 }
             }
+            if let Ok(certs) = fs::read_dir("/system/etc/security/cacerts") {
+                for entry in certs.filter_map(|r| r.ok()).filter(|e| e.path().is_file()) {
+                    debug!("Adding SYSTEM Certificate file {:?}", entry.path());
+                    let mut cert_str = String::new();
+                    if let Ok(_) = fs::File::open(entry.path()).and_then(|mut f| f.read_to_string(&mut cert_str)) {
+                        match openssl::x509::X509::from_pem(cert_str.as_bytes()) {
+                            Ok(cert) => {
+                                let m = cert_store.add_cert(cert);
+                                debug!("Added SYSTEM certificate: {:?}", m);
+                            }
+                            Err(error) => error!("Could not parse SYSTEM certificate: {:?}", error),
+                        }
+                    } else {
+                        error!("Could not retrieve certificate data");
+                    }
+                }
+            }
             debug!("Certificates added");
         }
 
@@ -516,8 +535,23 @@ impl Synchronizer {
             .build(&handle);
 
         Ok(Box::new(AndroidHttpsRequestClient { client: client }) as Box<RequestClient>)
-
     }
+
+    // 	#[cfg(target_os = "android")]
+    //    fn connect_with_https_android0(handle: &Handle) -> errors::Result<Box<RequestClient>> {
+    //    	let mut tls_connector_builder = native_tls::TlsConnector::builder()?;
+    //    	tls_connector_builder.builder_mut().builder_mut().set_verify(openssl::ssl::SSL_VERIFY_NONE);
+    //
+    //        let tls_connector = tls_connector_builder.build()?;
+    //        let hct = HttpsConnector::new(4, &handle)?;
+    //        let mut ct = HttpsConnector::from((hct, tls_connector));
+    //        ct.danger_disable_hostname_verification(true);
+    //        let client = Client::configure()
+    //            .connector(ct)
+    //            .build(&handle);
+    //
+    //        Ok(Box::new(AndroidHttpsRequestClient { client: client }) as Box<RequestClient>)
+    //    }
 
     // 	fn connect_with_https_android(handle: &Handle) -> errors::Result<Box<RequestClient>> {
     //        let mut ssl_connector_builder = openssl::ssl::SslConnectorBuilder::new(openssl::ssl::SslMethod::tls()).unwrap();

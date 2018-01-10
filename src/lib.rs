@@ -58,7 +58,7 @@ pub fn execute<T: Editor>(editor: &T) {
     // Keeps the sensitive data
     let mut safe = Safe::new();
     // Keeps the configuration data
-    let mut configuration = RklConfiguration::from(async::nextcloud::NextcloudConfiguration::default());
+    let mut configuration = RklConfiguration::from((async::nextcloud::NextcloudConfiguration::default(), SystemConfiguration::default()));
     // Signals changes that are not saved
     let mut contents_changed = false;
     let mut nextcloud_rx: Option<Receiver<errors::Result<async::nextcloud::SyncStatus>>> = None;
@@ -155,7 +155,7 @@ pub fn execute<T: Editor>(editor: &T) {
             }
             UserSelection::GoTo(Menu::Save) => {
                 debug!("UserSelection::GoTo(Menu::Save)");
-                let rkl_content = RklContent::from((&safe, &configuration.nextcloud));
+                let rkl_content = RklContent::from((&safe, &configuration.nextcloud, &configuration.system));
                 let res = rkl_content.and_then(|c| file_handler::save(c, filename, &cryptor, true));
                 match res {
                     Ok(_) => {
@@ -233,7 +233,7 @@ Warning: Saving will discard all the entries that could not be recovered.
             }
             UserSelection::ExportTo(path) => {
                 debug!("UserSelection::ExportTo(path)");
-                let rkl_content = RklContent::from((&safe, &configuration.nextcloud));
+                let rkl_content = RklContent::from((&safe, &configuration.nextcloud, &configuration.system));
                 let res = rkl_content.and_then(|c| file_handler::save(c, &path, &cryptor, false));
                 match res {
                     Ok(_) => {
@@ -382,7 +382,7 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
                 Ok(rkl_content) => {
                     user_selection = UserSelection::GoTo(Menu::Main);
                     // Set the retrieved configuration
-                    let new_rkl_conf = RklConfiguration::from(rkl_content.nextcloud_conf);
+                    let new_rkl_conf = RklConfiguration::from((rkl_content.nextcloud_conf, rkl_content.system_conf));
                     *configuration = new_rkl_conf;
                     rkl_content.entries
                 }
@@ -457,36 +457,91 @@ fn spawn_nextcloud_async_task(filename: &str,
 pub struct RklContent {
     entries: Vec<Entry>,
     nextcloud_conf: async::nextcloud::NextcloudConfiguration,
+    system_conf: SystemConfiguration,
 }
 
 impl RklContent {
-    pub fn new(entries: Vec<Entry>, nextcloud_conf: async::nextcloud::NextcloudConfiguration) -> RklContent {
+    pub fn new(entries: Vec<Entry>,
+               nextcloud_conf: async::nextcloud::NextcloudConfiguration,
+               system_conf: SystemConfiguration)
+               -> RklContent {
         RklContent {
             entries: entries,
             nextcloud_conf: nextcloud_conf,
+            system_conf: system_conf,
         }
     }
 
-    pub fn from(tup: (&Safe, &async::nextcloud::NextcloudConfiguration)) -> errors::Result<RklContent> {
+    pub fn from(tup: (&Safe, &async::nextcloud::NextcloudConfiguration, &SystemConfiguration)) -> errors::Result<RklContent> {
         let entries = tup.0.get_entries_decrypted();
         let nextcloud_conf = async::nextcloud::NextcloudConfiguration::new(tup.1.server_url.clone(),
                                                                            tup.1.username.clone(),
                                                                            tup.1.decrypted_password()?,
                                                                            tup.1.self_signed_der_certificate_location.clone());
+        let system_conf = SystemConfiguration::new(tup.2.saved_at, tup.2.version);
 
-        Ok(RklContent::new(entries, nextcloud_conf.unwrap()))
+        Ok(RklContent::new(entries, nextcloud_conf?, system_conf))
     }
 }
 
 /// Keeps the Configuration
 #[derive(Debug, PartialEq)]
 pub struct RklConfiguration {
+    pub system: SystemConfiguration,
     pub nextcloud: async::nextcloud::NextcloudConfiguration,
 }
 
-impl From<async::nextcloud::NextcloudConfiguration> for RklConfiguration {
-    fn from(ncc: async::nextcloud::NextcloudConfiguration) -> Self {
-        RklConfiguration { nextcloud: ncc }
+impl From<(async::nextcloud::NextcloudConfiguration, SystemConfiguration)> for RklConfiguration {
+    fn from(confs: (async::nextcloud::NextcloudConfiguration, SystemConfiguration)) -> Self {
+        RklConfiguration {
+            system: confs.1,
+            nextcloud: confs.0,
+        }
+    }
+}
+
+/// System - internal configuration
+#[derive(Debug, PartialEq)]
+pub struct SystemConfiguration {
+    /// When the passwords were saved
+    pub saved_at: Option<i64>,
+    /// A number that gets incremented with each persisted change
+    pub version: Option<i64>,
+}
+
+impl SystemConfiguration {
+    pub fn new(saved_at: Option<i64>, version: Option<i64>) -> SystemConfiguration {
+        SystemConfiguration {
+            saved_at: saved_at,
+            version: version,
+        }
+    }
+
+	pub fn from_table(table: &Table) -> Result<SystemConfiguration, errors::RustKeylockError> {
+        let saved_at = table.get("saved_at").and_then(|value| value.as_integer().and_then(|int_ref| Some(int_ref)));
+        let version = table.get("version").and_then(|value| value.as_integer().and_then(|int_ref| Some(int_ref)));
+        Ok(SystemConfiguration::new(saved_at, version))
+    }
+
+	pub fn to_table(&self) -> errors::Result<Table> {
+        let mut table = Table::new();
+        if self.saved_at.is_some() {
+	        table.insert("saved_at".to_string(), toml::Value::Integer(self.saved_at.unwrap()));
+        }
+        if self.version.is_some() {
+	        table.insert("version".to_string(), toml::Value::Integer(self.version.unwrap()));
+        }
+
+        Ok(table)
+    }
+}
+
+impl Default for SystemConfiguration {
+    fn default() -> SystemConfiguration {
+        SystemConfiguration {
+            saved_at: None,
+            version: None,
+        }
     }
 }
 
@@ -967,13 +1022,16 @@ pub enum UserOptionType {
 
 impl UserOptionType {
     fn extract_value_from_string(str: &str) -> errors::Result<String> {
+        println!("Extracting value from {}", str);
         let s = str.clone();
         let start = s.find("(");
         if s.ends_with(")") {
             match start {
                 Some(st) => {
                     let i = s.chars().skip(st + 1).take(str.len() - st - 2);
-                    Ok(String::from_iter(i))
+                    let s = String::from_iter(i);
+                    println!("returning {}", s);
+                    Ok(s)
                 }
                 _ => {
                     Err(errors::RustKeylockError::ParseError(format!("Could not extract UserOptionType value from {}. The \
@@ -991,7 +1049,10 @@ impl UserOptionType {
 
 impl ToString for UserOptionType {
     fn to_string(&self) -> String {
-        String::from(format!("{:?}", &self))
+        match self {
+            &UserOptionType::String(ref s) => format!("String({})", s),
+            _ => String::from(format!("{:?}", &self)),
+        }
     }
 }
 
@@ -1482,6 +1543,15 @@ mod unit_tests {
         assert!(super::UserOptionType::from("String(my string)") == super::UserOptionType::String("my string".to_string()));
         assert!(super::UserOptionType::from("Number(33)") == super::UserOptionType::Number(33));
         assert!(super::UserOptionType::from("Other(33)") == super::UserOptionType::None);
+    }
+
+    #[test]
+    fn user_option_type_to_string_from_string() {
+        let user_option_type = super::UserOptionType::String("my string".to_string());
+        let string = user_option_type.to_string();
+        assert!(string == "String(my string)");
+        let s: &str = &string;
+        assert!(super::UserOptionType::from(s) == super::UserOptionType::String("my string".to_string()));
     }
 
     struct DummyEditor;
