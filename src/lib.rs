@@ -23,7 +23,7 @@ extern crate openssl;
 
 use toml::value::Table;
 use std::error::Error;
-use std::time::{self, SystemTime};
+use std::time::{self, SystemTime, UNIX_EPOCH};
 use std::sync::mpsc::{self, Sender, Receiver};
 use std::iter::FromIterator;
 pub use async::nextcloud;
@@ -155,11 +155,19 @@ pub fn execute<T: Editor>(editor: &T) {
             }
             UserSelection::GoTo(Menu::Save) => {
                 debug!("UserSelection::GoTo(Menu::Save)");
+                let _ = configuration.update_system_for_save().map_err(|error| error!("Cannot update system for save: {:?}", error));
                 let rkl_content = RklContent::from((&safe, &configuration.nextcloud, &configuration.system));
                 let res = rkl_content.and_then(|c| file_handler::save(c, filename, &cryptor, true));
                 match res {
                     Ok(_) => {
+                    	// Cancel any pending background tasks
+		                let _ = nextcloud_loop_ctrl_tx.as_ref().and_then(|tx| Some(tx.send(true)));
+		                // Clean the flag for unsaved data
                         contents_changed = false;
+                        // Start a new background async task
+                        let (nc_rx, loop_ctrl_tx) = spawn_nextcloud_async_task(&filename, &configuration, &nextcloud_loop_ctrl_tx);
+	                    nextcloud_rx = Some(nc_rx);
+	                    nextcloud_loop_ctrl_tx = Some(loop_ctrl_tx);
                         let _ =
                             editor.show_message("Encrypted and saved successfully!", vec![UserOption::ok()], MessageSeverity::default());
                     }
@@ -312,7 +320,8 @@ fn async_channel_check(nextcloud_rx: &Option<Receiver<errors::Result<async::next
                                                         vec![UserOption::ok()],
                                                         MessageSeverity::Info);
                         }
-                        Ok(async::nextcloud::SyncStatus::NewAvailable(downloaded_filename)) => {
+                        Ok(async::nextcloud::SyncStatus::NewAvailable(downloaded_filename)) |
+                        Ok(async::nextcloud::SyncStatus::NewToMerge(downloaded_filename)) => {
                             let selection =
                                 editor.show_message("Downloaded new data from the nextcloud server. Do you want to apply them locally now?",
                                                   vec![UserOption::yes(), UserOption::no()],
@@ -448,7 +457,7 @@ fn spawn_nextcloud_async_task(filename: &str,
     let (tx, rx): (Sender<errors::Result<async::nextcloud::SyncStatus>>, Receiver<errors::Result<async::nextcloud::SyncStatus>>) =
         mpsc::channel();
     let every = time::Duration::from_millis(10000);
-    let nc = async::nextcloud::Synchronizer::new(&configuration.nextcloud, tx, filename).unwrap();
+    let nc = async::nextcloud::Synchronizer::new(&configuration.nextcloud, &configuration.system, tx, filename).unwrap();
     let async_task_control_tx = async::execute_task(Box::new(nc), every);
     (rx, async_task_control_tx)
 }
@@ -491,6 +500,15 @@ pub struct RklConfiguration {
     pub nextcloud: async::nextcloud::NextcloudConfiguration,
 }
 
+impl RklConfiguration {
+    pub fn update_system_for_save(&mut self) -> errors::Result<()> {
+        self.system.version = Some((self.system.version.unwrap_or(0)) + 1);
+        let local_time_seconds = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+        self.system.saved_at = Some(local_time_seconds as i64);
+        Ok(())
+    }
+}
+
 impl From<(async::nextcloud::NextcloudConfiguration, SystemConfiguration)> for RklConfiguration {
     fn from(confs: (async::nextcloud::NextcloudConfiguration, SystemConfiguration)) -> Self {
         RklConfiguration {
@@ -501,7 +519,7 @@ impl From<(async::nextcloud::NextcloudConfiguration, SystemConfiguration)> for R
 }
 
 /// System - internal configuration
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct SystemConfiguration {
     /// When the passwords were saved
     pub saved_at: Option<i64>,
@@ -517,19 +535,19 @@ impl SystemConfiguration {
         }
     }
 
-	pub fn from_table(table: &Table) -> Result<SystemConfiguration, errors::RustKeylockError> {
+    pub fn from_table(table: &Table) -> Result<SystemConfiguration, errors::RustKeylockError> {
         let saved_at = table.get("saved_at").and_then(|value| value.as_integer().and_then(|int_ref| Some(int_ref)));
         let version = table.get("version").and_then(|value| value.as_integer().and_then(|int_ref| Some(int_ref)));
         Ok(SystemConfiguration::new(saved_at, version))
     }
 
-	pub fn to_table(&self) -> errors::Result<Table> {
+    pub fn to_table(&self) -> errors::Result<Table> {
         let mut table = Table::new();
         if self.saved_at.is_some() {
-	        table.insert("saved_at".to_string(), toml::Value::Integer(self.saved_at.unwrap()));
+            table.insert("saved_at".to_string(), toml::Value::Integer(self.saved_at.unwrap()));
         }
         if self.version.is_some() {
-	        table.insert("version".to_string(), toml::Value::Integer(self.version.unwrap()));
+            table.insert("version".to_string(), toml::Value::Integer(self.version.unwrap()));
         }
 
         Ok(table)
@@ -1552,6 +1570,38 @@ mod unit_tests {
         assert!(string == "String(my string)");
         let s: &str = &string;
         assert!(super::UserOptionType::from(s) == super::UserOptionType::String("my string".to_string()));
+    }
+
+    #[test]
+    fn system_configuration_to_table() {
+        let toml = r#"
+			saved_at = 123
+			version = 1
+		"#;
+
+        let value = toml.parse::<toml::value::Value>().unwrap();
+        let table = value.as_table().unwrap();
+        let res = super::SystemConfiguration::from_table(&table);
+        assert!(res.is_ok());
+        let conf = res.unwrap();
+        let new_table = conf.to_table().unwrap();
+        assert!(table == &new_table);
+    }
+
+    #[test]
+    fn system_configuration_from_table_success() {
+        let toml = r#"
+			saved_at = 123
+			version = 1
+		"#;
+
+        let value = toml.parse::<toml::value::Value>().unwrap();
+        let table = value.as_table().unwrap();
+        let res = super::SystemConfiguration::from_table(&table);
+        assert!(res.is_ok());
+        let conf = res.unwrap();
+        assert!(conf.saved_at == Some(123));
+        assert!(conf.version == Some(1));
     }
 
     struct DummyEditor;

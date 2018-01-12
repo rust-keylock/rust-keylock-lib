@@ -1,6 +1,6 @@
 use std::sync::mpsc::Sender;
-use std::time::UNIX_EPOCH;
 use std::str::FromStr;
+use super::super::SystemConfiguration;
 use super::super::{errors, file_handler};
 use super::super::datacrypt::EntryPasswordCryptor;
 use std::fs::File;
@@ -32,10 +32,18 @@ pub struct Synchronizer {
     tx: Sender<errors::Result<SyncStatus>>,
     /// The rust-keylock file name to synchronize
     file_name: String,
+    /// The saved_at value read locally from the file
+    saved_at_local: Option<i64>,
+    /// The version value read locally from the file
+    version_local: Option<i64>,
 }
 
 impl Synchronizer {
-    pub fn new(ncc: &NextcloudConfiguration, tx: Sender<errors::Result<SyncStatus>>, f: &str) -> errors::Result<Synchronizer> {
+    pub fn new(ncc: &NextcloudConfiguration,
+               sys_conf: &SystemConfiguration,
+               tx: Sender<errors::Result<SyncStatus>>,
+               f: &str)
+               -> errors::Result<Synchronizer> {
         let ncc = NextcloudConfiguration::new(ncc.server_url.clone(),
                                               ncc.username.clone(),
                                               ncc.decrypted_password()?,
@@ -44,6 +52,8 @@ impl Synchronizer {
             conf: ncc,
             tx: tx,
             file_name: f.to_string(),
+            saved_at_local: sys_conf.saved_at,
+            version_local: sys_conf.version,
         };
         Ok(s)
     }
@@ -87,8 +97,8 @@ impl Synchronizer {
 
         let mut req: Request = Request::new(hyper::Method::Extension("PROPFIND".to_string()), uri);
         *req.headers_mut() = headers;
-        // Set the body of the request so that it returns the oc:savedat property
-        let xml_body = r#"<d:propfind xmlns:d="DAV:"><d:prop xmlns:oc="http://owncloud.org/ns"><oc:savedat/></d:prop></d:propfind>"#;
+        // Set the body of the request so that it returns the oc:rklsavedat and oc:rklversion properties
+        let xml_body = r#"<d:propfind xmlns:d="DAV:"><d:prop xmlns:oc="http://owncloud.org/ns"><oc:rklsavedat/><oc:rklversion/></d:prop></d:propfind>"#;
         req.set_body(xml_body.as_bytes());
 
         let mut resp_bytes: Vec<u8> = Vec::new();
@@ -110,16 +120,28 @@ impl Synchronizer {
 
         match http_status {
             Some(hyper::StatusCode::NotFound) => {
-                info!("Creating rust-keylock-resources on the server");
-                Self::create_rust_keylock_col(&self.conf.username, self.use_password()?, &self.conf.server_url, &client, &mut core)?;
-                Self::put(&self.conf.username, self.use_password()?, &self.conf.server_url, &client, &mut core, &self.file_name)?;
-                Ok(SyncStatus::UploadSuccess)
+                if self.version_local.is_some() {
+                    info!("Creating rust-keylock-resources on the server");
+                    Self::create_rust_keylock_col(&self.conf.username, self.use_password()?, &self.conf.server_url, &client, &mut core)?;
+                    Self::put(&self.conf.username,
+                              self.use_password()?,
+                              &self.conf.server_url,
+                              &client,
+                              &mut core,
+                              &self.file_name,
+                              &self.saved_at_local,
+                              &self.version_local)?;
+                    Ok(SyncStatus::UploadSuccess)
+                } else {
+                    debug!("Resources not found on the server, but nothing is yet saved locally. Save needs to be performed first.");
+                    Ok(SyncStatus::None)
+                }
             }
             Some(hyper::StatusCode::MultiStatus) => {
                 debug!("Parsing nextcoud response");
                 let web_dav_resp = Self::parse_xml(resp_bytes.as_slice(), &self.file_name)?;
-                match Self::parse_web_dav_response(&web_dav_resp, &self.file_name)? {
-                    -1 => {
+                match Self::parse_web_dav_response(&web_dav_resp, &self.file_name, &self.saved_at_local, &self.version_local)? {
+                    ParseWebDavResponse::Download => {
                         info!("Downloading file from the server");
                         let tmp_file_name = Self::get(&self.conf.username,
                                                       self.use_password()?,
@@ -129,20 +151,23 @@ impl Synchronizer {
                                                       &self.file_name)?;
                         Ok(SyncStatus::NewAvailable(tmp_file_name))
                     }
-                    0 => {
+                    ParseWebDavResponse::Ignore => {
                         debug!("No sync is needed");
                         Ok(SyncStatus::None)
                     }
-                    1 => {
+                    ParseWebDavResponse::Upload => {
                         info!("Uploading file on the server");
-                        Self::put(&self.conf.username, self.use_password()?, &self.conf.server_url, &client, &mut core, &self.file_name)?;
+                        Self::put(&self.conf.username,
+                                  self.use_password()?,
+                                  &self.conf.server_url,
+                                  &client,
+                                  &mut core,
+                                  &self.file_name,
+                                  &self.saved_at_local,
+                                  &self.version_local)?;
                         Ok(SyncStatus::UploadSuccess)
                     }
-                    other => {
-                        Err(errors::RustKeylockError::SyncError(format!("parse_web_dav_response returned unexpected result ({}). Please \
-                                                                         consider opening a bug to the developers.",
-                                                                        other)))
-                    }
+                    ParseWebDavResponse::DownloadMergeAndUpload => Ok(SyncStatus::None),
                 }
             }
             Some(other) => Err(errors::RustKeylockError::SyncError(format!("Encountered WebDav error response: {:?}", other))),
@@ -150,27 +175,55 @@ impl Synchronizer {
         }
     }
 
-    /// Returns:
-    /// -1 if the server last modified time is greater than the local last modified time
-    /// 1 if the server last modified time is less than the local last modified time
-    /// 0 if the server last modified time is equal to the local last modified time
-    fn parse_web_dav_response(web_dav_response: &WebDavResponse, filename: &str) -> errors::Result<isize> {
+    /// Returns the action that should be taken after parsing a Webdav response
+    ///
+    /// Algorithm: (The _bigger_, _smaller_ and _equal_ words represent values for comparing saved_at_local with saved_at_server and version_local with version_server)
+    ///
+    /// | version_local | version_server | saved_at_local | saved_at_server |            Action
+    /// | :-----------: | :------------: | :------------: | :-------------: | :------------------------:
+    /// | bigger        | smaller        | *              | *               | Upload
+    /// | smaller       | bigger         | *              | *               | Download
+    /// | equal         | equal          | bigger         | smaller         | Download, Merge and Upload
+    /// | equal         | equal          | smaller        | bigger          | Download, Merge and Upload
+    /// | equal         | equal          | equal          | equal           | Ignore
+    /// | None          | *              | *              | *               | Download
+    fn parse_web_dav_response(web_dav_response: &WebDavResponse,
+                              filename: &str,
+                              saved_at_local: &Option<i64>,
+                              version_local: &Option<i64>)
+                              -> errors::Result<ParseWebDavResponse> {
 
-        debug!("The file '{}' on the server was last modified at {}", filename, web_dav_response.last_modified);
-        let server_time_seconds = u64::from_str(&web_dav_response.last_modified)?;
+        debug!("The file '{}' on the server was saved at {} with version {}",
+               filename,
+               web_dav_response.last_modified,
+               web_dav_response.version);
+        let saved_at_server = i64::from_str(&web_dav_response.last_modified)?;
+        let version_server = i64::from_str(&web_dav_response.version)?;
 
-        let file = file_handler::get_file(filename)?;
-        let file_metadata = file.metadata()?;
-        let local_time = file_metadata.modified()?;
-        let local_time_seconds = local_time.duration_since(UNIX_EPOCH)?.as_secs();
-        debug!("The file '{}' locally was last modified seconds {:?}", filename, local_time_seconds);
+        debug!("The file '{}' locally was saved at {:?} with version {:?}", filename, saved_at_local, version_local);
 
-        if server_time_seconds > local_time_seconds {
-            Ok(-1)
-        } else if server_time_seconds < local_time_seconds {
-            Ok(1)
-        } else {
-            Ok(0)
+        match (version_local, version_server, saved_at_local, saved_at_server) {
+            (&Some(vl), vs, _, _) if vl > vs => {
+                debug!("The local version is bigger than the server. Need to upload");
+                Ok(ParseWebDavResponse::Upload)
+            }
+            (&Some(vl), vs, _, _) if vl < vs => {
+                debug!("The local version is smaller that the server. Need to download");
+                Ok(ParseWebDavResponse::Download)
+            }
+            (&Some(vl), vs, &Some(sl), ss) if vl == vs && sl != ss => {
+                debug!("The local and server versions are equal, but the saved_at are different. Need to download, merge and upload");
+                Ok(ParseWebDavResponse::DownloadMergeAndUpload)
+            }
+            (&Some(vl), vs, &Some(sl), ss) if vl == vs && sl == ss => {
+                debug!("Both the version and saved_at are equal locally and on the server. Ignoring...");
+                Ok(ParseWebDavResponse::Ignore)
+            }
+            (&None, _, _, _) => {
+                debug!("First time contacting the server... Need to download");
+                Ok(ParseWebDavResponse::Download)
+            }
+            (_, _, _, _) => Ok(ParseWebDavResponse::Ignore),
         }
     }
 
@@ -183,6 +236,7 @@ impl Synchronizer {
         let mut web_dav_resp = WebDavResponse {
             href: "".to_string(),
             last_modified: "".to_string(),
+            version: "".to_string(),
             status: "".to_string(),
         };
         let mut web_dav_resp_result: errors::Result<WebDavResponse> =
@@ -198,7 +252,8 @@ impl Synchronizer {
                     debug!("Parsing element {} that has characters {}", curr_elem_name, string);
                     match curr_elem_name.as_ref() {
                         "{DAV:}d:href" => web_dav_resp.href = string,
-                        "{http://owncloud.org/ns}oc:savedat" => web_dav_resp.last_modified = string,
+                        "{http://owncloud.org/ns}oc:rklsavedat" => web_dav_resp.last_modified = string,
+                        "{http://owncloud.org/ns}oc:rklversion" => web_dav_resp.version = string,
                         "{DAV:}d:status" => web_dav_resp.status = string,
                         _ => {
                             // ignore
@@ -209,7 +264,7 @@ impl Synchronizer {
                     if name.to_string() == "{DAV:}d:response" {
                         // Check if the file is the one where the passwords are stored and that the gathered data are all present
                         if web_dav_resp.href.ends_with(filename) && web_dav_resp.href != "" && web_dav_resp.last_modified != "" &&
-                           web_dav_resp.status != "" {
+                           web_dav_resp.status != "" && web_dav_resp.version != "" {
                             if web_dav_resp.status.contains("200 OK") {
                                 web_dav_resp_result = Ok(web_dav_resp);
                             } else {
@@ -329,7 +384,9 @@ impl Synchronizer {
            server_url: &str,
            client: &Box<RequestClient>,
            core: &mut Core,
-           filename: &str)
+           filename: &str,
+           local_saved_at: &Option<i64>,
+           local_version: &Option<i64>)
            -> errors::Result<()> {
 
         let mut file = file_handler::get_file(filename)?;
@@ -372,19 +429,17 @@ impl Synchronizer {
         *req_pp.headers_mut() = headers;
         req_pp.headers_mut().set(header::ContentType::octet_stream());
 
-        // Get the seconds since UNIX_EPOCH and set them in the savedat property
-        let file_metadata = file.metadata()?;
-        let local_time = file_metadata.modified()?;
-        let local_time_seconds = local_time.duration_since(UNIX_EPOCH)?.as_secs();
         let xml_body: String = format!(r#"<?xml version="1.0" encoding="UTF-8"?>
 <d:propertyupdate xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">
   <d:set>
     <d:prop>
-      <oc:savedat>{}</oc:savedat>
+      <oc:rklsavedat>{}</oc:rklsavedat>
+      <oc:rklversion>{}</oc:rklversion>
     </d:prop>
   </d:set>
 </d:propertyupdate>"#,
-                                       local_time_seconds);
+                                       local_saved_at.map(|s| s.to_string()).unwrap_or("".to_string()),
+                                       local_version.map(|s| s.to_string()).unwrap_or("".to_string()));
         req_pp.set_body(xml_body);
 
         let mut resp_bytes_pp: Vec<u8> = Vec::new();
@@ -625,11 +680,14 @@ impl super::AsyncTask for Synchronizer {
 /// The status of the sync actions
 #[derive(PartialEq, Debug)]
 pub enum SyncStatus {
-    /// An update is available from the nextcloud server
-    /// The String is the name of the file that is ready to be used if the user selects so
+    /// An update is available from the nextcloud server.
+    /// The String is the name of the file that is ready to be used if the user selects so.
     NewAvailable(String),
-    /// The local file was uploaded to the nextcloud server
+    /// The local file was uploaded to the nextcloud server.
     UploadSuccess,
+    /// An update is available from the nextcloud server but instead of replacing the contents, merging needs to be done.
+    /// The String is the name of the file that is ready to be used if the user selects so.
+    NewToMerge(String),
     /// None
     None,
 }
@@ -682,6 +740,14 @@ impl RequestClient for HttpsRequestClientSelfSignedCertificate {
     fn request(&self, req: Request) -> FutureResponse {
         self.client.request(req)
     }
+}
+
+#[derive(PartialEq, Debug)]
+enum ParseWebDavResponse {
+    Download,
+    Upload,
+    Ignore,
+    DownloadMergeAndUpload,
 }
 
 /// The configuration that is retrieved from the rust-keylock encrypted file
@@ -770,6 +836,7 @@ impl Default for NextcloudConfiguration {
 struct WebDavResponse {
     href: String,
     last_modified: String,
+    version: String,
     status: String,
 }
 
@@ -782,8 +849,7 @@ mod nextcloud_tests {
     use std::io::prelude::*;
     use std::fs;
     use std::fs::File;
-    use super::super::super::errors;
-    use super::super::super::file_handler;
+    use super::super::super::{errors, file_handler, SystemConfiguration};
     use super::super::AsyncTask;
     use futures;
     use futures::future::Future;
@@ -799,7 +865,7 @@ mod nextcloud_tests {
                                                      password.clone(),
                                                      "".to_string())
             .unwrap();
-        let nc = super::Synchronizer::new(&ncc, tx, "filename").unwrap();
+        let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, "filename").unwrap();
 
         assert!(nc.conf.decrypted_password().unwrap() == password)
     }
@@ -887,7 +953,9 @@ mod nextcloud_tests {
                                                      password.clone(),
                                                      "".to_string())
             .unwrap();
-        let nc = super::Synchronizer::new(&ncc, tx, filename).unwrap();
+        let sys_config = SystemConfiguration::new(Some(123), Some(1));
+
+        let nc = super::Synchronizer::new(&ncc, &sys_config, tx, filename).unwrap();
         thread::spawn(move || {
             nc.execute();
         });
@@ -899,7 +967,7 @@ mod nextcloud_tests {
         assert!(rx_assert.recv_timeout(timeout).unwrap());
         // Assert the PUT that creates the file
         assert!(rx_assert.recv_timeout(timeout).unwrap());
-        // Assert the PROPPATCH for the oc:savedat
+        // Assert the PROPPATCH for the oc:rklsavedat and oc:rklversion
         assert!(rx_assert.recv_timeout(timeout).unwrap());
 
         // Assert that the file is ready to be downloaded
@@ -929,7 +997,7 @@ mod nextcloud_tests {
                                                      password.clone(),
                                                      "".to_string())
             .unwrap();
-        let nc = super::Synchronizer::new(&ncc, tx, filename).unwrap();
+        let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename).unwrap();
         thread::spawn(move || {
             nc.execute();
         });
@@ -969,7 +1037,7 @@ mod nextcloud_tests {
                                                      password.clone(),
                                                      "".to_string())
             .unwrap();
-        let nc = super::Synchronizer::new(&ncc, tx, filename).unwrap();
+        let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename).unwrap();
         thread::spawn(move || {
             nc.execute();
         });
@@ -1005,7 +1073,9 @@ mod nextcloud_tests {
                                                      password.clone(),
                                                      "".to_string())
             .unwrap();
-        let nc = super::Synchronizer::new(&ncc, tx, filename).unwrap();
+        let sys_config = SystemConfiguration::new(Some(123), Some(1));
+
+        let nc = super::Synchronizer::new(&ncc, &sys_config, tx, filename).unwrap();
         thread::spawn(move || {
             nc.execute();
         });
@@ -1043,7 +1113,9 @@ mod nextcloud_tests {
                                                      password.clone(),
                                                      "".to_string())
             .unwrap();
-        let nc = super::Synchronizer::new(&ncc, tx, filename).unwrap();
+        let sys_config = SystemConfiguration::new(Some(123), Some(1));
+
+        let nc = super::Synchronizer::new(&ncc, &sys_config, tx, filename).unwrap();
         thread::spawn(move || {
             nc.execute();
         });
@@ -1083,7 +1155,7 @@ mod nextcloud_tests {
                                                      password.clone(),
                                                      "".to_string())
             .unwrap();
-        let nc = super::Synchronizer::new(&ncc, tx, filename).unwrap();
+        let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename).unwrap();
         thread::spawn(move || {
             nc.execute();
         });
@@ -1114,7 +1186,7 @@ mod nextcloud_tests {
         let ncc =
             super::NextcloudConfiguration::new("http://127.0.0.1".to_string(), "username".to_string(), password.clone(), "".to_string())
                 .unwrap();
-        let nc = super::Synchronizer::new(&ncc, tx, filename).unwrap();
+        let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename).unwrap();
         thread::spawn(move || {
             nc.execute();
         });
@@ -1139,7 +1211,8 @@ mod nextcloud_tests {
 			  <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/{}</d:href>
 			  <d:propstat>
 			   <d:prop>
-			    <oc:savedat>1234567</oc:savedat>
+			    <oc:rklsavedat>1234567</oc:rklsavedat>
+			    <oc:rklversion>1</oc:rklversion>
 			   </d:prop>
 			   <d:status>HTTP/1.1 200 OK</d:status>
 			  </d:propstat>
@@ -1153,6 +1226,7 @@ mod nextcloud_tests {
         assert!(res.as_ref().unwrap().href == "/nextcloud/remote.php/dav/files/user/.rust-keylock/afilename");
         assert!(res.as_ref().unwrap().last_modified == "1234567");
         assert!(res.as_ref().unwrap().status == "HTTP/1.1 200 OK");
+        assert!(res.as_ref().unwrap().version == "1");
     }
 
     #[test]
@@ -1188,7 +1262,7 @@ mod nextcloud_tests {
     #[test]
     fn parse_xml_error_not_all_elements_are_present() {
         let filename = "afilename";
-        // The oc:savedat element is not present
+        // The oc:rklsavedat element is not present
         let xml = format!(r#"
 	    	<?xml version="1.0"?>
 			<d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">
@@ -1218,7 +1292,8 @@ mod nextcloud_tests {
 			  <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/{}</d:href>
 			  <d:propstat>
 			   <d:prop>
-			    <oc:savedat>1234567</oc:savedat>
+			    <oc:rklsavedat>1234567</oc:rklsavedat>
+			    <oc:rklversion>1</oc:rklversion>
 			   </d:prop>
 			   <d:status>HTTP/1.1 400 Bad Request</d:status>
 			  </d:propstat>
@@ -1232,30 +1307,75 @@ mod nextcloud_tests {
     }
 
     #[test]
-    // Note: the test will fail on 01/12 of year 2117 ;-)
     fn parse_web_dav_response() {
         let filename = "parse_web_dav_response";
         create_file_with_contents(filename, "This is a test file");
 
-        // Seconds after Unix Epoch time are 1512950400 for Monday, December 11, 2017 12:00:00 AM
+        // Upload because of version (saved_at bigger locally)
         let wdr1 = super::WebDavResponse {
             href: "not needed".to_string(),
-            last_modified: "1512950400".to_string(),
+            last_modified: "100".to_string(),
+            version: "1".to_string(),
             status: "not needed".to_string(),
         };
-        let res1 = super::Synchronizer::parse_web_dav_response(&wdr1, filename);
+        let res1 = super::Synchronizer::parse_web_dav_response(&wdr1, filename, &Some(133), &Some(2));
         assert!(res1.is_ok());
-        assert!(res1.as_ref().unwrap() == &isize::from(1 as i8));
+        assert!(res1.as_ref().unwrap() == &super::ParseWebDavResponse::Upload);
 
-        // Seconds after Unix Epoch time are 4667760000 for Wednesday, December 1, 2117 12:00:00 AM
+        // Upload because of version (saved_at bigger on server)
+        let wdr1_2 = super::WebDavResponse {
+            href: "not needed".to_string(),
+            last_modified: "133".to_string(),
+            version: "1".to_string(),
+            status: "not needed".to_string(),
+        };
+        let res1_2 = super::Synchronizer::parse_web_dav_response(&wdr1_2, filename, &Some(100), &Some(2));
+        assert!(res1_2.is_ok());
+        assert!(res1_2.as_ref().unwrap() == &super::ParseWebDavResponse::Upload);
+
+        // Download because of version (saved_at bigger locally)
         let wdr2 = super::WebDavResponse {
             href: "not needed".to_string(),
-            last_modified: "4667760000".to_string(),
+            last_modified: "100".to_string(),
+            version: "2".to_string(),
             status: "not needed".to_string(),
         };
-        let res2 = super::Synchronizer::parse_web_dav_response(&wdr2, filename);
+        let res2 = super::Synchronizer::parse_web_dav_response(&wdr2, filename, &Some(133), &Some(1));
         assert!(res2.is_ok());
-        assert!(res2.as_ref().unwrap() == &isize::from(-1 as i8));
+        assert!(res2.as_ref().unwrap() == &super::ParseWebDavResponse::Download);
+
+        // Download because of version (saved_at bigger on server)
+        let wdr2_2 = super::WebDavResponse {
+            href: "not needed".to_string(),
+            last_modified: "133".to_string(),
+            version: "2".to_string(),
+            status: "not needed".to_string(),
+        };
+        let res2_2 = super::Synchronizer::parse_web_dav_response(&wdr2_2, filename, &Some(100), &Some(1));
+        assert!(res2_2.is_ok());
+        assert!(res2_2.as_ref().unwrap() == &super::ParseWebDavResponse::Download);
+
+        // Download merge and upload because of saved_at bigger locally
+        let wdr3 = super::WebDavResponse {
+            href: "not needed".to_string(),
+            last_modified: "100".to_string(),
+            version: "1".to_string(),
+            status: "not needed".to_string(),
+        };
+        let res3 = super::Synchronizer::parse_web_dav_response(&wdr3, filename, &Some(133), &Some(1));
+        assert!(res3.is_ok());
+        assert!(res3.as_ref().unwrap() == &super::ParseWebDavResponse::DownloadMergeAndUpload);
+
+        // Download merge and upload because of saved_at bigger on the server
+        let wdr3_2 = super::WebDavResponse {
+            href: "not needed".to_string(),
+            last_modified: "133".to_string(),
+            version: "1".to_string(),
+            status: "not needed".to_string(),
+        };
+        let res3_2 = super::Synchronizer::parse_web_dav_response(&wdr3_2, filename, &Some(100), &Some(1));
+        assert!(res3_2.is_ok());
+        assert!(res3_2.as_ref().unwrap() == &super::ParseWebDavResponse::DownloadMergeAndUpload);
 
         delete_file(filename);
     }
@@ -1319,7 +1439,8 @@ mod nextcloud_tests {
 							  <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/download_a_file_from_the_server</d:href>
 							  <d:propstat>
 							   <d:prop>
-							    <oc:savedat>4667760000</oc:savedat>
+							    <oc:rklsavedat>4667760000</oc:rklsavedat>
+							    <oc:rklversion>1</oc:rklversion>
 							   </d:prop>
 							   <d:status>HTTP/1.1 200 OK</d:status>
 							  </d:propstat>
@@ -1382,7 +1503,8 @@ mod nextcloud_tests {
 							  <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/http_error_response_on_get</d:href>
 							  <d:propstat>
 							   <d:prop>
-							    <oc:savedat>4667760000</oc:savedat>
+							    <oc:rklsavedat>4667760000</oc:rklsavedat>
+							    <oc:rklversion>1</oc:rklversion>
 							   </d:prop>
 							   <d:status>HTTP/1.1 200 OK</d:status>
 							  </d:propstat>
