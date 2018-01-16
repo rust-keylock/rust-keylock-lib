@@ -1548,3 +1548,25 @@ mod nextcloud_tests {
         assert!(fs::remove_file(path).is_ok());
     }
 }
+/*
+From https://users.rust-lang.org/t/tls-sockets-without-certificate-validation/13929/4:
+
+It’s also possible to do it through native-tls if one uses a backend-specific connector builder:
+
+extern crate native_tls;
+extern crate openssl;
+
+use native_tls::TlsConnector;
+use native_tls::backend::openssl::TlsConnectorBuilderExt;
+use openssl::ssl::SSL_VERIFY_NONE;
+
+...
+let mut builder = TlsConnector::builder()?;
+builder.builder_mut().builder_mut().set_verify(SSL_VERIFY_NONE);
+let connector = builder.build()?;
+...
+
+The connection must be opened with the danger_connect...() method for SSL_VERIFY_NONE to have effect.
+
+This has to be hidden behind some kind of #[cfg(...)] if you’re writing cross-platform code, since there’s no equivalent functionality for non-OpenSSL backends I’m aware of.
+*/

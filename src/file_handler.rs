@@ -15,7 +15,8 @@ pub fn create_bcryptor(filename: &str,
                        password: String,
                        salt_position: usize,
                        reinitialize_randoms: bool,
-                       use_default_location: bool)
+                       use_default_location: bool,
+                       expanded_key: bool)
                        -> Result<BcryptAes, io::Error> {
     debug!("Creating bcryptor");
     let full_path = if use_default_location {
@@ -87,7 +88,7 @@ pub fn create_bcryptor(filename: &str,
         }
     };
     // TODO: Take the cost from the configuration
-    Ok(BcryptAes::new(password, salt, 3, iv, salt_position, hash_bytes))
+    Ok(BcryptAes::new(password, salt, 3, iv, salt_position, hash_bytes, expanded_key))
 }
 
 /// Returns true if the passwords file exists in the Filesystem, flase otherwise
@@ -579,9 +580,9 @@ mod test_parser {
             .unwrap();
         let sys_conf = SystemConfiguration::new(Some(0), Some(1));
 
-        let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
+        let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, true).unwrap();
         assert!(super::save(super::RklContent::new(entries.clone(), nc_conf, sys_conf), filename, &cryptor, true).is_ok());
-        cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
+        cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, true).unwrap();
 
         let m = super::load(filename, &cryptor, true);
         let rkl_content = m.unwrap();
@@ -616,7 +617,7 @@ mod test_parser {
                                                          "empty_import".to_string())
             .unwrap();
 
-        let tmp_cryptor_import = super::create_bcryptor(filename_import, password_import.clone(), salt_position_import, false, false)
+        let tmp_cryptor_import = super::create_bcryptor(filename_import, password_import.clone(), salt_position_import, false, false, true)
             .unwrap();
         let sys_conf_import = SystemConfiguration::new(Some(0), Some(1));
         assert!(super::save(super::RklContent::new(entries_import, nc_conf_import, sys_conf_import),
@@ -636,13 +637,13 @@ mod test_parser {
             .unwrap();
         let sys_conf = SystemConfiguration::new(Some(2), Some(3));
 
-        let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
+        let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, true).unwrap();
         assert!(super::save(super::RklContent::new(entries, nc_conf, sys_conf), filename, &cryptor, true).is_ok());
-        cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
+        cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, true).unwrap();
         assert!(super::load(filename, &cryptor, true).is_ok());
 
         // Import the file by creating a new cryptor
-        let cryptor_import = super::create_bcryptor(filename_import, password_import.clone(), salt_position_import, false, false).unwrap();
+        let cryptor_import = super::create_bcryptor(filename_import, password_import.clone(), salt_position_import, false, false, true).unwrap();
         assert!(super::load(filename_import, &cryptor_import, false).is_ok());
 
         delete_file(filename);
@@ -660,10 +661,10 @@ mod test_parser {
         let nc_conf = NextcloudConfiguration::default();
         let sys_conf = SystemConfiguration::default();
 
-        let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
+        let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, true).unwrap();
         assert!(super::save(super::RklContent::new(entries.clone(), nc_conf, sys_conf), filename, &cryptor, true).is_ok());
 
-        cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
+        cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, true).unwrap();
 
         let m = super::load(filename, &cryptor, true);
         let rkl_content = m.unwrap();
@@ -695,10 +696,10 @@ mod test_parser {
             .unwrap();
         let sys_conf = SystemConfiguration::new(Some(0), Some(1));
 
-        let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
+        let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, true).unwrap();
         assert!(super::save(super::RklContent::new(entries.clone(), nc_conf, sys_conf), filename, &cryptor, true).is_ok());
 
-        cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
+        cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, true).unwrap();
 
         let m = super::load(filename, &cryptor, true);
         let rkl_content = m.unwrap();
@@ -732,7 +733,7 @@ mod test_parser {
         // Create a v0.2.1 cryptor
         let old_cryptor = CryptorV021::new(password.clone(), datacrypt::create_random(16), 3, datacrypt::create_random(16), salt_position);
         assert!(super::save(super::RklContent::new(entries.clone(), nc_conf, sys_conf), filename, &old_cryptor, true).is_ok());
-        let new_cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
+        let new_cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, true).unwrap();
 
         let m = super::load(filename, &new_cryptor, true);
         let rkl_content = m.unwrap();
@@ -762,7 +763,7 @@ mod test_parser {
         let sys_conf = SystemConfiguration::default();
 
         // Create a bcryptor
-        let cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
+        let cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, true).unwrap();
         // Saving will change the hash, so reading with the same cryptor should result to an integrity error
         assert!(super::save(super::RklContent::new(entries, nc_conf, sys_conf), filename, &cryptor, true).is_ok());
 

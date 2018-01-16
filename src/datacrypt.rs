@@ -49,9 +49,13 @@ pub struct BcryptAes {
 
 impl BcryptAes {
     /// Creates a new key using the bcrypt algorithm.
-    fn create_new_bcrypt_key(password: &str, salt: &[u8], cost: u32) -> Vec<u8> {
+    fn create_new_bcrypt_key(password: &str, salt: &[u8], cost: u32, expand: bool) -> Vec<u8> {
         let mut key: Vec<u8> = repeat(0u8).take(24).collect();
         bcrypt(cost, &salt, password.as_bytes(), &mut key);
+        if expand {
+            let append_to_key: Vec<u8> = repeat(0u8).take(8).collect();
+            key.extend(append_to_key.iter());
+        }
         key
     }
 
@@ -62,15 +66,22 @@ impl BcryptAes {
     /// * Cost for the bcrypt algorithm
     /// * iv for AES
     /// * hash for Sha3Keccak512 hashing
-    pub fn new(password: String, salt: Vec<u8>, cost: u32, iv: Vec<u8>, salt_position: usize, hash_bytes: Vec<u8>) -> BcryptAes {
+    pub fn new(password: String,
+               salt: Vec<u8>,
+               cost: u32,
+               iv: Vec<u8>,
+               salt_position: usize,
+               hash_bytes: Vec<u8>,
+               expand_to_32: bool)
+               -> BcryptAes {
         // Create bcrypt password for the current encrypted data
-        let key = BcryptAes::create_new_bcrypt_key(&password, &salt, cost);
+        let key = BcryptAes::create_new_bcrypt_key(&password, &salt, cost, expand_to_32);
 
         // Create 10 new salt-key pairs to use them for encryption
         let mut salt_key_pairs = Vec::new();
         for _ in 0..NUMBER_OF_SALT_KEY_PAIRS {
             let s = create_random(16);
-            let k = BcryptAes::create_new_bcrypt_key(&password, &s, cost);
+            let k = BcryptAes::create_new_bcrypt_key(&password, &s, cost, expand_to_32);
             salt_key_pairs.push((s, RklSecret::new(k)));
         }
 
@@ -211,6 +222,8 @@ impl EntryPasswordCryptor {
         // Generate a key
         let mut key: Vec<u8> = create_random(24);
         bcrypt(3, &salt, &password, &mut key);
+        let append_to_key: Vec<u8> = repeat(0u8).take(8).collect();
+        key.extend(append_to_key.iter());
         // Create and return the EntryPasswordCryptor
         EntryPasswordCryptor {
             key: RklSecret::new(key),
@@ -906,7 +919,7 @@ mod test_crypt {
         bytes.append(&mut tmp);
 
         // Create the cryptor
-        let cryptor = super::BcryptAes::new("password".to_string(), iv, 1, salt, 33, hash);
+        let cryptor = super::BcryptAes::new("password".to_string(), iv, 1, salt, 33, hash, true);
         let result = cryptor.decrypt(&bytes);
         assert!(result.is_err());
         match result.err() {
