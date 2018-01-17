@@ -258,23 +258,37 @@ Warning: Saving will discard all the entries that could not be recovered.
                 debug!("UserSelection::GoTo(Menu::ImportEntries)");
                 editor.show_menu(&Menu::ImportEntries, &safe, &configuration)
             }
-            UserSelection::ImportFrom(path, pwd, salt_pos) => {
-                let cr = file_handler::create_bcryptor(&path, pwd, salt_pos, false, false, true).unwrap();
-                debug!("UserSelection::ImportFrom(path, pwd, salt_pos)");
+            us @ UserSelection::ImportFrom(_, _, _) |
+            us @ UserSelection::ImportFromDefaultLocation(_, _, _) => {
 
-                match file_handler::load(&path, &cr, false) {
-                    Ok(rkl_content) => {
-                        let message = format!("Imported {} entries!", &rkl_content.entries.len());
-                        debug!("{}", message);
-                        contents_changed = true;
-                        safe.merge(rkl_content.entries);
-                        let _ = editor.show_message(&message, vec![UserOption::ok()], MessageSeverity::default());
-                    }
-                    Err(error) => {
-                        let _ = editor.show_message("Could not import...", vec![UserOption::ok()], MessageSeverity::Error);
-                        error!("Could not import... {:?}", error);
-                    }
+                let import_from_default_location = match us {
+                    UserSelection::ImportFrom(_, _, _) => false,
+                    UserSelection::ImportFromDefaultLocation(_, _, _) => true,
+                    _ => false,
                 };
+                match us {
+                    UserSelection::ImportFrom(path, pwd, salt_pos) |
+                    UserSelection::ImportFromDefaultLocation(path, pwd, salt_pos) => {
+                        let cr = file_handler::create_bcryptor(&path, pwd, salt_pos, false, import_from_default_location, true).unwrap();
+                        debug!("UserSelection::ImportFrom(path, pwd, salt_pos)");
+
+                        match file_handler::load(&path, &cr, import_from_default_location) {
+                            Ok(rkl_content) => {
+                                let message = format!("Imported {} entries!", &rkl_content.entries.len());
+                                debug!("{}", message);
+                                contents_changed = true;
+                                safe.merge(rkl_content.entries);
+                                let _ = editor.show_message(&message, vec![UserOption::ok()], MessageSeverity::default());
+                            }
+                            Err(error) => {
+                                let _ = editor.show_message("Could not import...", vec![UserOption::ok()], MessageSeverity::Error);
+                                error!("Could not import... {:?}", error);
+                            }
+                        };
+                    }
+                    _ => {}
+                };
+
                 UserSelection::GoTo(Menu::Main)
             }
             UserSelection::GoTo(Menu::ShowConfiguration) => {
@@ -298,7 +312,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                 let message = format!("Bug: User Selection '{:?}' should not be handled in the main loop. Please, consider opening a bug \
                                        to the developers.",
                                       &other);
-                debug!("{}", message);
+                error!("{}", message);
                 panic!(message)
             }
         }
@@ -320,8 +334,7 @@ fn async_channel_check(nextcloud_rx: &Option<Receiver<errors::Result<async::next
                                                         vec![UserOption::ok()],
                                                         MessageSeverity::Info);
                         }
-                        Ok(async::nextcloud::SyncStatus::NewAvailable(downloaded_filename)) |
-                        Ok(async::nextcloud::SyncStatus::NewToMerge(downloaded_filename)) => {
+                        Ok(async::nextcloud::SyncStatus::NewAvailable(downloaded_filename)) => {
                             let selection =
                                 editor.show_message("Downloaded new data from the nextcloud server. Do you want to apply them locally now?",
                                                   vec![UserOption::yes(), UserOption::no()],
@@ -332,6 +345,37 @@ fn async_channel_check(nextcloud_rx: &Option<Receiver<errors::Result<async::next
                                 debug!("Replacing the local file with the one downloaded from the server");
                                 let _ = file_handler::replace(&downloaded_filename, filename);
                                 *user_selection = UserSelection::GoTo(Menu::TryPass);
+                            }
+                        }
+                        Ok(async::nextcloud::SyncStatus::NewToMerge(downloaded_filename)) => {
+                            let selection =
+                                editor.show_message("Downloaded data from the nextcloud server, but conflicts were identified. The \
+                                                     contents will be merged but nothing will be saved. You will need to explicitly save \
+                                                     after reviewing the merged data. Do you want to do the merge now?",
+                                                    vec![UserOption::yes(), UserOption::no()],
+                                                    MessageSeverity::Info);
+
+                            debug!("The user selected {:?} as an answer for applying the downloaded data locally", &selection);
+                            if selection == UserSelection::UserOption(UserOption::yes()) {
+                                debug!("Merging the local data with the downloaded from the server");
+
+                                match editor.show_password_enter() {
+                                    UserSelection::ProvidedPassword(pwd, salt_pos) => {
+                                        *user_selection = UserSelection::ImportFromDefaultLocation(downloaded_filename, pwd, salt_pos);
+                                    }
+                                    other => {
+                                        let message = format!("Expected a ProvidedPassword but received '{:?}'. Please, consider opening \
+                                                               a bug to the developers.",
+                                                              &other);
+                                        error!("{}", message);
+                                        let _ =
+                                            editor.show_message("Unexpected result when waiting for password. See the logs for more \
+                                                                 details. Please consider opening a but to the developers.",
+                                                                vec![UserOption::ok()],
+                                                                MessageSeverity::Error);
+                                        *user_selection = UserSelection::GoTo(Menu::TryPass);
+                                    }
+                                }
                             }
                         }
                         _ => {
@@ -973,6 +1017,8 @@ pub enum UserSelection {
     ExportTo(String),
     /// The User selected to import the password `Entries` from a path.
     ImportFrom(String, String, usize),
+    /// The User selected to import the password `Entries` from a file in the default location.
+    ImportFromDefaultLocation(String, String, usize),
     /// The User may be offered to select one of the Options.
     UserOption(UserOption),
     /// The User updates the configuration
