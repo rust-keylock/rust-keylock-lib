@@ -18,12 +18,14 @@ extern crate tokio_core;
 extern crate hyper_tls;
 extern crate native_tls;
 extern crate xml;
-extern crate httpdate;
+#[cfg(target_os = "android")]
+extern crate openssl;
 
 use toml::value::Table;
 use std::error::Error;
-use std::time::{self, SystemTime};
+use std::time::{self, SystemTime, UNIX_EPOCH};
 use std::sync::mpsc::{self, Sender, Receiver};
+use std::iter::FromIterator;
 pub use async::nextcloud;
 
 mod file_handler;
@@ -35,6 +37,7 @@ mod async;
 /// Takes a reference of `Editor` implementation as argument and executes the _rust-keylock_ logic.
 /// The `Editor` is responsible for the interaction with the user. Currently there are `Editor` implementations for __shell__ and for __Android__.
 pub fn execute<T: Editor>(editor: &T) {
+    // 	openssl_probe::init_ssl_cert_env_vars();
     info!("Starting rust-keylock...");
 
     let filename = ".sec";
@@ -55,7 +58,7 @@ pub fn execute<T: Editor>(editor: &T) {
     // Keeps the sensitive data
     let mut safe = Safe::new();
     // Keeps the configuration data
-    let mut configuration = RklConfiguration::from(async::nextcloud::NextcloudConfiguration::default());
+    let mut configuration = RklConfiguration::from((async::nextcloud::NextcloudConfiguration::default(), SystemConfiguration::default()));
     // Signals changes that are not saved
     let mut contents_changed = false;
     let mut nextcloud_rx: Option<Receiver<errors::Result<async::nextcloud::SyncStatus>>> = None;
@@ -71,7 +74,7 @@ pub fn execute<T: Editor>(editor: &T) {
         };
 
         // Take the provided password and do the initialization
-        let (us, cr) = handle_provided_password_for_init(provided_password, filename, &mut safe, &mut configuration, editor);
+        let (us, cr) = handle_provided_password_for_init(provided_password, filename, &mut safe, &mut configuration, editor, true);
         // If a valid nextcloud configuration is in place, spawn the background async execution
         if configuration.nextcloud.is_filled() {
             let (nc_rx, loop_ctrl_tx) = spawn_nextcloud_async_task(&filename, &configuration, &nextcloud_loop_ctrl_tx);
@@ -99,10 +102,10 @@ pub fn execute<T: Editor>(editor: &T) {
         // Handle
         user_selection = match user_selection {
             UserSelection::GoTo(Menu::TryPass) => {
-            	// Cancel any pending background tasks
-            	let _ = nextcloud_loop_ctrl_tx.as_ref().and_then(|tx| Some(tx.send(true)));
+                // Cancel any pending background tasks
+                let _ = nextcloud_loop_ctrl_tx.as_ref().and_then(|tx| Some(tx.send(true)));
                 let (user_selection, cr) =
-                    handle_provided_password_for_init(editor.show_password_enter(), filename, &mut safe, &mut configuration, editor);
+                    handle_provided_password_for_init(editor.show_password_enter(), filename, &mut safe, &mut configuration, editor, true);
                 // If a valid nextcloud configuration is in place, spawn the background async execution
                 if configuration.nextcloud.is_filled() {
                     debug!("A valid configuration for Nextcloud synchronization was found. Spawning async tasks");
@@ -126,7 +129,7 @@ pub fn execute<T: Editor>(editor: &T) {
             }
             UserSelection::ProvidedPassword(pwd, salt_pos) => {
                 debug!("UserSelection::GoTo(Menu::ProvidedPassword)");
-                cryptor = file_handler::create_bcryptor(filename, pwd, salt_pos, true, true).unwrap();
+                cryptor = file_handler::create_bcryptor(filename, pwd, salt_pos, true, true, true).unwrap();
                 UserSelection::GoTo(Menu::Main)
             }
             UserSelection::GoTo(Menu::EntriesList(filter)) => {
@@ -152,11 +155,19 @@ pub fn execute<T: Editor>(editor: &T) {
             }
             UserSelection::GoTo(Menu::Save) => {
                 debug!("UserSelection::GoTo(Menu::Save)");
-                let rkl_content = RklContent::from((&safe, &configuration.nextcloud));
+                let _ = configuration.update_system_for_save().map_err(|error| error!("Cannot update system for save: {:?}", error));
+                let rkl_content = RklContent::from((&safe, &configuration.nextcloud, &configuration.system));
                 let res = rkl_content.and_then(|c| file_handler::save(c, filename, &cryptor, true));
                 match res {
                     Ok(_) => {
+                        // Cancel any pending background tasks
+                        let _ = nextcloud_loop_ctrl_tx.as_ref().and_then(|tx| Some(tx.send(true)));
+                        // Clean the flag for unsaved data
                         contents_changed = false;
+                        // Start a new background async task
+                        let (nc_rx, loop_ctrl_tx) = spawn_nextcloud_async_task(&filename, &configuration, &nextcloud_loop_ctrl_tx);
+                        nextcloud_rx = Some(nc_rx);
+                        nextcloud_loop_ctrl_tx = Some(loop_ctrl_tx);
                         let _ =
                             editor.show_message("Encrypted and saved successfully!", vec![UserOption::ok()], MessageSeverity::default());
                     }
@@ -230,7 +241,7 @@ Warning: Saving will discard all the entries that could not be recovered.
             }
             UserSelection::ExportTo(path) => {
                 debug!("UserSelection::ExportTo(path)");
-                let rkl_content = RklContent::from((&safe, &configuration.nextcloud));
+                let rkl_content = RklContent::from((&safe, &configuration.nextcloud, &configuration.system));
                 let res = rkl_content.and_then(|c| file_handler::save(c, &path, &cryptor, false));
                 match res {
                     Ok(_) => {
@@ -247,23 +258,37 @@ Warning: Saving will discard all the entries that could not be recovered.
                 debug!("UserSelection::GoTo(Menu::ImportEntries)");
                 editor.show_menu(&Menu::ImportEntries, &safe, &configuration)
             }
-            UserSelection::ImportFrom(path, pwd, salt_pos) => {
-                let cr = file_handler::create_bcryptor(&path, pwd, salt_pos, false, false).unwrap();
-                debug!("UserSelection::ImportFrom(path, pwd, salt_pos)");
+            us @ UserSelection::ImportFrom(_, _, _) |
+            us @ UserSelection::ImportFromDefaultLocation(_, _, _) => {
 
-                match file_handler::load(&path, &cr, false) {
-                    Ok(rkl_content) => {
-                        let message = format!("Imported {} entries!", &rkl_content.entries.len());
-                        debug!("{}", message);
-                        contents_changed = true;
-                        safe.merge(rkl_content.entries);
-                        let _ = editor.show_message(&message, vec![UserOption::ok()], MessageSeverity::default());
-                    }
-                    Err(error) => {
-                        let _ = editor.show_message("Could not import...", vec![UserOption::ok()], MessageSeverity::Error);
-                        error!("Could not import... {:?}", error);
-                    }
+                let import_from_default_location = match us {
+                    UserSelection::ImportFrom(_, _, _) => false,
+                    UserSelection::ImportFromDefaultLocation(_, _, _) => true,
+                    _ => false,
                 };
+                match us {
+                    UserSelection::ImportFrom(path, pwd, salt_pos) |
+                    UserSelection::ImportFromDefaultLocation(path, pwd, salt_pos) => {
+                        let cr = file_handler::create_bcryptor(&path, pwd, salt_pos, false, import_from_default_location, true).unwrap();
+                        debug!("UserSelection::ImportFrom(path, pwd, salt_pos)");
+
+                        match file_handler::load(&path, &cr, import_from_default_location) {
+                            Ok(rkl_content) => {
+                                let message = format!("Imported {} entries!", &rkl_content.entries.len());
+                                debug!("{}", message);
+                                contents_changed = true;
+                                safe.merge(rkl_content.entries);
+                                let _ = editor.show_message(&message, vec![UserOption::ok()], MessageSeverity::default());
+                            }
+                            Err(error) => {
+                                let _ = editor.show_message("Could not import...", vec![UserOption::ok()], MessageSeverity::Error);
+                                error!("Could not import... {:?}", error);
+                            }
+                        };
+                    }
+                    _ => {}
+                };
+
                 UserSelection::GoTo(Menu::Main)
             }
             UserSelection::GoTo(Menu::ShowConfiguration) => {
@@ -272,7 +297,7 @@ Warning: Saving will discard all the entries that could not be recovered.
             }
             UserSelection::UpdateConfiguration(new_conf) => {
                 debug!("UserSelection::UpdateConfiguration");
-                configuration = new_conf;
+                configuration.nextcloud = new_conf;
                 if configuration.nextcloud.is_filled() {
                     debug!("A valid configuration for Nextcloud synchronization was found after being updated by the User. Spawning \
                             async tasks");
@@ -287,7 +312,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                 let message = format!("Bug: User Selection '{:?}' should not be handled in the main loop. Please, consider opening a bug \
                                        to the developers.",
                                       &other);
-                debug!("{}", message);
+                error!("{}", message);
                 panic!(message)
             }
         }
@@ -314,9 +339,43 @@ fn async_channel_check(nextcloud_rx: &Option<Receiver<errors::Result<async::next
                                 editor.show_message("Downloaded new data from the nextcloud server. Do you want to apply them locally now?",
                                                   vec![UserOption::yes(), UserOption::no()],
                                                   MessageSeverity::Info);
+
+                            debug!("The user selected {:?} as an answer for applying the downloaded data locally", &selection);
                             if selection == UserSelection::UserOption(UserOption::yes()) {
+                                debug!("Replacing the local file with the one downloaded from the server");
                                 let _ = file_handler::replace(&downloaded_filename, filename);
                                 *user_selection = UserSelection::GoTo(Menu::TryPass);
+                            }
+                        }
+                        Ok(async::nextcloud::SyncStatus::NewToMerge(downloaded_filename)) => {
+                            let selection =
+                                editor.show_message("Downloaded data from the nextcloud server, but conflicts were identified. The \
+                                                     contents will be merged but nothing will be saved. You will need to explicitly save \
+                                                     after reviewing the merged data. Do you want to do the merge now?",
+                                                    vec![UserOption::yes(), UserOption::no()],
+                                                    MessageSeverity::Info);
+
+                            debug!("The user selected {:?} as an answer for applying the downloaded data locally", &selection);
+                            if selection == UserSelection::UserOption(UserOption::yes()) {
+                                debug!("Merging the local data with the downloaded from the server");
+
+                                match editor.show_password_enter() {
+                                    UserSelection::ProvidedPassword(pwd, salt_pos) => {
+                                        *user_selection = UserSelection::ImportFromDefaultLocation(downloaded_filename, pwd, salt_pos);
+                                    }
+                                    other => {
+                                        let message = format!("Expected a ProvidedPassword but received '{:?}'. Please, consider opening \
+                                                               a bug to the developers.",
+                                                              &other);
+                                        error!("{}", message);
+                                        let _ =
+                                            editor.show_message("Unexpected result when waiting for password. See the logs for more \
+                                                                 details. Please consider opening a but to the developers.",
+                                                                vec![UserOption::ok()],
+                                                                MessageSeverity::Error);
+                                        *user_selection = UserSelection::GoTo(Menu::TryPass);
+                                    }
+                                }
                             }
                         }
                         _ => {
@@ -363,20 +422,21 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
                                      filename: &str,
                                      safe: &mut Safe,
                                      configuration: &mut RklConfiguration,
-                                     editor: &Editor)
+                                     editor: &Editor,
+                                     expanded_key: bool)
                                      -> (UserSelection, datacrypt::BcryptAes) {
     let user_selection: UserSelection;
     match provided_password {
         UserSelection::ProvidedPassword(pwd, salt_pos) => {
             // New Cryptor here
-            let cr = file_handler::create_bcryptor(filename, pwd, salt_pos, false, true).unwrap();
+            let cr = file_handler::create_bcryptor(filename, pwd.clone(), salt_pos, false, true, expanded_key).unwrap();
             // Try to decrypt and load the Entries
             let retrieved_entries = match file_handler::load(filename, &cr, true) {
                 // Success, go to the Main menu
                 Ok(rkl_content) => {
                     user_selection = UserSelection::GoTo(Menu::Main);
                     // Set the retrieved configuration
-                    let new_rkl_conf = RklConfiguration::from(rkl_content.nextcloud_conf);
+                    let new_rkl_conf = RklConfiguration::from((rkl_content.nextcloud_conf, rkl_content.system_conf));
                     *configuration = new_rkl_conf;
                     rkl_content.entries
                 }
@@ -392,14 +452,31 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
                         // In all the other cases, notify the User and retry
                         _ => {
                             error!("{}", error.description());
-                            let _ =
+                            let just_upgraded_opt =
+                                UserOption::new("Just Upgraded...", UserOptionType::String("just_upgraded".to_string()), "j");
+                            let s =
                                 editor.show_message("Wrong password or number! Please make sure that both the password and number that you \
                                                    provide are correct. If this is the case, the rust-keylock data is corrupted and \
                                                    nothing can be done about it.",
-                                                  vec![UserOption::ok()],
+                                                  vec![UserOption::ok(), just_upgraded_opt],
                                                   MessageSeverity::Error);
-                            user_selection = UserSelection::GoTo(Menu::TryPass);
-                            Vec::new()
+                            match s {
+                                UserSelection::UserOption(uo) => {
+                                    if uo.short_label == "j" {
+                                        let usel = UserSelection::ProvidedPassword(pwd.clone(), salt_pos);
+                                        let _ = handle_provided_password_for_init(usel, filename, safe, configuration, editor, false);
+                                        user_selection = UserSelection::GoTo(Menu::Main);
+                                        safe.get_entries_decrypted()
+                                    } else {
+                                        user_selection = UserSelection::GoTo(Menu::TryPass);
+                                        Vec::new()
+                                    }
+                                }
+                                _ => {
+                                    user_selection = UserSelection::GoTo(Menu::TryPass);
+                                    Vec::new()
+                                }
+                            }
                         }
                     }
                 }
@@ -412,7 +489,7 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
         }
         UserSelection::GoTo(Menu::Exit) => {
             debug!("UserSelection::GoTo(Menu::Exit) was called before providing credentials");
-            let cr = file_handler::create_bcryptor(filename, "dummy".to_string(), 33, false, true).unwrap();
+            let cr = file_handler::create_bcryptor(filename, "dummy".to_string(), 33, false, true, true).unwrap();
             let exit_selection = UserSelection::GoTo(Menu::ForceExit);
             (exit_selection, cr)
         }
@@ -442,7 +519,7 @@ fn spawn_nextcloud_async_task(filename: &str,
     let (tx, rx): (Sender<errors::Result<async::nextcloud::SyncStatus>>, Receiver<errors::Result<async::nextcloud::SyncStatus>>) =
         mpsc::channel();
     let every = time::Duration::from_millis(10000);
-    let nc = async::nextcloud::Synchronizer::new(&configuration.nextcloud, tx, filename).unwrap();
+    let nc = async::nextcloud::Synchronizer::new(&configuration.nextcloud, &configuration.system, tx, filename).unwrap();
     let async_task_control_tx = async::execute_task(Box::new(nc), every);
     (rx, async_task_control_tx)
 }
@@ -451,36 +528,110 @@ fn spawn_nextcloud_async_task(filename: &str,
 pub struct RklContent {
     entries: Vec<Entry>,
     nextcloud_conf: async::nextcloud::NextcloudConfiguration,
+    system_conf: SystemConfiguration,
 }
 
 impl RklContent {
-    pub fn new(entries: Vec<Entry>, nextcloud_conf: async::nextcloud::NextcloudConfiguration) -> RklContent {
+    pub fn new(entries: Vec<Entry>,
+               nextcloud_conf: async::nextcloud::NextcloudConfiguration,
+               system_conf: SystemConfiguration)
+               -> RklContent {
         RklContent {
             entries: entries,
             nextcloud_conf: nextcloud_conf,
+            system_conf: system_conf,
         }
     }
 
-    pub fn from(tup: (&Safe, &async::nextcloud::NextcloudConfiguration)) -> errors::Result<RklContent> {
+    pub fn from(tup: (&Safe, &async::nextcloud::NextcloudConfiguration, &SystemConfiguration)) -> errors::Result<RklContent> {
         let entries = tup.0.get_entries_decrypted();
         let nextcloud_conf = async::nextcloud::NextcloudConfiguration::new(tup.1.server_url.clone(),
                                                                            tup.1.username.clone(),
                                                                            tup.1.decrypted_password()?,
                                                                            tup.1.self_signed_der_certificate_location.clone());
+        let system_conf = SystemConfiguration::new(tup.2.saved_at, tup.2.version, tup.2.last_sync_version);
 
-        Ok(RklContent::new(entries, nextcloud_conf.unwrap()))
+        Ok(RklContent::new(entries, nextcloud_conf?, system_conf))
     }
 }
 
 /// Keeps the Configuration
 #[derive(Debug, PartialEq)]
 pub struct RklConfiguration {
+    pub system: SystemConfiguration,
     pub nextcloud: async::nextcloud::NextcloudConfiguration,
 }
 
-impl From<async::nextcloud::NextcloudConfiguration> for RklConfiguration {
-    fn from(ncc: async::nextcloud::NextcloudConfiguration) -> Self {
-        RklConfiguration { nextcloud: ncc }
+impl RklConfiguration {
+    pub fn update_system_for_save(&mut self) -> errors::Result<()> {
+        self.system.version = Some((self.system.version.unwrap_or(0)) + 1);
+        // When uploaded, the last_sync_version should be the same with the version
+        self.system.last_sync_version = self.system.version;
+        let local_time_seconds = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+        self.system.saved_at = Some(local_time_seconds as i64);
+        Ok(())
+    }
+}
+
+impl From<(async::nextcloud::NextcloudConfiguration, SystemConfiguration)> for RklConfiguration {
+    fn from(confs: (async::nextcloud::NextcloudConfiguration, SystemConfiguration)) -> Self {
+        RklConfiguration {
+            system: confs.1,
+            nextcloud: confs.0,
+        }
+    }
+}
+
+/// System - internal configuration
+#[derive(Debug, PartialEq, Clone)]
+pub struct SystemConfiguration {
+    /// When the passwords were saved
+    pub saved_at: Option<i64>,
+    /// A number that gets incremented with each persisted change
+    pub version: Option<i64>,
+    /// The version that was set upon the last sync. This is the same with the version once the data is uploaded to the server
+    pub last_sync_version: Option<i64>,
+}
+
+impl SystemConfiguration {
+    pub fn new(saved_at: Option<i64>, version: Option<i64>, last_sync_version: Option<i64>) -> SystemConfiguration {
+        SystemConfiguration {
+            saved_at: saved_at,
+            version: version,
+            last_sync_version: last_sync_version,
+        }
+    }
+
+    pub fn from_table(table: &Table) -> Result<SystemConfiguration, errors::RustKeylockError> {
+        let saved_at = table.get("saved_at").and_then(|value| value.as_integer().and_then(|int_ref| Some(int_ref)));
+        let version = table.get("version").and_then(|value| value.as_integer().and_then(|int_ref| Some(int_ref)));
+        let last_sync_version = table.get("last_sync_version").and_then(|value| value.as_integer().and_then(|int_ref| Some(int_ref)));
+        Ok(SystemConfiguration::new(saved_at, version, last_sync_version))
+    }
+
+    pub fn to_table(&self) -> errors::Result<Table> {
+        let mut table = Table::new();
+        if self.saved_at.is_some() {
+            table.insert("saved_at".to_string(), toml::Value::Integer(self.saved_at.unwrap()));
+        }
+        if self.version.is_some() {
+            table.insert("version".to_string(), toml::Value::Integer(self.version.unwrap()));
+        }
+        if self.last_sync_version.is_some() {
+            table.insert("last_sync_version".to_string(), toml::Value::Integer(self.last_sync_version.unwrap()));
+        }
+
+        Ok(table)
+    }
+}
+
+impl Default for SystemConfiguration {
+    fn default() -> SystemConfiguration {
+        SystemConfiguration {
+            saved_at: None,
+            version: None,
+            last_sync_version: None,
+        }
     }
 }
 
@@ -876,10 +1027,12 @@ pub enum UserSelection {
     ExportTo(String),
     /// The User selected to import the password `Entries` from a path.
     ImportFrom(String, String, usize),
+    /// The User selected to import the password `Entries` from a file in the default location.
+    ImportFromDefaultLocation(String, String, usize),
     /// The User may be offered to select one of the Options.
     UserOption(UserOption),
     /// The User updates the configuration
-    UpdateConfiguration(RklConfiguration),
+    UpdateConfiguration(nextcloud::NextcloudConfiguration),
 }
 
 #[derive(Debug, PartialEq)]
@@ -903,13 +1056,21 @@ impl From<(String, String, String)> for UserOption {
     fn from(f: (String, String, String)) -> Self {
         UserOption {
             label: f.0,
-            value: UserOptionType::None, // FIXME: Implement From for the UserOptionType
+            value: UserOptionType::from(f.1.as_ref()),
             short_label: f.2,
         }
     }
 }
 
 impl UserOption {
+    pub fn new(label: &str, option_type: UserOptionType, short_label: &str) -> UserOption {
+        UserOption {
+            label: label.to_string(),
+            value: option_type,
+            short_label: short_label.to_string(),
+        }
+    }
+
     pub fn empty() -> UserOption {
         UserOption {
             label: "".to_string(),
@@ -954,14 +1115,76 @@ impl UserOption {
 /// Represents a type for a `UserOption`
 #[derive(Debug, PartialEq, Clone)]
 pub enum UserOptionType {
-    Number(usize),
+    Number(isize),
     String(String),
     None,
 }
 
+impl UserOptionType {
+    fn extract_value_from_string(str: &str) -> errors::Result<String> {
+        println!("Extracting value from {}", str);
+        let s = str.clone();
+        let start = s.find("(");
+        if s.ends_with(")") {
+            match start {
+                Some(st) => {
+                    let i = s.chars().skip(st + 1).take(str.len() - st - 2);
+                    let s = String::from_iter(i);
+                    println!("returning {}", s);
+                    Ok(s)
+                }
+                _ => {
+                    Err(errors::RustKeylockError::ParseError(format!("Could not extract UserOptionType value from {}. The \
+                                                                      UserOptionType can be extracted from strings like String(value)",
+                                                                     str)))
+                }
+            }
+        } else {
+            Err(errors::RustKeylockError::ParseError(format!("Could not extract UserOptionType value from {}. The UserOptionType can be \
+                                                              extracted from strings like String(value)",
+                                                             str)))
+        }
+    }
+}
+
 impl ToString for UserOptionType {
     fn to_string(&self) -> String {
-        String::from(format!("{:?}", &self))
+        match self {
+            &UserOptionType::String(ref s) => format!("String({})", s),
+            _ => String::from(format!("{:?}", &self)),
+        }
+    }
+}
+
+impl<'a> From<&'a str> for UserOptionType {
+    fn from(string: &str) -> Self {
+        match string {
+            ref s if s.starts_with("String") => {
+                match Self::extract_value_from_string(s) {
+                    Ok(value) => UserOptionType::String(value),
+                    Err(error) => {
+                        error!("Could not create UserOptionType from {}: {:?}. Please consider opening a bug to the developers.", s, error);
+                        UserOptionType::None
+                    }
+                }
+            }
+            ref s if s.starts_with("Number") => {
+                let m = Self::extract_value_from_string(s).and_then(|value| {
+                    value.parse::<i64>().map_err(|_| errors::RustKeylockError::ParseError(format!("Could not parse {} to i64", value)))
+                });
+                match m {
+                    Ok(num) => UserOptionType::Number(num as isize),
+                    Err(error) => {
+                        error!("Could not create UserOptionType from {}: {:?}. Please consider opening a bug to the developers.", s, error);
+                        UserOptionType::None
+                    }
+                }
+            }
+            other => {
+                error!("Could not create UserOptionType from {}. Please consider opening a bug to the developers.", other);
+                UserOptionType::None
+            }
+        }
     }
 }
 
@@ -1396,6 +1619,71 @@ mod unit_tests {
         assert!(&opt3.label == "Ok");
         assert!(opt3.value == super::UserOptionType::String("Ok".to_string()));
         assert!(&opt3.short_label == "o");
+    }
+
+    #[test]
+    fn user_option_type_extract_value_from_string() {
+        let s1 = "String(my string)";
+        let sr1 = super::UserOptionType::extract_value_from_string(&s1).unwrap();
+        assert!(sr1 == "my string");
+
+        let s2 = "String(wrong";
+        assert!(super::UserOptionType::extract_value_from_string(&s2).is_err());
+
+        let s3 = "String wrong)";
+        assert!(super::UserOptionType::extract_value_from_string(&s3).is_err());
+
+        let s4 = "String((my string))";
+        let sr4 = super::UserOptionType::extract_value_from_string(&s4).unwrap();
+        assert!(sr4 == "(my string)");
+    }
+
+    #[test]
+    fn user_option_type_from_string() {
+        assert!(super::UserOptionType::from("String(my string)") == super::UserOptionType::String("my string".to_string()));
+        assert!(super::UserOptionType::from("Number(33)") == super::UserOptionType::Number(33));
+        assert!(super::UserOptionType::from("Other(33)") == super::UserOptionType::None);
+    }
+
+    #[test]
+    fn user_option_type_to_string_from_string() {
+        let user_option_type = super::UserOptionType::String("my string".to_string());
+        let string = user_option_type.to_string();
+        assert!(string == "String(my string)");
+        let s: &str = &string;
+        assert!(super::UserOptionType::from(s) == super::UserOptionType::String("my string".to_string()));
+    }
+
+    #[test]
+    fn system_configuration_to_table() {
+        let toml = r#"
+			saved_at = 123
+			version = 1
+		"#;
+
+        let value = toml.parse::<toml::value::Value>().unwrap();
+        let table = value.as_table().unwrap();
+        let res = super::SystemConfiguration::from_table(&table);
+        assert!(res.is_ok());
+        let conf = res.unwrap();
+        let new_table = conf.to_table().unwrap();
+        assert!(table == &new_table);
+    }
+
+    #[test]
+    fn system_configuration_from_table_success() {
+        let toml = r#"
+			saved_at = 123
+			version = 1
+		"#;
+
+        let value = toml.parse::<toml::value::Value>().unwrap();
+        let table = value.as_table().unwrap();
+        let res = super::SystemConfiguration::from_table(&table);
+        assert!(res.is_ok());
+        let conf = res.unwrap();
+        assert!(conf.saved_at == Some(123));
+        assert!(conf.version == Some(1));
     }
 
     struct DummyEditor;

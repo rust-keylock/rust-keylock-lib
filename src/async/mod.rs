@@ -58,9 +58,9 @@ mod async_tests {
         let task = DummyTask { tx: tx };
         let _dummy = super::execute_task(Box::new(task), ten_millis);
 
-        assert!(rx.recv_timeout(time::Duration::from_millis(20)).is_ok());
-        assert!(rx.recv_timeout(time::Duration::from_millis(20)).is_ok());
-        assert!(rx.recv_timeout(time::Duration::from_millis(20)).is_ok());
+        assert!(rx.recv_timeout(time::Duration::from_millis(1000)).is_ok());
+        assert!(rx.recv_timeout(time::Duration::from_millis(1000)).is_ok());
+        assert!(rx.recv_timeout(time::Duration::from_millis(1000)).is_ok());
     }
 
     pub struct DummyTask {
