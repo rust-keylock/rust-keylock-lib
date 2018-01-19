@@ -36,6 +36,8 @@ pub struct Synchronizer {
     saved_at_local: Option<i64>,
     /// The version value read locally from the file
     version_local: Option<i64>,
+    /// The version that was set during the last sync
+    last_sync_version: Option<i64>,
 }
 
 impl Synchronizer {
@@ -54,6 +56,7 @@ impl Synchronizer {
             file_name: f.to_string(),
             saved_at_local: sys_conf.saved_at,
             version_local: sys_conf.version,
+            last_sync_version: sys_conf.last_sync_version,
         };
         Ok(s)
     }
@@ -140,7 +143,11 @@ impl Synchronizer {
             Some(hyper::StatusCode::MultiStatus) => {
                 debug!("Parsing nextcoud response");
                 let web_dav_resp = Self::parse_xml(resp_bytes.as_slice(), &self.file_name)?;
-                match Self::parse_web_dav_response(&web_dav_resp, &self.file_name, &self.saved_at_local, &self.version_local)? {
+                match Self::parse_web_dav_response(&web_dav_resp,
+                                                   &self.file_name,
+                                                   &self.saved_at_local,
+                                                   &self.version_local,
+                                                   &self.last_sync_version)? {
                     ParseWebDavResponse::Download => {
                         info!("Downloading file from the server");
                         let tmp_file_name = Self::get(&self.conf.username,
@@ -185,53 +192,59 @@ impl Synchronizer {
 
     /// Returns the action that should be taken after parsing a Webdav response
     ///
-    /// Algorithm: (The _bigger_, _smaller_ and _equal_ words represent values for comparing saved_at_local with saved_at_server and version_local with version_server)
+    /// ## Algorithm:
     ///
-    /// | version_local | version_server | saved_at_local | saved_at_server |            Action
-    /// | :-----------: | :------------: | :------------: | :-------------: | :------------------------:
-    /// | bigger        | smaller        | *              | *               | Upload
-    /// | smaller       | bigger         | *              | *               | Download
-    /// | equal         | equal          | bigger         | smaller         | Download, Merge and Upload
-    /// | equal         | equal          | smaller        | bigger          | Download, Merge and Upload
-    /// | equal         | equal          | equal          | equal           | Ignore
-    /// | None          | *              | *              | *               | Download
+    /// |           version_local        |       version_server     |     last_sync_version    |          Action
+    /// | :---------------------------:  | :----------------------: | :----------------------: | :------------------------:
+    /// | bigger than server             | smaller than local       | *                        | Upload
+    /// | smaller than server            | bigger than local        | smaller than server      | Download
+    /// | smaller than server            | bigger than local        | smaller than local       | Download and Megre
+    /// | same everywhere                | same everywhere          | same everywhere          | Ignore
+    /// | smaller than last_sync_version | *                        | bigger than local        | Ignore (Error)
+
     fn parse_web_dav_response(web_dav_response: &WebDavResponse,
                               filename: &str,
                               saved_at_local: &Option<i64>,
-                              version_local: &Option<i64>)
+                              version_local: &Option<i64>,
+                              last_sync_version: &Option<i64>)
                               -> errors::Result<ParseWebDavResponse> {
 
         debug!("The file '{}' on the server was saved at {} with version {}",
                filename,
                web_dav_response.last_modified,
                web_dav_response.version);
-        let saved_at_server = i64::from_str(&web_dav_response.last_modified)?;
         let version_server = i64::from_str(&web_dav_response.version)?;
 
-        debug!("The file '{}' locally was saved at {:?} with version {:?}", filename, saved_at_local, version_local);
+        debug!("The file '{}' locally was saved at {:?} with version {:?}. Last sync version is {:?}",
+               filename,
+               saved_at_local,
+               version_local,
+               last_sync_version);
 
-        match (version_local, version_server, saved_at_local, saved_at_server) {
-            (&Some(vl), vs, _, _) if vl > vs => {
+        match (version_local, version_server, last_sync_version) {
+            (&Some(vl), vs, _) if vl > vs => {
                 debug!("The local version is bigger than the server. Need to upload");
                 Ok(ParseWebDavResponse::Upload)
             }
-            (&Some(vl), vs, _, _) if vl < vs => {
-                debug!("The local version is smaller that the server. Need to download");
+            (&Some(vl), vs, &Some(lsv)) if vl < vs && vl == lsv => {
+                debug!("The local version is smaller than the server and the last sync version is smaller than the server. Need to \
+                        download");
                 Ok(ParseWebDavResponse::Download)
             }
-            (&Some(vl), vs, &Some(sl), ss) if vl == vs && sl != ss => {
-                debug!("The local and server versions are equal, but the saved_at are different. Need to download, merge and upload");
+            (&Some(vl), vs, &Some(lsv)) if vl < vs && lsv < vl => {
+                debug!("The local version is smaller than the server and the last sync version is smaller than the local. Need to \
+                        download and merge");
                 Ok(ParseWebDavResponse::DownloadMergeAndUpload)
             }
-            (&Some(vl), vs, &Some(sl), ss) if vl == vs && sl == ss => {
-                debug!("Both the version and saved_at are equal locally and on the server. Ignoring...");
+            (&Some(vl), vs, &Some(lsv)) if vl == vs && vs == lsv => {
+                debug!("The versions locally and on the server are equal. Ignoring...");
                 Ok(ParseWebDavResponse::Ignore)
             }
-            (&None, _, _, _) => {
+            (&None, _, _) => {
                 debug!("First time contacting the server... Need to download");
                 Ok(ParseWebDavResponse::Download)
             }
-            (_, _, _, _) => Ok(ParseWebDavResponse::Ignore),
+            (_, _, _) => Ok(ParseWebDavResponse::Ignore),
         }
     }
 
@@ -961,7 +974,7 @@ mod nextcloud_tests {
                                                      password.clone(),
                                                      "".to_string())
             .unwrap();
-        let sys_config = SystemConfiguration::new(Some(123), Some(1));
+        let sys_config = SystemConfiguration::new(Some(123), Some(1), None);
 
         let nc = super::Synchronizer::new(&ncc, &sys_config, tx, filename).unwrap();
         thread::spawn(move || {
@@ -1081,7 +1094,7 @@ mod nextcloud_tests {
                                                      password.clone(),
                                                      "".to_string())
             .unwrap();
-        let sys_config = SystemConfiguration::new(Some(123), Some(1));
+        let sys_config = SystemConfiguration::new(Some(123), Some(1), None);
 
         let nc = super::Synchronizer::new(&ncc, &sys_config, tx, filename).unwrap();
         thread::spawn(move || {
@@ -1121,7 +1134,7 @@ mod nextcloud_tests {
                                                      password.clone(),
                                                      "".to_string())
             .unwrap();
-        let sys_config = SystemConfiguration::new(Some(123), Some(1));
+        let sys_config = SystemConfiguration::new(Some(123), Some(1), None);
 
         let nc = super::Synchronizer::new(&ncc, &sys_config, tx, filename).unwrap();
         thread::spawn(move || {
@@ -1319,71 +1332,60 @@ mod nextcloud_tests {
         let filename = "parse_web_dav_response";
         create_file_with_contents(filename, "This is a test file");
 
-        // Upload because of version (saved_at bigger locally)
+        // Upload because version_local is bigger than version_server
         let wdr1 = super::WebDavResponse {
             href: "not needed".to_string(),
-            last_modified: "100".to_string(),
+            last_modified: "133".to_string(),
             version: "1".to_string(),
             status: "not needed".to_string(),
         };
-        let res1 = super::Synchronizer::parse_web_dav_response(&wdr1, filename, &Some(133), &Some(2));
+        let res1 = super::Synchronizer::parse_web_dav_response(&wdr1, filename, &Some(133), &Some(2), &Some(2));
         assert!(res1.is_ok());
         assert!(res1.as_ref().unwrap() == &super::ParseWebDavResponse::Upload);
 
-        // Upload because of version (saved_at bigger on server)
-        let wdr1_2 = super::WebDavResponse {
-            href: "not needed".to_string(),
-            last_modified: "133".to_string(),
-            version: "1".to_string(),
-            status: "not needed".to_string(),
-        };
-        let res1_2 = super::Synchronizer::parse_web_dav_response(&wdr1_2, filename, &Some(100), &Some(2));
-        assert!(res1_2.is_ok());
-        assert!(res1_2.as_ref().unwrap() == &super::ParseWebDavResponse::Upload);
-
-        // Download because of version (saved_at bigger locally)
+        // Download because version_server is bigger than version_local
         let wdr2 = super::WebDavResponse {
             href: "not needed".to_string(),
-            last_modified: "100".to_string(),
+            last_modified: "133".to_string(),
             version: "2".to_string(),
             status: "not needed".to_string(),
         };
-        let res2 = super::Synchronizer::parse_web_dav_response(&wdr2, filename, &Some(133), &Some(1));
+        let res2 = super::Synchronizer::parse_web_dav_response(&wdr2, filename, &Some(133), &Some(1), &Some(1));
         assert!(res2.is_ok());
         assert!(res2.as_ref().unwrap() == &super::ParseWebDavResponse::Download);
 
-        // Download because of version (saved_at bigger on server)
+        // Download and Merge because of version_server is bigger than version_local and last_sync_version is smaller than the version_local
         let wdr2_2 = super::WebDavResponse {
             href: "not needed".to_string(),
             last_modified: "133".to_string(),
-            version: "2".to_string(),
+            version: "3".to_string(),
             status: "not needed".to_string(),
         };
-        let res2_2 = super::Synchronizer::parse_web_dav_response(&wdr2_2, filename, &Some(100), &Some(1));
+        let res2_2 = super::Synchronizer::parse_web_dav_response(&wdr2_2, filename, &Some(133), &Some(2), &Some(1));
         assert!(res2_2.is_ok());
-        assert!(res2_2.as_ref().unwrap() == &super::ParseWebDavResponse::Download);
+        assert!(res2_2.as_ref().unwrap() == &super::ParseWebDavResponse::DownloadMergeAndUpload);
 
-        // Download merge and upload because of saved_at bigger locally
+		// Ignore when all versions are equal
         let wdr3 = super::WebDavResponse {
             href: "not needed".to_string(),
-            last_modified: "100".to_string(),
-            version: "1".to_string(),
+            last_modified: "133".to_string(),
+            version: "3".to_string(),
             status: "not needed".to_string(),
         };
-        let res3 = super::Synchronizer::parse_web_dav_response(&wdr3, filename, &Some(133), &Some(1));
+        let res3 = super::Synchronizer::parse_web_dav_response(&wdr3, filename, &Some(133), &Some(3), &Some(3));
         assert!(res3.is_ok());
-        assert!(res3.as_ref().unwrap() == &super::ParseWebDavResponse::DownloadMergeAndUpload);
+        assert!(res3.as_ref().unwrap() == &super::ParseWebDavResponse::Ignore);
 
-        // Download merge and upload because of saved_at bigger on the server
-        let wdr3_2 = super::WebDavResponse {
+		// Ignore when error (the last_sync_version is bigger than the version_local)
+        let wdr3 = super::WebDavResponse {
             href: "not needed".to_string(),
             last_modified: "133".to_string(),
-            version: "1".to_string(),
+            version: "3".to_string(),
             status: "not needed".to_string(),
         };
-        let res3_2 = super::Synchronizer::parse_web_dav_response(&wdr3_2, filename, &Some(100), &Some(1));
-        assert!(res3_2.is_ok());
-        assert!(res3_2.as_ref().unwrap() == &super::ParseWebDavResponse::DownloadMergeAndUpload);
+        let res3 = super::Synchronizer::parse_web_dav_response(&wdr3, filename, &Some(133), &Some(1), &Some(3));
+        assert!(res3.is_ok());
+        assert!(res3.as_ref().unwrap() == &super::ParseWebDavResponse::Ignore);
 
         delete_file(filename);
     }

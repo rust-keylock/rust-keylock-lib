@@ -549,7 +549,7 @@ impl RklContent {
                                                                            tup.1.username.clone(),
                                                                            tup.1.decrypted_password()?,
                                                                            tup.1.self_signed_der_certificate_location.clone());
-        let system_conf = SystemConfiguration::new(tup.2.saved_at, tup.2.version);
+        let system_conf = SystemConfiguration::new(tup.2.saved_at, tup.2.version, tup.2.last_sync_version);
 
         Ok(RklContent::new(entries, nextcloud_conf?, system_conf))
     }
@@ -565,6 +565,8 @@ pub struct RklConfiguration {
 impl RklConfiguration {
     pub fn update_system_for_save(&mut self) -> errors::Result<()> {
         self.system.version = Some((self.system.version.unwrap_or(0)) + 1);
+        // When uploaded, the last_sync_version should be the same with the version
+        self.system.last_sync_version = self.system.version;
         let local_time_seconds = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
         self.system.saved_at = Some(local_time_seconds as i64);
         Ok(())
@@ -587,20 +589,24 @@ pub struct SystemConfiguration {
     pub saved_at: Option<i64>,
     /// A number that gets incremented with each persisted change
     pub version: Option<i64>,
+    /// The version that was set upon the last sync. This is the same with the version once the data is uploaded to the server
+    pub last_sync_version: Option<i64>,
 }
 
 impl SystemConfiguration {
-    pub fn new(saved_at: Option<i64>, version: Option<i64>) -> SystemConfiguration {
+    pub fn new(saved_at: Option<i64>, version: Option<i64>, last_sync_version: Option<i64>) -> SystemConfiguration {
         SystemConfiguration {
             saved_at: saved_at,
             version: version,
+            last_sync_version: last_sync_version,
         }
     }
 
     pub fn from_table(table: &Table) -> Result<SystemConfiguration, errors::RustKeylockError> {
         let saved_at = table.get("saved_at").and_then(|value| value.as_integer().and_then(|int_ref| Some(int_ref)));
         let version = table.get("version").and_then(|value| value.as_integer().and_then(|int_ref| Some(int_ref)));
-        Ok(SystemConfiguration::new(saved_at, version))
+        let last_sync_version = table.get("last_sync_version").and_then(|value| value.as_integer().and_then(|int_ref| Some(int_ref)));
+        Ok(SystemConfiguration::new(saved_at, version, last_sync_version))
     }
 
     pub fn to_table(&self) -> errors::Result<Table> {
@@ -610,6 +616,9 @@ impl SystemConfiguration {
         }
         if self.version.is_some() {
             table.insert("version".to_string(), toml::Value::Integer(self.version.unwrap()));
+        }
+        if self.last_sync_version.is_some() {
+            table.insert("last_sync_version".to_string(), toml::Value::Integer(self.last_sync_version.unwrap()));
         }
 
         Ok(table)
@@ -621,6 +630,7 @@ impl Default for SystemConfiguration {
         SystemConfiguration {
             saved_at: None,
             version: None,
+            last_sync_version: None,
         }
     }
 }

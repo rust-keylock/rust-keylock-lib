@@ -431,7 +431,7 @@ mod test_parser {
         vec.push(Entry::new("name".to_string(), "user".to_string(), "pass".to_string(), "desc".to_string()));
         let nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), "".to_string())
             .unwrap();
-        let sys_conf = SystemConfiguration::new(Some(0), Some(1));
+        let sys_conf = SystemConfiguration::new(Some(0), Some(1), Some(2));
 
         assert!(super::save(super::RklContent::new(vec, nc_conf, sys_conf), filename, &NoCryptor::new(), true).is_ok());
 
@@ -578,7 +578,7 @@ mod test_parser {
         entries.push(Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "1".to_string()));
         let nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), "".to_string())
             .unwrap();
-        let sys_conf = SystemConfiguration::new(Some(0), Some(1));
+        let sys_conf = SystemConfiguration::new(Some(0), Some(1), Some(2));
 
         let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, true).unwrap();
         assert!(super::save(super::RklContent::new(entries.clone(), nc_conf, sys_conf), filename, &cryptor, true).is_ok());
@@ -592,7 +592,7 @@ mod test_parser {
         assert!("" == rkl_content.nextcloud_conf.self_signed_der_certificate_location);
         let new_nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), "".to_string())
             .unwrap();
-        let new_sys_conf = SystemConfiguration::new(Some(0), Some(1));
+        let new_sys_conf = SystemConfiguration::new(Some(0), Some(1), Some(2));
         assert!(super::save(super::RklContent::new(entries, new_nc_conf, new_sys_conf), filename, &cryptor, true).is_ok());
 
         delete_file(filename);
@@ -619,7 +619,7 @@ mod test_parser {
 
         let tmp_cryptor_import = super::create_bcryptor(filename_import, password_import.clone(), salt_position_import, false, false, true)
             .unwrap();
-        let sys_conf_import = SystemConfiguration::new(Some(0), Some(1));
+        let sys_conf_import = SystemConfiguration::new(Some(0), Some(1), Some(2));
         assert!(super::save(super::RklContent::new(entries_import, nc_conf_import, sys_conf_import),
                             filename_import,
                             &tmp_cryptor_import,
@@ -635,7 +635,7 @@ mod test_parser {
         entries.push(Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "1".to_string()));
         let nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), "".to_string())
             .unwrap();
-        let sys_conf = SystemConfiguration::new(Some(2), Some(3));
+        let sys_conf = SystemConfiguration::new(Some(2), Some(3), Some(2));
 
         let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, true).unwrap();
         assert!(super::save(super::RklContent::new(entries, nc_conf, sys_conf), filename, &cryptor, true).is_ok());
@@ -694,7 +694,7 @@ mod test_parser {
         let entries = Vec::new();
         let nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), "".to_string())
             .unwrap();
-        let sys_conf = SystemConfiguration::new(Some(0), Some(1));
+        let sys_conf = SystemConfiguration::new(Some(0), Some(1), Some(2));
 
         let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, true).unwrap();
         assert!(super::save(super::RklContent::new(entries.clone(), nc_conf, sys_conf), filename, &cryptor, true).is_ok());
@@ -709,6 +709,7 @@ mod test_parser {
         assert!("" == rkl_content.nextcloud_conf.self_signed_der_certificate_location);
         assert!(rkl_content.system_conf.saved_at == Some(0));
         assert!(rkl_content.system_conf.version == Some(1));
+        assert!(rkl_content.system_conf.last_sync_version == Some(2));
 
         assert!(super::save(super::RklContent::new(entries, NextcloudConfiguration::default(), SystemConfiguration::default()),
                             filename,
