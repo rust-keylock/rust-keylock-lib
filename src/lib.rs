@@ -18,8 +18,7 @@ extern crate tokio_core;
 extern crate hyper_tls;
 extern crate native_tls;
 extern crate xml;
-#[cfg(target_os = "android")]
-extern crate openssl;
+extern crate openssl_probe;
 
 use toml::value::Table;
 use std::error::Error;
@@ -37,7 +36,7 @@ mod async;
 /// Takes a reference of `Editor` implementation as argument and executes the _rust-keylock_ logic.
 /// The `Editor` is responsible for the interaction with the user. Currently there are `Editor` implementations for __shell__ and for __Android__.
 pub fn execute<T: Editor>(editor: &T) {
-    // 	openssl_probe::init_ssl_cert_env_vars();
+    openssl_probe::init_ssl_cert_env_vars();
     info!("Starting rust-keylock...");
 
     let filename = ".sec";
@@ -548,7 +547,7 @@ impl RklContent {
         let nextcloud_conf = async::nextcloud::NextcloudConfiguration::new(tup.1.server_url.clone(),
                                                                            tup.1.username.clone(),
                                                                            tup.1.decrypted_password()?,
-                                                                           tup.1.self_signed_der_certificate_location.clone());
+                                                                           tup.1.use_self_signed_certificate);
         let system_conf = SystemConfiguration::new(tup.2.saved_at, tup.2.version, tup.2.last_sync_version);
 
         Ok(RklContent::new(entries, nextcloud_conf?, system_conf))

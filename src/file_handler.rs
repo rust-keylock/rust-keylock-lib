@@ -220,6 +220,22 @@ pub fn default_rustkeylock_location() -> PathBuf {
     home_dir
 }
 
+#[cfg(target_os = "android")]
+pub fn create_certs_path() -> errors::Result<PathBuf> {
+	let mut rust_keylock_home = default_rustkeylock_location();
+    rust_keylock_home.push("/sdcard/Download/rust-keylock/etc/ssl/certs");
+    let _ = fs::create_dir_all(rust_keylock_home.clone())?;
+    Ok(rust_keylock_home)
+}
+
+#[cfg(not(target_os = "android"))]
+pub fn create_certs_path() -> errors::Result<PathBuf> {
+    let mut rust_keylock_home = default_rustkeylock_location();
+    rust_keylock_home.push("etc/ssl/certs");
+    let _ = fs::create_dir_all(rust_keylock_home.clone())?;
+    Ok(rust_keylock_home)
+}
+
 /// Transforms properties toml to Props dto
 fn transform_to_props(table: &Table) -> Result<Props, RustKeylockError> {
     Props::from_table(table)
@@ -291,7 +307,7 @@ fn retrieve_system_conf(table: &Table) -> Result<SystemConfiguration, RustKeyloc
 }
 
 /// Loads a file that contains a toml String and returns this String
-fn load_existing_file<'a>(file_path: &PathBuf, cryptor_opt: Option<&Cryptor>) -> Result<String, RustKeylockError> {
+fn load_existing_file<'a>(file_path: &PathBuf, cryptor_opt: Option<&Cryptor>) -> errors::Result<String> {
     let bytes = {
         match File::open(file_path) {
             Ok(file) => {
@@ -309,8 +325,11 @@ fn load_existing_file<'a>(file_path: &PathBuf, cryptor_opt: Option<&Cryptor>) ->
             }
             Err(_) => {
                 debug!("Encrypted file does not exist. Initializing...");
-                assert!(fs::create_dir_all(default_rustkeylock_location()).is_ok());
-                debug!("Directories created successfully");
+                // Create the rust-keylock home
+                let _ = fs::create_dir_all(default_rustkeylock_location())?;
+                // Create the directory for the self signed certificates
+                let _ = create_certs_path()?;
+                debug!("Directories for home and certs created successfully");
                 Vec::new()
             }
         }
@@ -337,7 +356,15 @@ fn load_existing_file<'a>(file_path: &PathBuf, cryptor_opt: Option<&Cryptor>) ->
                 Ok("".to_string())
             }
         }
-        None => Ok(try!(String::from_utf8(bytes))),
+        None => {
+            match String::from_utf8(bytes) {
+                Ok(s) => Ok(s),
+                Err(error) => {
+                    error!("Could not load existing file {:?}: {:?}", file_path, error);
+                    Ok("".to_string())
+                }
+            }
+        }
     }
 }
 
@@ -429,7 +456,7 @@ mod test_parser {
         let rkl_content = res.unwrap();
         let mut vec = rkl_content.entries;
         vec.push(Entry::new("name".to_string(), "user".to_string(), "pass".to_string(), "desc".to_string()));
-        let nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), "".to_string())
+        let nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), true)
             .unwrap();
         let sys_conf = SystemConfiguration::new(Some(0), Some(1), Some(2));
 
@@ -446,7 +473,7 @@ mod test_parser {
 
         assert!(new_nc_conf.server_url == "nc_url");
         assert!(new_nc_conf.username == "nc_user");
-        assert!(new_nc_conf.self_signed_der_certificate_location == "");
+        assert!(new_nc_conf.use_self_signed_certificate);
 
         assert!(new_sys_conf.saved_at == Some(0));
         assert!(new_sys_conf.version == Some(1));
@@ -576,7 +603,7 @@ mod test_parser {
 
         let mut entries = Vec::new();
         entries.push(Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "1".to_string()));
-        let nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), "".to_string())
+        let nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), true)
             .unwrap();
         let sys_conf = SystemConfiguration::new(Some(0), Some(1), Some(2));
 
@@ -589,8 +616,8 @@ mod test_parser {
         assert!(entries == rkl_content.entries);
         assert!("nc_url" == rkl_content.nextcloud_conf.server_url);
         assert!("nc_user" == rkl_content.nextcloud_conf.username);
-        assert!("" == rkl_content.nextcloud_conf.self_signed_der_certificate_location);
-        let new_nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), "".to_string())
+        assert!(rkl_content.nextcloud_conf.use_self_signed_certificate);
+        let new_nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), true)
             .unwrap();
         let new_sys_conf = SystemConfiguration::new(Some(0), Some(1), Some(2));
         assert!(super::save(super::RklContent::new(entries, new_nc_conf, new_sys_conf), filename, &cryptor, true).is_ok());
@@ -614,7 +641,7 @@ mod test_parser {
         let nc_conf_import = NextcloudConfiguration::new("nc_url_import".to_string(),
                                                          "nc_user_import".to_string(),
                                                          "nc_pass_import".to_string(),
-                                                         "empty_import".to_string())
+                                                         false)
             .unwrap();
 
         let tmp_cryptor_import = super::create_bcryptor(filename_import, password_import.clone(), salt_position_import, false, false, true)
@@ -633,7 +660,7 @@ mod test_parser {
 
         let mut entries = Vec::new();
         entries.push(Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "1".to_string()));
-        let nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), "".to_string())
+        let nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), false)
             .unwrap();
         let sys_conf = SystemConfiguration::new(Some(2), Some(3), Some(2));
 
@@ -643,7 +670,8 @@ mod test_parser {
         assert!(super::load(filename, &cryptor, true).is_ok());
 
         // Import the file by creating a new cryptor
-        let cryptor_import = super::create_bcryptor(filename_import, password_import.clone(), salt_position_import, false, false, true).unwrap();
+        let cryptor_import = super::create_bcryptor(filename_import, password_import.clone(), salt_position_import, false, false, true)
+            .unwrap();
         assert!(super::load(filename_import, &cryptor_import, false).is_ok());
 
         delete_file(filename);
@@ -671,7 +699,7 @@ mod test_parser {
         assert!(entries == rkl_content.entries);
         assert!("" == rkl_content.nextcloud_conf.server_url);
         assert!("" == rkl_content.nextcloud_conf.username);
-        assert!("" == rkl_content.nextcloud_conf.self_signed_der_certificate_location);
+        assert!(!rkl_content.nextcloud_conf.use_self_signed_certificate);
         assert!(rkl_content.system_conf.saved_at == None);
         assert!(rkl_content.system_conf.version == None);
 
@@ -692,7 +720,7 @@ mod test_parser {
         let password = "123".to_string();
 
         let entries = Vec::new();
-        let nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), "".to_string())
+        let nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), true)
             .unwrap();
         let sys_conf = SystemConfiguration::new(Some(0), Some(1), Some(2));
 
@@ -706,7 +734,7 @@ mod test_parser {
         assert!(entries.len() == 0);
         assert!("nc_url" == rkl_content.nextcloud_conf.server_url);
         assert!("nc_user" == rkl_content.nextcloud_conf.username);
-        assert!("" == rkl_content.nextcloud_conf.self_signed_der_certificate_location);
+        assert!(rkl_content.nextcloud_conf.use_self_signed_certificate);
         assert!(rkl_content.system_conf.saved_at == Some(0));
         assert!(rkl_content.system_conf.version == Some(1));
         assert!(rkl_content.system_conf.last_sync_version == Some(2));
@@ -741,7 +769,7 @@ mod test_parser {
         assert!(entries == rkl_content.entries);
         assert!("" == rkl_content.nextcloud_conf.server_url);
         assert!("" == rkl_content.nextcloud_conf.username);
-        assert!("" == rkl_content.nextcloud_conf.self_signed_der_certificate_location);
+        assert!(!rkl_content.nextcloud_conf.use_self_signed_certificate);
 
         assert!(super::save(super::RklContent::new(entries, NextcloudConfiguration::default(), SystemConfiguration::default()),
                             filename,
@@ -794,7 +822,7 @@ mod test_parser {
 			url = "http://127.0.0.1/nextcloud"
 			user = "user"
 			pass = "123"
-			self_signed_cert = ""
+			use_self_signed_certificate = false
         [[entry]]
 			name = "name"
 			user = "user"

@@ -3,11 +3,10 @@ use std::str::FromStr;
 use super::super::SystemConfiguration;
 use super::super::{errors, file_handler};
 use super::super::datacrypt::EntryPasswordCryptor;
-use std::fs::File;
 use std::io::prelude::*;
 use futures::{Future, Stream};
 use hyper::Client;
-use hyper::client::{Request, HttpConnector, FutureResponse};
+use hyper::client::{Request, FutureResponse};
 use hyper;
 use hyper::header;
 use hyper_tls::{self, HttpsConnector};
@@ -16,13 +15,8 @@ use toml;
 use toml::value::Table;
 use hyper::header::{Headers, Authorization, Basic};
 use xml::reader::{EventReader, XmlEvent};
-use native_tls;
 #[allow(unused_imports)]
 use native_tls::backend::openssl::TlsConnectorBuilderExt;
-#[cfg(target_os = "android")]
-use openssl;
-#[cfg(target_os = "android")]
-use std::fs;
 
 /// A (Next/Own)cloud synchronizer
 pub struct Synchronizer {
@@ -49,7 +43,7 @@ impl Synchronizer {
         let ncc = NextcloudConfiguration::new(ncc.server_url.clone(),
                                               ncc.username.clone(),
                                               ncc.decrypted_password()?,
-                                              ncc.self_signed_der_certificate_location.clone())?;
+                                              ncc.use_self_signed_certificate)?;
         let s = Synchronizer {
             conf: ncc,
             tx: tx,
@@ -74,15 +68,10 @@ impl Synchronizer {
             // Use HTTP
             debug!("The Nextcloud async task uses HTTP connector");
             Self::connect_with_http(&handle)
-        } else if cfg!(target_os = "android") && self.conf.server_url.starts_with("https://") {
-            // Use HTTPS in Android
-            debug!("The Nextcloud async task uses HTTPS connector in Android");
-            Self::connect_with_https_android(&handle)?
-        } else if self.conf.self_signed_der_certificate_location.len() > 0 {
+        } else if self.conf.use_self_signed_certificate {
             // Use HTTPS with a self signed certificate
-            debug!("The Nextcloud async task uses HTTPS connector with a self-signed certificate located at {}",
-                   &self.conf.self_signed_der_certificate_location);
-            Self::connect_with_https_self_signed(&handle, &self.conf.self_signed_der_certificate_location)?
+            debug!("The Nextcloud async task uses HTTPS connector with a self-signed certificate");
+            Self::connect_with_https_self_signed(&handle)?
         } else {
             // Use HTTPS
             debug!("The Nextcloud async task uses HTTPS connector");
@@ -505,176 +494,11 @@ impl Synchronizer {
         Ok(Box::new(HttpsRequestClient { client: client }) as Box<RequestClient>)
     }
 
-    //        fn connect_with_https_android_2(handle: &Handle) -> errors::Result<Box<RequestClient>> {
-    //            let mut http = HttpConnector::new(4, &handle);
-    //            http.enforce_http(false);
-    //
-    //            let mut tls = native_tls::TlsConnector::builder().unwrap();
-    //            match fs::read_dir("/data/misc/keystore/") {
-    //            	Ok(certs) => {
-    //     	            for entry in certs.filter_map(|r| r.ok()).filter(|e| e.path().is_file()) {
-    //     	                debug!("========Adding file {:?}", entry.path());
-    //     	                let mut buffer = vec![];
-    //     	                match fs::File::open(entry.path()).and_then(|mut f| f.read_to_end(&mut buffer)) {
-    //     	                    Ok(_) => {
-    //     	                        debug!("File read");
-    //     	                        match openssl::x509::X509::from_pem(buffer.as_slice()) {
-    //     	                            Ok(cert_x509) => {
-    //     	                                let der_bytes = cert_x509.to_der().unwrap();
-    //     	                                debug!("Transformed to DER");
-    //     	                                let cert = native_tls::Certificate::from_der(&der_bytes).unwrap();
-    //     	                                tls.add_root_certificate(cert).unwrap();
-    //     	                                debug!("Added!");
-    //     	                            }
-    //     	                            Err(error) => {
-    //     	                                error!("Could not transform to DER: {:?}", error);
-    //     	                            }
-    //     	                        }
-    //     	                    }
-    //     	                    Err(error) => {
-    //     	                        error!("Could not retrieve certificate data: {:?}", error);
-    //     	                    }
-    //     	                }
-    //     	            }
-    //     	            debug!("Certificates added");
-    //            	}
-    //            	Err(error) => {
-    //            		error!("Could not read certificates directory: {:?}", error);
-    //            	}
-    //            }
-    //
-    //            let tls = tls.build().unwrap();
-    //
-    //            let ct = HttpsConnector::from((http, tls));
-    //
-    //            Ok(Box::new(HttpsRequestClientSelfSignedCertificate {
-    //                client: Client::configure().connector(ct).build(&handle),
-    //            }) as Box<RequestClient>)
-    //        }
-
-    #[cfg(not(target_os = "android"))]
-    fn connect_with_https_android(_: &Handle) -> errors::Result<Box<RequestClient>> {
-        Err(errors::RustKeylockError::GeneralError("Cannot call the connect_with_https_android function in non-android environment"
-            .to_string()))
-    }
-
-    #[cfg(target_os = "android")]
-    fn connect_with_https_android(handle: &Handle) -> errors::Result<Box<RequestClient>> {
-        let mut ssl_connector_builder = openssl::ssl::SslConnectorBuilder::new(openssl::ssl::SslMethod::tls())?;
-        {
-            let ref mut ssl_context_builder = *ssl_connector_builder;
-
-            let cert_store = ssl_context_builder.cert_store_mut();
-
-            if let Ok(certs) = fs::read_dir("/data/misc/keychain/cacerts-added") {
-                for entry in certs.filter_map(|r| r.ok()).filter(|e| e.path().is_file()) {
-                    debug!("Adding Certificate file {:?}", entry.path());
-                    let mut cert_str = String::new();
-                    if let Ok(_) = fs::File::open(entry.path()).and_then(|mut f| f.read_to_string(&mut cert_str)) {
-                        match openssl::x509::X509::from_pem(cert_str.as_bytes()) {
-                            Ok(cert) => {
-                                let m = cert_store.add_cert(cert);
-                                debug!("Added certificate: {:?}", m);
-                            }
-                            Err(error) => error!("Could not parse certificate: {:?}", error),
-                        }
-                    } else {
-                        error!("Could not retrieve certificate data");
-                    }
-                }
-            }
-            if let Ok(certs) = fs::read_dir("/system/etc/security/cacerts") {
-                for entry in certs.filter_map(|r| r.ok()).filter(|e| e.path().is_file()) {
-                    debug!("Adding SYSTEM Certificate file {:?}", entry.path());
-                    let mut cert_str = String::new();
-                    if let Ok(_) = fs::File::open(entry.path()).and_then(|mut f| f.read_to_string(&mut cert_str)) {
-                        match openssl::x509::X509::from_pem(cert_str.as_bytes()) {
-                            Ok(cert) => {
-                                let m = cert_store.add_cert(cert);
-                                debug!("Added SYSTEM certificate: {:?}", m);
-                            }
-                            Err(error) => error!("Could not parse SYSTEM certificate: {:?}", error),
-                        }
-                    } else {
-                        error!("Could not retrieve certificate data");
-                    }
-                }
-            }
-            debug!("Certificates added");
-        }
-
-        let tls_connector_builder: native_tls::TlsConnectorBuilder =
-            native_tls::backend::openssl::TlsConnectorBuilderExt::from_openssl(ssl_connector_builder);
-        let tls_connector = tls_connector_builder.build()?;
-        let client = Client::configure()
-            .connector(HttpsConnector::from((HttpsConnector::new(4, &handle)?, tls_connector)))
-            .build(&handle);
-
-        Ok(Box::new(AndroidHttpsRequestClient { client: client }) as Box<RequestClient>)
-    }
-
-    // 	#[cfg(target_os = "android")]
-    //    fn connect_with_https_android0(handle: &Handle) -> errors::Result<Box<RequestClient>> {
-    //    	let mut tls_connector_builder = native_tls::TlsConnector::builder()?;
-    //    	tls_connector_builder.builder_mut().builder_mut().set_verify(openssl::ssl::SSL_VERIFY_NONE);
-    //
-    //        let tls_connector = tls_connector_builder.build()?;
-    //        let hct = HttpsConnector::new(4, &handle)?;
-    //        let mut ct = HttpsConnector::from((hct, tls_connector));
-    //        ct.danger_disable_hostname_verification(true);
-    //        let client = Client::configure()
-    //            .connector(ct)
-    //            .build(&handle);
-    //
-    //        Ok(Box::new(AndroidHttpsRequestClient { client: client }) as Box<RequestClient>)
-    //    }
-
-    // 	fn connect_with_https_android(handle: &Handle) -> errors::Result<Box<RequestClient>> {
-    //        let mut ssl_connector_builder = openssl::ssl::SslConnectorBuilder::new(openssl::ssl::SslMethod::tls()).unwrap();
-    //        {
-    //            let ref mut ssl_context_builder = *ssl_connector_builder;
-    //            let path = Path::new("/data/misc/keystore/gtca.pem");
-    //            match ssl_context_builder.set_ca_file(&path) {
-    //            	Ok(_) => debug!("CACERT WAS SET"),
-    //            	Err(error) => error!("Could not set CACERT: {:?}", error),
-    //            };
-    //            debug!("Certificates added");
-    //        }
-    //
-    //        let tls_connector_builder: native_tls::TlsConnectorBuilder =
-    //            native_tls::backend::openssl::TlsConnectorBuilderExt::from_openssl(ssl_connector_builder);
-    //        let tls_connector = tls_connector_builder.build()?;
-    //        let client = Client::configure()
-    //            .connector(HttpsConnector::from((HttpsConnector::new(4, &handle)?, tls_connector)))
-    //            .build(&handle);
-    //
-    //        Ok(Box::new(AndroidHttpsRequestClient { client: client }) as Box<RequestClient>)
-    //
-    //    }
-
-    fn connect_with_https_self_signed(handle: &Handle, der_path: &str) -> errors::Result<Box<RequestClient>> {
-        debug!("---{:?}", der_path);
-        let mut f = File::open(der_path)?;
-        debug!("---2");
-        let mut buffer = vec![];
-        f.read_to_end(&mut buffer)?;
-        debug!("---3");
-        let cert = native_tls::Certificate::from_der(buffer.as_slice())?;
-        debug!("---4");
-
-        let mut http = HttpConnector::new(4, &handle);
-        http.enforce_http(false);
-
-        let mut tls = native_tls::TlsConnector::builder()?;
-        tls.add_root_certificate(cert)?;
-        let tls = tls.build()?;
-
-        let mut ct = HttpsConnector::from((http, tls));
-        ct.danger_disable_hostname_verification(true);
-
-        Ok(Box::new(HttpsRequestClientSelfSignedCertificate {
-            client: Client::configure().connector(ct).build(&handle),
-        }) as Box<RequestClient>)
+    fn connect_with_https_self_signed(handle: &Handle) -> errors::Result<Box<RequestClient>> {
+        let mut self_signed_cert_path = file_handler::create_certs_path()?;
+        self_signed_cert_path.push("cacert.pem");
+        ::std::env::set_var("SSL_CERT_FILE", self_signed_cert_path.to_str().unwrap());
+        Self::connect_with_https(&handle)
     }
 }
 
@@ -740,29 +564,6 @@ impl RequestClient for HttpsRequestClient {
     }
 }
 
-/// A client that executes HTTPS requests in Android
-#[allow(dead_code)]
-struct AndroidHttpsRequestClient {
-    client: hyper::Client<hyper_tls::HttpsConnector<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>>,
-}
-
-impl RequestClient for AndroidHttpsRequestClient {
-    fn request(&self, req: Request) -> FutureResponse {
-        self.client.request(req)
-    }
-}
-
-/// A client that executes HTTPS requests using a self signed certificate
-struct HttpsRequestClientSelfSignedCertificate {
-    client: hyper::Client<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>,
-}
-
-impl RequestClient for HttpsRequestClientSelfSignedCertificate {
-    fn request(&self, req: Request) -> FutureResponse {
-        self.client.request(req)
-    }
-}
-
 #[derive(PartialEq, Debug)]
 enum ParseWebDavResponse {
     Download,
@@ -781,27 +582,22 @@ pub struct NextcloudConfiguration {
     /// The password of a nextcoud account
     password: String,
     password_cryptor: EntryPasswordCryptor,
-    /// In the case that the server's certificate is self signed the following steps need to be done:
-    /// * Get the server certificate:
-    ///
-    /// `openssl s_client -showcerts -connect my.nextcloud.server:443 > server.crt`
-    /// * Transform it to DER:
-    ///
-    /// `openssl x509 -in server.crt -outform der -out server.der`
-    ///
-    /// The path of the DER file should be passed here.
-    pub self_signed_der_certificate_location: String,
+    /// If a self-signed certificate is needed in order to communicate with the Nextcloud server over HTTPS,
+    /// this boolean should be true. In that case, the application will use the certificate __cacert.pem__ located in
+    /// `$HOME/.rust-keylock/etc/ssl/certs` and in `/sdcard/Download/rust-keylock/etc/ssl/certs` for Android devices.
+    /// The user is responsible to place the self-signed .pem file into this location with this exact name.
+    pub use_self_signed_certificate: bool,
 }
 
 impl NextcloudConfiguration {
     /// Creates a new NextcloudConfiguration
-    pub fn new(u: String, un: String, pw: String, self_signed_der_certificate_location: String) -> errors::Result<NextcloudConfiguration> {
+    pub fn new(u: String, un: String, pw: String, use_self_signed_certificate: bool) -> errors::Result<NextcloudConfiguration> {
         let mut s = NextcloudConfiguration {
             username: un,
             password: "".to_string(),
             password_cryptor: EntryPasswordCryptor::new(),
             server_url: u.to_string(),
-            self_signed_der_certificate_location: self_signed_der_certificate_location.to_owned(),
+            use_self_signed_certificate: use_self_signed_certificate,
         };
         s.password = s.password_cryptor.encrypt_str(&pw)?;
         Ok(s)
@@ -817,7 +613,7 @@ impl NextcloudConfiguration {
         table.insert("url".to_string(), toml::Value::String(self.server_url.clone()));
         table.insert("user".to_string(), toml::Value::String(self.username.clone()));
         table.insert("pass".to_string(), toml::Value::String(self.decrypted_password()?));
-        table.insert("self_signed_cert".to_string(), toml::Value::String(self.self_signed_der_certificate_location.clone()));
+        table.insert("use_self_signed_certificate".to_string(), toml::Value::Boolean(self.use_self_signed_certificate));
 
         Ok(table)
     }
@@ -827,8 +623,10 @@ impl NextcloudConfiguration {
         let url = table.get("url").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
         let user = table.get("user").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
         let pass = table.get("pass").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
-        let self_signed_cert = table.get("self_signed_cert").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
-        match (url, user, pass, self_signed_cert) {
+        let use_self_signed_certificate = table.get("use_self_signed_certificate")
+            .and_then(|value| value.as_bool().and_then(|bool_ref| Some(bool_ref)));
+            println!("-------{:?}", table.get("use_self_signed_certificate"));
+        match (url, user, pass, use_self_signed_certificate) {
             (Some(ul), Some(u), Some(p), Some(ssc)) => NextcloudConfiguration::new(ul, u, p, ssc),
             _ => Err(errors::RustKeylockError::ParseError(toml::ser::to_string(&table).unwrap_or("Cannot deserialize toml".to_string()))),
         }
@@ -848,7 +646,7 @@ impl Default for NextcloudConfiguration {
             password: "".to_string(),
             password_cryptor: EntryPasswordCryptor::new(),
             server_url: "".to_string(),
-            self_signed_der_certificate_location: "".to_string(),
+            use_self_signed_certificate: false,
         }
     }
 }
@@ -881,11 +679,9 @@ mod nextcloud_tests {
     fn synchronizer_stores_encrypted_password() {
         let password = "password".to_string();
         let (tx, _rx): (Sender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::channel();
-        let ncc = super::NextcloudConfiguration::new("https://localhost/nextcloud".to_string(),
-                                                     "username".to_string(),
-                                                     password.clone(),
-                                                     "".to_string())
-            .unwrap();
+        let ncc =
+            super::NextcloudConfiguration::new("https://localhost/nextcloud".to_string(), "username".to_string(), password.clone(), false)
+                .unwrap();
         let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, "filename").unwrap();
 
         assert!(nc.conf.decrypted_password().unwrap() == password)
@@ -894,11 +690,9 @@ mod nextcloud_tests {
     #[test]
     fn nextcloud_configuration_stores_encrypted_password() {
         let password = "password".to_string();
-        let ncc = super::NextcloudConfiguration::new("https://localhost/nextcloud".to_string(),
-                                                     "username".to_string(),
-                                                     password.clone(),
-                                                     "path".to_string())
-            .unwrap();
+        let ncc =
+            super::NextcloudConfiguration::new("https://localhost/nextcloud".to_string(), "username".to_string(), password.clone(), false)
+                .unwrap();
 
         assert!(ncc.password != password)
     }
@@ -909,7 +703,7 @@ mod nextcloud_tests {
 			url = "http://a/url"
 			user = "user1"
 			pass = "123"
-			self_signed_cert = "/a/path"
+			use_self_signed_certificate = true
 		"#;
 
         let value = toml.parse::<toml::value::Value>().unwrap();
@@ -927,7 +721,7 @@ mod nextcloud_tests {
 			url = "http://a/url"
 			user = "user1"
 			pass = "123"
-			self_signed_cert = "/a/path"
+			use_self_signed_certificate = true
 		"#;
 
         let value = toml.parse::<toml::value::Value>().unwrap();
@@ -939,7 +733,7 @@ mod nextcloud_tests {
         assert!(ncc.username == "user1");
         // The password is encrypted
         assert!(ncc.password != "123");
-        assert!(ncc.self_signed_der_certificate_location == "/a/path");
+        assert!(ncc.use_self_signed_certificate);
     }
 
     #[test]
@@ -947,7 +741,7 @@ mod nextcloud_tests {
         let ncc1 = super::NextcloudConfiguration::new("https://localhost/nextcloud".to_string(),
                                                       "username".to_string(),
                                                       "password".to_string(),
-                                                      "path".to_string())
+                                                      false)
             .unwrap();
         assert!(ncc1.is_filled());
         let ncc2 = super::NextcloudConfiguration::default();
@@ -969,10 +763,7 @@ mod nextcloud_tests {
         // Execute the synchronizer
         let password = "password".to_string();
         let (tx, rx): (Sender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::channel();
-        let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8080".to_string(),
-                                                     "username".to_string(),
-                                                     password.clone(),
-                                                     "".to_string())
+        let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8080".to_string(), "username".to_string(), password.clone(), false)
             .unwrap();
         let sys_config = SystemConfiguration::new(Some(123), Some(1), None);
 
@@ -1013,10 +804,7 @@ mod nextcloud_tests {
         // Execute the synchronizer
         let password = "password".to_string();
         let (tx, rx): (Sender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::channel();
-        let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8081".to_string(),
-                                                     "username".to_string(),
-                                                     password.clone(),
-                                                     "".to_string())
+        let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8081".to_string(), "username".to_string(), password.clone(), false)
             .unwrap();
         let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename).unwrap();
         thread::spawn(move || {
@@ -1053,10 +841,7 @@ mod nextcloud_tests {
         // Execute the synchronizer
         let password = "password".to_string();
         let (tx, rx): (Sender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::channel();
-        let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8082".to_string(),
-                                                     "username".to_string(),
-                                                     password.clone(),
-                                                     "".to_string())
+        let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8082".to_string(), "username".to_string(), password.clone(), false)
             .unwrap();
         let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename).unwrap();
         thread::spawn(move || {
@@ -1089,10 +874,7 @@ mod nextcloud_tests {
         // Execute the synchronizer
         let password = "password".to_string();
         let (tx, rx): (Sender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::channel();
-        let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8083".to_string(),
-                                                     "username".to_string(),
-                                                     password.clone(),
-                                                     "".to_string())
+        let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8083".to_string(), "username".to_string(), password.clone(), false)
             .unwrap();
         let sys_config = SystemConfiguration::new(Some(123), Some(1), None);
 
@@ -1129,10 +911,7 @@ mod nextcloud_tests {
         // Execute the synchronizer
         let password = "password".to_string();
         let (tx, rx): (Sender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::channel();
-        let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8084".to_string(),
-                                                     "username".to_string(),
-                                                     password.clone(),
-                                                     "".to_string())
+        let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8084".to_string(), "username".to_string(), password.clone(), false)
             .unwrap();
         let sys_config = SystemConfiguration::new(Some(123), Some(1), None);
 
@@ -1171,10 +950,7 @@ mod nextcloud_tests {
         // Execute the synchronizer
         let password = "password".to_string();
         let (tx, rx): (Sender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::channel();
-        let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8085".to_string(),
-                                                     "username".to_string(),
-                                                     password.clone(),
-                                                     "".to_string())
+        let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8085".to_string(), "username".to_string(), password.clone(), false)
             .unwrap();
         let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename).unwrap();
         thread::spawn(move || {
@@ -1204,9 +980,8 @@ mod nextcloud_tests {
         // Execute the synchronizer
         let password = "password".to_string();
         let (tx, rx): (Sender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::channel();
-        let ncc =
-            super::NextcloudConfiguration::new("http://127.0.0.1".to_string(), "username".to_string(), password.clone(), "".to_string())
-                .unwrap();
+        let ncc = super::NextcloudConfiguration::new("http://127.0.0.1".to_string(), "username".to_string(), password.clone(), false)
+            .unwrap();
         let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename).unwrap();
         thread::spawn(move || {
             nc.execute();
@@ -1365,7 +1140,7 @@ mod nextcloud_tests {
         assert!(res2_2.is_ok());
         assert!(res2_2.as_ref().unwrap() == &super::ParseWebDavResponse::DownloadMergeAndUpload);
 
-		// Ignore when all versions are equal
+        // Ignore when all versions are equal
         let wdr3 = super::WebDavResponse {
             href: "not needed".to_string(),
             last_modified: "133".to_string(),
@@ -1376,7 +1151,7 @@ mod nextcloud_tests {
         assert!(res3.is_ok());
         assert!(res3.as_ref().unwrap() == &super::ParseWebDavResponse::Ignore);
 
-		// Ignore when error (the last_sync_version is bigger than the version_local)
+        // Ignore when error (the last_sync_version is bigger than the version_local)
         let wdr3 = super::WebDavResponse {
             href: "not needed".to_string(),
             last_modified: "133".to_string(),
