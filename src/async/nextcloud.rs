@@ -623,7 +623,6 @@ impl NextcloudConfiguration {
         let pass = table.get("pass").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
         let use_self_signed_certificate = table.get("use_self_signed_certificate")
             .and_then(|value| value.as_bool().and_then(|bool_ref| Some(bool_ref)));
-            println!("-------{:?}", table.get("use_self_signed_certificate"));
         match (url, user, pass, use_self_signed_certificate) {
             (Some(ul), Some(u), Some(p), Some(ssc)) => NextcloudConfiguration::new(ul, u, p, ssc),
             _ => Err(errors::RustKeylockError::ParseError(toml::ser::to_string(&table).unwrap_or("Cannot deserialize toml".to_string()))),

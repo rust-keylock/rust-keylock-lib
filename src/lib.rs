@@ -1121,7 +1121,6 @@ pub enum UserOptionType {
 
 impl UserOptionType {
     fn extract_value_from_string(str: &str) -> errors::Result<String> {
-        println!("Extracting value from {}", str);
         let s = str.clone();
         let start = s.find("(");
         if s.ends_with(")") {
@@ -1129,7 +1128,6 @@ impl UserOptionType {
                 Some(st) => {
                     let i = s.chars().skip(st + 1).take(str.len() - st - 2);
                     let s = String::from_iter(i);
-                    println!("returning {}", s);
                     Ok(s)
                 }
                 _ => {
