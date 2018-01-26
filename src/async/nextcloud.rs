@@ -15,8 +15,6 @@ use toml;
 use toml::value::Table;
 use hyper::header::{Headers, Authorization, Basic};
 use xml::reader::{EventReader, XmlEvent};
-#[allow(unused_imports)]
-use native_tls::backend::openssl::TlsConnectorBuilderExt;
 
 /// A (Next/Own)cloud synchronizer
 pub struct Synchronizer {
