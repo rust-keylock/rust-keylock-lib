@@ -25,6 +25,7 @@ use std::error::Error;
 use std::time::{self, SystemTime, UNIX_EPOCH};
 use std::sync::mpsc::{self, Sender, Receiver};
 use std::iter::FromIterator;
+use std::collections::HashMap;
 pub use async::nextcloud;
 
 mod file_handler;
@@ -155,6 +156,8 @@ pub fn execute<T: Editor>(editor: &T) {
             UserSelection::GoTo(Menu::Save) => {
                 debug!("UserSelection::GoTo(Menu::Save)");
                 let _ = configuration.update_system_for_save().map_err(|error| error!("Cannot update system for save: {:?}", error));
+                // Reset the filter
+                safe.set_filter("".to_string());
                 let rkl_content = RklContent::from((&safe, &configuration.nextcloud, &configuration.system));
                 let res = rkl_content.and_then(|c| file_handler::save(c, filename, &cryptor, true));
                 match res {
@@ -194,12 +197,16 @@ pub fn execute<T: Editor>(editor: &T) {
             UserSelection::ReplaceEntry(index, entry) => {
                 debug!("UserSelection::ReplaceEntry(index, entry)");
                 contents_changed = true;
-                safe.replace_entry(index, entry);
+                let _ = safe.replace_entry(index, entry).map_err(|err| {
+                    let _ = editor.show_message(&format!("{:?}", err), vec![UserOption::ok()], MessageSeverity::Error);
+                });
                 UserSelection::GoTo(Menu::EntriesList(safe.get_filter()))
             }
             UserSelection::DeleteEntry(index) => {
                 debug!("UserSelection::DeleteEntry(index)");
-                safe.remove_entry(index);
+                let _ = safe.remove_entry(index).map_err(|err| {
+                    let _ = editor.show_message(&format!("{:?}", err), vec![UserOption::ok()], MessageSeverity::Error);
+                });
                 contents_changed = true;
                 UserSelection::GoTo(Menu::EntriesList("".to_string()))
             }
@@ -733,6 +740,8 @@ impl Entry {
 pub struct Safe {
     entries: Vec<Entry>,
     filtered_entries: Vec<Entry>,
+    /// Maps the filtered Entries to the Vec that contains all the entries.
+    map_filtered_to_unfiltered: HashMap<usize, usize>,
     password_cryptor: datacrypt::EntryPasswordCryptor,
     filter: String,
 }
@@ -742,6 +751,7 @@ impl Default for Safe {
         Safe {
             entries: Vec::new(),
             filtered_entries: Vec::new(),
+            map_filtered_to_unfiltered: HashMap::new(),
             password_cryptor: datacrypt::EntryPasswordCryptor::new(),
             filter: "".to_string(),
         }
@@ -753,6 +763,7 @@ impl Safe {
         Safe {
             entries: Vec::new(),
             filtered_entries: Vec::new(),
+            map_filtered_to_unfiltered: HashMap::new(),
             password_cryptor: datacrypt::EntryPasswordCryptor::new(),
             filter: "".to_string(),
         }
@@ -765,16 +776,46 @@ impl Safe {
     }
 
     /// Replaces an Entry in the Safe, with a new Entry that has the password encrypted
-    fn replace_entry(&mut self, index: usize, entry: Entry) {
+    fn replace_entry(&mut self, index: usize, entry: Entry) -> errors::Result<()> {
+        // Push the Entry
         self.entries.push(entry.encrypted(&self.password_cryptor));
-        self.entries.swap_remove(index);
+        // Find the correct index of the edited entry in the main Entries Vec
+        let res = match &self.map_filtered_to_unfiltered.get(&index) {
+            &Some(index_in_main_vec) => {
+                // Replace
+                self.entries.swap_remove(*index_in_main_vec);
+                Ok(())
+            }
+            &None => {
+                Err(errors::RustKeylockError::GeneralError("The entry being replaced was not found in the Entries... If the entries \
+                                                            changed meanwhile, this is normal. If not, please consider opening a bug to \
+                                                            the developers."
+                    .to_string()))
+            }
+        };
+        // Apply the filter once again
         self.apply_filter();
+        res
     }
 
     /// Removes an Entry from the Safe
-    fn remove_entry(&mut self, index: usize) {
-        self.entries.remove(index);
+    fn remove_entry(&mut self, index: usize) -> errors::Result<()> {
+    	let res = match &self.map_filtered_to_unfiltered.get(&index) {
+            &Some(index_in_main_vec) => {
+                // Remove
+                self.entries.remove(*index_in_main_vec);
+                Ok(())
+            }
+            &None => {
+                Err(errors::RustKeylockError::GeneralError("The entry being replaced was not found in the Entries... If the entries \
+                                                            changed meanwhile, this is normal. If not, please consider opening a bug to \
+                                                            the developers."
+                    .to_string()))
+            }
+        };
+        // Apply the filter once again
         self.apply_filter();
+        res
     }
 
     /// Merges the Entries, by appending the incoming elements that are not the same with some existing one in Safe
@@ -825,7 +866,7 @@ impl Safe {
         &self.filtered_entries
     }
 
-    /// Retrieves all Entries with the passwords decrypted, after applying the filter to the Vector
+    /// Retrieves __all__ the Entries with the passwords decrypted
     fn get_entries_decrypted(&self) -> Vec<Entry> {
         self.get_entries()
             .into_iter()
@@ -847,15 +888,39 @@ impl Safe {
     fn apply_filter(&mut self) {
         let m: Vec<Entry> = if self.filter.len() > 0 {
             let ref lower_filter = self.filter.to_lowercase();
-            self.entries
-                .clone()
-                .into_iter()
-                .filter(|entry| {
-                    entry.name.to_lowercase().contains(lower_filter) || entry.user.to_lowercase().contains(lower_filter) ||
-                    entry.desc.to_lowercase().contains(lower_filter)
-                })
-                .collect()
+            let mut indexes_vec = Vec::new();
+            let mut vec = Vec::new();
+
+            {
+                let iter = self.entries
+                    .iter()
+                    .enumerate()
+                    .filter(|&(_, entry)| {
+                        entry.name.to_lowercase().contains(lower_filter) || entry.user.to_lowercase().contains(lower_filter) ||
+                        entry.desc.to_lowercase().contains(lower_filter)
+                    });
+                for tup in iter {
+                    // Push the entry in the vec
+                    vec.push(tup.1.clone());
+                    // Push the index in the indexes vec
+                    indexes_vec.push(tup.0);
+                }
+            }
+
+            // Put the indexes mapping in the map_filtered_to_unfiltered
+            self.map_filtered_to_unfiltered.clear();
+            indexes_vec.iter().enumerate().for_each(|(index_in_filtered_vec, index_in_main_vec)| {
+                self.map_filtered_to_unfiltered.insert(index_in_filtered_vec, *index_in_main_vec);
+            });
+
+            vec
         } else {
+            // Put the indexes mapping in the map_filtered_to_unfiltered.
+            // The mapping here is one-to-one
+            self.map_filtered_to_unfiltered.clear();
+            for index in 0..self.entries.len() {
+                self.map_filtered_to_unfiltered.insert(index, index);
+            }
             self.entries.clone()
         };
 
@@ -865,6 +930,7 @@ impl Safe {
     pub fn clear(&mut self) {
         self.filtered_entries = Vec::new();
         self.entries = Vec::new();
+        self.map_filtered_to_unfiltered.clear();
         self.filter = "".to_string();
     }
 }
@@ -1433,13 +1499,37 @@ mod unit_tests {
         let entry = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
         safe.add_entry(entry.clone());
         let new_entry = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string());
-        safe.replace_entry(1, new_entry.clone());
+        let _ = safe.replace_entry(0, new_entry.clone());
 
         assert!(safe.entries.len() == 1);
-        assert!(safe.entries[0].name != new_entry.name);
-        assert!(safe.entries[0].user != new_entry.user);
-        assert!(safe.entries[0].pass != new_entry.pass);
-        assert!(safe.entries[0].desc != new_entry.desc);
+        let replaced_entry = safe.get_entry_decrypted(0);
+        assert!(replaced_entry.name == new_entry.name);
+        assert!(replaced_entry.user == new_entry.user);
+        assert!(replaced_entry.pass == new_entry.pass);
+        assert!(replaced_entry.desc == new_entry.desc);
+    }
+
+    #[test]
+    fn replace_entry_after_filter() {
+        let mut safe = super::Safe::new();
+        let entry1 = Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "1".to_string());
+        let entry2 = Entry::new("2".to_string(), "2".to_string(), "2".to_string(), "2".to_string());
+        let entry3 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
+        safe.add_entry(entry1.clone());
+        safe.add_entry(entry2.clone());
+        safe.add_entry(entry3.clone());
+        let new_entry = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string());
+
+        safe.set_filter("3".to_string());
+        let _ = safe.replace_entry(0, new_entry.clone());
+        safe.set_filter("".to_string());
+
+        assert!(safe.entries.len() == 3);
+        let replaced_entry = safe.get_entry_decrypted(2);
+        assert!(replaced_entry.name == new_entry.name);
+        assert!(replaced_entry.user == new_entry.user);
+        assert!(replaced_entry.pass == new_entry.pass);
+        assert!(replaced_entry.desc == new_entry.desc);
     }
 
     #[test]
@@ -1450,13 +1540,33 @@ mod unit_tests {
         safe.add_entry(entry1.clone());
         safe.add_entry(entry2.clone());
 
-        safe.remove_entry(1);
+        let _ = safe.remove_entry(1);
 
         assert!(safe.entries.len() == 1);
         assert!(safe.entries[0].name == entry1.name);
         assert!(safe.entries[0].user == entry1.user);
         assert!(safe.entries[0].pass != entry1.pass);
         assert!(safe.entries[0].desc == entry1.desc);
+    }
+
+	#[test]
+    fn remove_entry_after_filter() {
+        let mut safe = super::Safe::new();
+        let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
+        let entry2 = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string());
+        safe.add_entry(entry1.clone());
+        safe.add_entry(entry2.clone());
+
+        safe.set_filter("33".to_string());
+        let _ = safe.remove_entry(0);
+        safe.set_filter("".to_string());
+
+        assert!(safe.entries.len() == 1);
+		let decrypted_entry = safe.get_entry_decrypted(0);
+        assert!(decrypted_entry.name == entry1.name);
+        assert!(decrypted_entry.user == entry1.user);
+        assert!(decrypted_entry.pass == entry1.pass);
+        assert!(decrypted_entry.desc == entry1.desc);
     }
 
     #[test]
