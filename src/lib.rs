@@ -314,6 +314,38 @@ Warning: Saving will discard all the entries that could not be recovered.
                 }
                 UserSelection::GoTo(Menu::Main)
             }
+            UserSelection::GoTo(Menu::Synchronize) => {
+                debug!("UserSelection::GoTo(Menu::Synchronize)");
+                let mut tmp_nextcloud_loop_ctrl_tx: Option<Sender<bool>> = None;
+                let (nc_rx, loop_ctrl_tx) = spawn_nextcloud_async_task(&filename, &configuration, &tmp_nextcloud_loop_ctrl_tx);
+                let timeout = time::Duration::from_millis(10000);
+                let to_ret = match nc_rx.recv_timeout(timeout) {
+                    Ok(sync_status_res) => {
+                        match sync_status_res {
+                            Ok(sync_status) => {
+                                let mut tmp_user_selection = UserSelection::GoTo(Menu::ShowConfiguration);
+                                handle_sync_status_success(sync_status, editor, &filename, &mut tmp_user_selection);
+                                tmp_user_selection
+                            }
+                            Err(error) => {
+                                let error_message = format!("Could not synchronize... Error detail: {:?}", error);
+                                let _ = editor.show_message(&error_message, vec![UserOption::ok()], MessageSeverity::Error);
+                                UserSelection::GoTo(Menu::ShowConfiguration)
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        let error_message = format!("Could not synchronize... Error detail: {:?}", error);
+                        let _ = editor.show_message(&error_message, vec![UserOption::ok()], MessageSeverity::Error);
+                        UserSelection::GoTo(Menu::ShowConfiguration)
+                    }
+                };
+
+                // Stop the async task
+                let _ = loop_ctrl_tx.send(true);
+                // Return the result
+                to_ret
+            }
             other => {
                 let message = format!("Bug: User Selection '{:?}' should not be handled in the main loop. Please, consider opening a bug \
                                        to the developers.",
@@ -333,64 +365,74 @@ fn async_channel_check(nextcloud_rx: &Option<Receiver<errors::Result<async::next
     match nextcloud_rx.as_ref() {
         Some(rx) => {
             match rx.try_recv() {
-                Ok(sync_status) => {
-                    match sync_status {
-                        Ok(async::nextcloud::SyncStatus::UploadSuccess) => {
-                            let _ = editor.show_message("The nextcloud server was updated with the local data",
-                                                        vec![UserOption::ok()],
-                                                        MessageSeverity::Info);
-                        }
-                        Ok(async::nextcloud::SyncStatus::NewAvailable(downloaded_filename)) => {
-                            let selection =
-                                editor.show_message("Downloaded new data from the nextcloud server. Do you want to apply them locally now?",
-                                                  vec![UserOption::yes(), UserOption::no()],
-                                                  MessageSeverity::Info);
-
-                            debug!("The user selected {:?} as an answer for applying the downloaded data locally", &selection);
-                            if selection == UserSelection::UserOption(UserOption::yes()) {
-                                debug!("Replacing the local file with the one downloaded from the server");
-                                let _ = file_handler::replace(&downloaded_filename, filename);
-                                *user_selection = UserSelection::GoTo(Menu::TryPass);
-                            }
-                        }
-                        Ok(async::nextcloud::SyncStatus::NewToMerge(downloaded_filename)) => {
-                            let selection =
-                                editor.show_message("Downloaded data from the nextcloud server, but conflicts were identified. The \
-                                                     contents will be merged but nothing will be saved. You will need to explicitly save \
-                                                     after reviewing the merged data. Do you want to do the merge now?",
-                                                    vec![UserOption::yes(), UserOption::no()],
-                                                    MessageSeverity::Info);
-
-                            debug!("The user selected {:?} as an answer for applying the downloaded data locally", &selection);
-                            if selection == UserSelection::UserOption(UserOption::yes()) {
-                                debug!("Merging the local data with the downloaded from the server");
-
-                                match editor.show_password_enter() {
-                                    UserSelection::ProvidedPassword(pwd, salt_pos) => {
-                                        *user_selection = UserSelection::ImportFromDefaultLocation(downloaded_filename, pwd, salt_pos);
-                                    }
-                                    other => {
-                                        let message = format!("Expected a ProvidedPassword but received '{:?}'. Please, consider opening \
-                                                               a bug to the developers.",
-                                                              &other);
-                                        error!("{}", message);
-                                        let _ =
-                                            editor.show_message("Unexpected result when waiting for password. See the logs for more \
-                                                                 details. Please consider opening a but to the developers.",
-                                                                vec![UserOption::ok()],
-                                                                MessageSeverity::Error);
-                                        *user_selection = UserSelection::GoTo(Menu::TryPass);
-                                    }
-                                }
-                            }
-                        }
-                        _ => {
+                Ok(sync_status_res) => {
+                    match sync_status_res {
+                        Ok(sync_status) => handle_sync_status_success(sync_status, editor, filename, user_selection),
+                        Err(_) => {
                             // ignore
                         }
                     }
                 }
                 _ => {
                     // ignore
+                }
+            }
+        }
+        _ => {
+            // ignore
+        }
+    }
+}
+
+fn handle_sync_status_success(sync_status: async::nextcloud::SyncStatus,
+                              editor: &Editor,
+                              filename: &str,
+                              user_selection: &mut UserSelection) {
+    match sync_status {
+        async::nextcloud::SyncStatus::UploadSuccess => {
+            let _ =
+                editor.show_message("The nextcloud server was updated with the local data", vec![UserOption::ok()], MessageSeverity::Info);
+        }
+        async::nextcloud::SyncStatus::NewAvailable(downloaded_filename) => {
+            let selection = editor.show_message("Downloaded new data from the nextcloud server. Do you want to apply them locally now?",
+                                                vec![UserOption::yes(), UserOption::no()],
+                                                MessageSeverity::Info);
+
+            debug!("The user selected {:?} as an answer for applying the downloaded data locally", &selection);
+            if selection == UserSelection::UserOption(UserOption::yes()) {
+                debug!("Replacing the local file with the one downloaded from the server");
+                let _ = file_handler::replace(&downloaded_filename, filename);
+                *user_selection = UserSelection::GoTo(Menu::TryPass);
+            }
+        }
+        async::nextcloud::SyncStatus::NewToMerge(downloaded_filename) => {
+            let selection =
+                editor.show_message("Downloaded data from the nextcloud server, but conflicts were identified. The contents will be merged \
+                                   but nothing will be saved. You will need to explicitly save after reviewing the merged data. Do you \
+                                   want to do the merge now?",
+                                  vec![UserOption::yes(), UserOption::no()],
+                                  MessageSeverity::Info);
+
+            debug!("The user selected {:?} as an answer for applying the downloaded data locally", &selection);
+            if selection == UserSelection::UserOption(UserOption::yes()) {
+                debug!("Merging the local data with the downloaded from the server");
+
+                match editor.show_password_enter() {
+                    UserSelection::ProvidedPassword(pwd, salt_pos) => {
+                        *user_selection = UserSelection::ImportFromDefaultLocation(downloaded_filename, pwd, salt_pos);
+                    }
+                    other => {
+                        let message = format!("Expected a ProvidedPassword but received '{:?}'. Please, consider opening a bug to the \
+                                               developers.",
+                                              &other);
+                        error!("{}", message);
+                        let _ =
+                            editor.show_message("Unexpected result when waiting for password. See the logs for more details. Please \
+                                                 consider opening a but to the developers.",
+                                                vec![UserOption::ok()],
+                                                MessageSeverity::Error);
+                        *user_selection = UserSelection::GoTo(Menu::TryPass);
+                    }
                 }
             }
         }
@@ -800,7 +842,7 @@ impl Safe {
 
     /// Removes an Entry from the Safe
     fn remove_entry(&mut self, index: usize) -> errors::Result<()> {
-    	let res = match &self.map_filtered_to_unfiltered.get(&index) {
+        let res = match &self.map_filtered_to_unfiltered.get(&index) {
             &Some(index_in_main_vec) => {
                 // Remove
                 self.entries.remove(*index_in_main_vec);
@@ -1012,7 +1054,7 @@ pub enum Menu {
     /// The user should be presented with the configuration menu
     ShowConfiguration,
     /// Perform Synchronization
-    Syncronize,
+    Synchronize,
 }
 
 impl Menu {
@@ -1034,7 +1076,7 @@ impl Menu {
             &Menu::ImportEntries => format!("{:?}", Menu::ImportEntries),
             &Menu::ExportEntries => format!("{:?}", Menu::ExportEntries),
             &Menu::ShowConfiguration => format!("{:?}", Menu::ShowConfiguration),
-            &Menu::Syncronize => format!("{:?}", Menu::Syncronize),
+            &Menu::Synchronize => format!("{:?}", Menu::Synchronize),
         }
     }
 
@@ -1059,7 +1101,7 @@ impl Menu {
             (ref n, None, None) if &Menu::ImportEntries.get_name() == n => Menu::ImportEntries,
             (ref n, None, None) if &Menu::ExportEntries.get_name() == n => Menu::ExportEntries,
             (ref n, None, None) if &Menu::ShowConfiguration.get_name() == n => Menu::ShowConfiguration,
-            (ref n, None, None) if &Menu::Syncronize.get_name() == n => Menu::Syncronize,
+            (ref n, None, None) if &Menu::Synchronize.get_name() == n => Menu::Synchronize,
             (ref other, _, _) => {
                 let message = format!("Cannot create Menu from String '{}' and arguments usize: '{:?}', String: '{:?}'. Please, consider \
                                        opening a bug to the developers.",
@@ -1549,7 +1591,7 @@ mod unit_tests {
         assert!(safe.entries[0].desc == entry1.desc);
     }
 
-	#[test]
+    #[test]
     fn remove_entry_after_filter() {
         let mut safe = super::Safe::new();
         let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
@@ -1562,7 +1604,7 @@ mod unit_tests {
         safe.set_filter("".to_string());
 
         assert!(safe.entries.len() == 1);
-		let decrypted_entry = safe.get_entry_decrypted(0);
+        let decrypted_entry = safe.get_entry_decrypted(0);
         assert!(decrypted_entry.name == entry1.name);
         assert!(decrypted_entry.user == entry1.user);
         assert!(decrypted_entry.pass == entry1.pass);
