@@ -323,8 +323,8 @@ Warning: Saving will discard all the entries that could not be recovered.
                     Ok(sync_status_res) => {
                         match sync_status_res {
                             Ok(sync_status) => {
-                                let mut tmp_user_selection = UserSelection::GoTo(Menu::ShowConfiguration);
-                                handle_sync_status_success(sync_status, editor, &filename, &mut tmp_user_selection);
+                                let mut tmp_user_selection = UserSelection::GoTo(Menu::Main);
+                                handle_sync_status_success(sync_status, editor, &filename, &mut tmp_user_selection, false);
                                 tmp_user_selection
                             }
                             Err(error) => {
@@ -367,7 +367,7 @@ fn async_channel_check(nextcloud_rx: &Option<Receiver<errors::Result<async::next
             match rx.try_recv() {
                 Ok(sync_status_res) => {
                     match sync_status_res {
-                        Ok(sync_status) => handle_sync_status_success(sync_status, editor, filename, user_selection),
+                        Ok(sync_status) => handle_sync_status_success(sync_status, editor, filename, user_selection, true),
                         Err(_) => {
                             // ignore
                         }
@@ -387,7 +387,8 @@ fn async_channel_check(nextcloud_rx: &Option<Receiver<errors::Result<async::next
 fn handle_sync_status_success(sync_status: async::nextcloud::SyncStatus,
                               editor: &Editor,
                               filename: &str,
-                              user_selection: &mut UserSelection) {
+                              user_selection: &mut UserSelection,
+                              ignore_contents_identical_message: bool) {
     match sync_status {
         async::nextcloud::SyncStatus::UploadSuccess => {
             let _ =
@@ -435,6 +436,9 @@ fn handle_sync_status_success(sync_status: async::nextcloud::SyncStatus,
                     }
                 }
             }
+        }
+        async::nextcloud::SyncStatus::None if !ignore_contents_identical_message => {
+            let _ = editor.show_message("No need to sync. The contents are identical", vec![UserOption::ok()], MessageSeverity::Info);
         }
         _ => {
             // ignore
