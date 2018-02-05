@@ -318,7 +318,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                 debug!("UserSelection::GoTo(Menu::Synchronize)");
                 let mut tmp_nextcloud_loop_ctrl_tx: Option<Sender<bool>> = None;
                 let (nc_rx, loop_ctrl_tx) = spawn_nextcloud_async_task(&filename, &configuration, &tmp_nextcloud_loop_ctrl_tx);
-                let timeout = time::Duration::from_millis(10000);
+                let timeout = time::Duration::from_millis(30000);
                 let to_ret = match nc_rx.recv_timeout(timeout) {
                     Ok(sync_status_res) => {
                         match sync_status_res {
@@ -987,7 +987,7 @@ pub struct Props {
 
 impl Default for Props {
     fn default() -> Self {
-        Props { idle_timeout_seconds: 180 }
+        Props { idle_timeout_seconds: 300 }
     }
 }
 
