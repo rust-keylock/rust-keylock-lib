@@ -39,7 +39,15 @@ The core logic is written in [Rust](https://www.rust-lang.org), but the presenta
 Thanks to [xargo](https://github.com/japaric/xargo), [cross](https://github.com/japaric/cross) and [JNA](https://github.com/java-native-access/jna)!
 
 See how to [download and install](https://rust-keylock.github.io/download/rkl/).
- 
+
+## FAQ
+
+On the Project [website](https://rust-keylock.github.io/faq/rkl/).
+
+## Wiki
+
+On the Project [website](https://rust-keylock.github.io/wiki/).
+
 ## The _rust-keylock_ library and the _Editors_
 
 The idea is that the [rust-keylock library](https://github.com/rust-keylock/rust-keylock-lib) handles the core application logic, whereas the interaction with the _rust-keylock_ users is done via libraries that have presentation responsibilities (aka [Editors](https://rust-keylock.github.io/rust-keylock-lib/rust_keylock/trait.Editor.html)).
