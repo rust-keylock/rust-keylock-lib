@@ -1,5 +1,6 @@
 ![Build Status](https://travis-ci.org/rust-keylock/rust-keylock-lib.svg?branch=master)
 [![crates.io](https://img.shields.io/crates/v/rust_keylock.svg)](https://crates.io/crates/rust_keylock)
+[![Coverage Status](https://coveralls.io/repos/github/rust-keylock/rust-keylock-lib/badge.svg?branch=master)](https://coveralls.io/github/rust-keylock/rust-keylock-lib?branch=master)
 
 ## General
 
