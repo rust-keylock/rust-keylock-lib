@@ -1297,7 +1297,7 @@ impl<'a> From<&'a str> for UserOptionType {
     }
 }
 
-/// Severity for the messages presented to tthe Users
+/// Severity for the messages presented to the Users
 #[derive(Debug, PartialEq)]
 pub enum MessageSeverity {
     Info,
