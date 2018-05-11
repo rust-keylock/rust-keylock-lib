@@ -33,11 +33,12 @@ The core logic is written in [Rust](https://www.rust-lang.org), but the presenta
  
 ### Application Portability
 
- * [Shell implementation](https://github.com/rust-keylock/rust-keylock-shell) running on Linux and Windows
- * [JavaFX implementation](https://github.com/rust-keylock/rust-keylock-ui) running on Linux and Windows
- * [Android implementation](https://github.com/rust-keylock/rust-keylock-android) to be published in [F-Droid](https://gitlab.com/fdroid/fdroiddata/merge_requests/2668)
 
-Thanks to [xargo](https://github.com/japaric/xargo), [cross](https://github.com/japaric/cross) and [JNA](https://github.com/java-native-access/jna)!
+ * [Shell implementation](https://github.com/rust-keylock/rust-keylock-shell).
+ * [JavaFX implementation](https://github.com/rust-keylock/rust-keylock-ui).
+    * Using the [j4rs crate](https://github.com/astonbitecode/j4rs)
+ * [Android implementation](https://github.com/rust-keylock/rust-keylock-android)
+    * Using [xargo](https://github.com/japaric/xargo) and [JNA](https://github.com/java-native-access/jna)
 
 See how to [download and install](https://rust-keylock.github.io/download/rkl/).
 
