@@ -95,8 +95,10 @@ pub fn execute<T: Editor>(editor: &T) {
         editor.sort_entries(&mut safe.entries);
         // Check reception of async message
         async_channel_check(&nextcloud_rx, editor, filename, &mut user_selection);
-        // Idle time check
-        user_selection = user_selection_after_idle_check(&last_action_time, props.idle_timeout_seconds, user_selection, editor);
+        // Idle time check only on selections other than GoTo::Main
+        if user_selection != UserSelection::GoTo(Menu::Main) {
+            user_selection = user_selection_after_idle_check(&last_action_time, props.idle_timeout_seconds, user_selection, editor);
+        }
         // Update the action time
         last_action_time = SystemTime::now();
         // Handle
@@ -266,7 +268,6 @@ Warning: Saving will discard all the entries that could not be recovered.
             }
             us @ UserSelection::ImportFrom(_, _, _) |
             us @ UserSelection::ImportFromDefaultLocation(_, _, _) => {
-
                 let import_from_default_location = match us {
                     UserSelection::ImportFrom(_, _, _) => false,
                     UserSelection::ImportFromDefaultLocation(_, _, _) => true,
@@ -411,8 +412,8 @@ fn handle_sync_status_success(sync_status: async::nextcloud::SyncStatus,
                 editor.show_message("Downloaded data from the nextcloud server, but conflicts were identified. The contents will be merged \
                                    but nothing will be saved. You will need to explicitly save after reviewing the merged data. Do you \
                                    want to do the merge now?",
-                                  vec![UserOption::yes(), UserOption::no()],
-                                  MessageSeverity::Info);
+                                    vec![UserOption::yes(), UserOption::no()],
+                                    MessageSeverity::Info);
 
             debug!("The user selected {:?} as an answer for applying the downloaded data locally", &selection);
             if selection == UserSelection::UserOption(UserOption::yes()) {
@@ -510,8 +511,8 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
                                 editor.show_message("Wrong password or number! Please make sure that both the password and number that you \
                                                    provide are correct. If this is the case, the rust-keylock data is corrupted and \
                                                    nothing can be done about it.",
-                                                  vec![UserOption::ok(), just_upgraded_opt],
-                                                  MessageSeverity::Error);
+                                                    vec![UserOption::ok(), just_upgraded_opt],
+                                                    MessageSeverity::Error);
                             match s {
                                 UserSelection::UserOption(uo) => {
                                     if uo.short_label == "j" {
@@ -556,7 +557,6 @@ fn spawn_nextcloud_async_task(filename: &str,
                               configuration: &RklConfiguration,
                               async_task_control_tx_opt: &Option<Sender<bool>>)
                               -> (Receiver<errors::Result<async::nextcloud::SyncStatus>>, Sender<bool>) {
-
     match async_task_control_tx_opt.as_ref() {
         Some(ctrl_tx) => {
             debug!("Stopping a previously spawned nextcloud async task");
@@ -873,7 +873,7 @@ impl Safe {
                     let opt = main_iter.find(|main_entry| {
                         let enrypted_entry = entry.encrypted(&self.password_cryptor);
                         main_entry.name == enrypted_entry.name && main_entry.user == enrypted_entry.user &&
-                        main_entry.pass == enrypted_entry.pass && main_entry.desc == enrypted_entry.desc
+                            main_entry.pass == enrypted_entry.pass && main_entry.desc == enrypted_entry.desc
                     });
                     opt.is_none()
                 })
@@ -943,7 +943,7 @@ impl Safe {
                     .enumerate()
                     .filter(|&(_, entry)| {
                         entry.name.to_lowercase().contains(lower_filter) || entry.user.to_lowercase().contains(lower_filter) ||
-                        entry.desc.to_lowercase().contains(lower_filter)
+                            entry.desc.to_lowercase().contains(lower_filter)
                     });
                 for tup in iter {
                     // Push the entry in the vec
@@ -1146,6 +1146,28 @@ pub enum UserSelection {
     UpdateConfiguration(nextcloud::NextcloudConfiguration),
 }
 
+impl UserSelection {
+    pub fn is_same_variant_with(&self, other: &UserSelection) -> bool {
+        self.ordinal() == other.ordinal()
+    }
+
+    fn ordinal(&self) -> i8 {
+        match self {
+            UserSelection::NewEntry(_) => 1,
+            UserSelection::ReplaceEntry(_, _) => 2,
+            UserSelection::DeleteEntry(_) => 3,
+            UserSelection::GoTo(_) => 4,
+            UserSelection::ProvidedPassword(_, _) => 5,
+            UserSelection::Ack => 6,
+            UserSelection::ExportTo(_) => 7,
+            UserSelection::ImportFrom(_, _, _) => 8,
+            UserSelection::ImportFromDefaultLocation(_, _, _) => 9,
+            UserSelection::UserOption(_) => 10,
+            UserSelection::UpdateConfiguration(_) => 11,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct UserOption {
     pub label: String,
@@ -1342,7 +1364,7 @@ pub trait Editor {
 #[cfg(test)]
 mod unit_tests {
     use toml;
-    use super::{Menu, Entry, UserSelection};
+    use super::{Menu, Entry, UserSelection, UserOption};
     use super::datacrypt::EntryPasswordCryptor;
     use std::time::SystemTime;
     use std;
@@ -1837,6 +1859,26 @@ mod unit_tests {
         let conf = res.unwrap();
         assert!(conf.saved_at == Some(123));
         assert!(conf.version == Some(1));
+    }
+
+    #[test]
+    fn user_selection_ordinal() {
+        assert!(UserSelection::NewEntry(Entry::empty()).ordinal() == 1);
+        assert!(UserSelection::ReplaceEntry(1, Entry::empty()).ordinal() == 2);
+        assert!(UserSelection::DeleteEntry(1).ordinal() == 3);
+        assert!(UserSelection::GoTo(Menu::TryPass).ordinal() == 4);
+        assert!(UserSelection::ProvidedPassword("".to_owned(), 33).ordinal() == 5);
+        assert!(UserSelection::Ack.ordinal() == 6);
+        assert!(UserSelection::ExportTo("".to_owned()).ordinal() == 7);
+        assert!(UserSelection::ImportFrom("".to_owned(), "".to_owned(), 1).ordinal() == 8);
+        assert!(UserSelection::ImportFromDefaultLocation("".to_owned(), "".to_owned(), 1).ordinal() == 9);
+        assert!(UserSelection::UserOption(UserOption::empty()).ordinal() == 10);
+        assert!(UserSelection::UpdateConfiguration(super::nextcloud::NextcloudConfiguration::default()).ordinal() == 11);
+    }
+
+    #[test]
+    fn is_same_variant_with() {
+        assert!(UserSelection::ProvidedPassword("".to_owned(), 33).is_same_variant_with(&UserSelection::ProvidedPassword("other".to_owned(), 11)));
     }
 
     struct DummyEditor;
