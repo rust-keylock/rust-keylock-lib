@@ -1,40 +1,30 @@
 # sudo required for coveralls
 sudo: required
-
 language: rust
-
-# Cache cargo symbols for faster build
+dist: trusty
 cache: cargo
 
 addons:
   apt:
     packages:
-      - libcurl4-openssl-dev
-      - libelf-dev
-      - libdw-dev
-      - binutils-dev
-      - cmake # also required for cargo-update
-    sources:
-      - kalakris-cmake
-
+      - libssl-dev
 rust:
   - stable
   - beta
   - nightly
 
-before_script:
-  - export PATH=$HOME/.cargo/bin:$PATH
-  - cargo install cargo-update || echo "cargo-update already installed"
-  - cargo install cargo-travis || echo "cargo-travis already installed"
-  - cargo install-update -a # update outdated cached binaries
-
 script:
   - |
+      cargo clean &&
       cargo build &&
       cargo test
 
-after_success:
-  - cargo coveralls --verbose
+after_success: |
+    if [[ "$TRAVIS_RUST_VERSION" == stable ]]; then
+      bash <(curl https://raw.githubusercontent.com/xd009642/tarpaulin/master/travis-install.sh)
+      # Uncomment the following line for coveralls.io
+      cargo tarpaulin --ciserver travis-ci --coveralls $TRAVIS_JOB_ID
+    fi
 
 matrix:
   allow_failures:
