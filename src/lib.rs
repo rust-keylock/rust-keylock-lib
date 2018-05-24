@@ -74,7 +74,7 @@ pub fn execute<T: Editor>(editor: &T) {
         };
 
         // Take the provided password and do the initialization
-        let (us, cr) = handle_provided_password_for_init(provided_password, filename, &mut safe, &mut configuration, editor, true);
+        let (us, cr) = handle_provided_password_for_init(provided_password, filename, &mut safe, &mut configuration, editor);
         // If a valid nextcloud configuration is in place, spawn the background async execution
         if configuration.nextcloud.is_filled() {
             let (nc_rx, loop_ctrl_tx) = spawn_nextcloud_async_task(&filename, &configuration, &nextcloud_loop_ctrl_tx);
@@ -107,7 +107,7 @@ pub fn execute<T: Editor>(editor: &T) {
                 // Cancel any pending background tasks
                 let _ = nextcloud_loop_ctrl_tx.as_ref().and_then(|tx| Some(tx.send(true)));
                 let (user_selection, cr) =
-                    handle_provided_password_for_init(editor.show_password_enter(), filename, &mut safe, &mut configuration, editor, true);
+                    handle_provided_password_for_init(editor.show_password_enter(), filename, &mut safe, &mut configuration, editor);
                 // If a valid nextcloud configuration is in place, spawn the background async execution
                 if configuration.nextcloud.is_filled() {
                     debug!("A valid configuration for Nextcloud synchronization was found. Spawning async tasks");
@@ -131,7 +131,7 @@ pub fn execute<T: Editor>(editor: &T) {
             }
             UserSelection::ProvidedPassword(pwd, salt_pos) => {
                 debug!("UserSelection::GoTo(Menu::ProvidedPassword)");
-                cryptor = file_handler::create_bcryptor(filename, pwd, salt_pos, true, true, true).unwrap();
+                cryptor = file_handler::create_bcryptor(filename, pwd, salt_pos, true, true).unwrap();
                 UserSelection::GoTo(Menu::Main)
             }
             UserSelection::GoTo(Menu::EntriesList(filter)) => {
@@ -276,7 +276,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                 match us {
                     UserSelection::ImportFrom(path, pwd, salt_pos) |
                     UserSelection::ImportFromDefaultLocation(path, pwd, salt_pos) => {
-                        let cr = file_handler::create_bcryptor(&path, pwd, salt_pos, false, import_from_default_location, true).unwrap();
+                        let cr = file_handler::create_bcryptor(&path, pwd, salt_pos, false, import_from_default_location).unwrap();
                         debug!("UserSelection::ImportFrom(path, pwd, salt_pos)");
 
                         match file_handler::load(&path, &cr, import_from_default_location) {
@@ -475,14 +475,13 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
                                      filename: &str,
                                      safe: &mut Safe,
                                      configuration: &mut RklConfiguration,
-                                     editor: &Editor,
-                                     expanded_key: bool)
+                                     editor: &Editor)
                                      -> (UserSelection, datacrypt::BcryptAes) {
     let user_selection: UserSelection;
     match provided_password {
         UserSelection::ProvidedPassword(pwd, salt_pos) => {
             // New Cryptor here
-            let cr = file_handler::create_bcryptor(filename, pwd.clone(), salt_pos, false, true, expanded_key).unwrap();
+            let cr = file_handler::create_bcryptor(filename, pwd.clone(), salt_pos, false, true).unwrap();
             // Try to decrypt and load the Entries
             let retrieved_entries = match file_handler::load(filename, &cr, true) {
                 // Success, go to the Main menu
@@ -505,26 +504,13 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
                         // In all the other cases, notify the User and retry
                         _ => {
                             error!("{}", error.description());
-                            let just_upgraded_opt =
-                                UserOption::new("Just Upgraded...", UserOptionType::String("just_upgraded".to_string()), "j");
                             let s =
                                 editor.show_message("Wrong password or number! Please make sure that both the password and number that you \
                                                    provide are correct. If this is the case, the rust-keylock data is corrupted and \
                                                    nothing can be done about it.",
-                                                    vec![UserOption::ok(), just_upgraded_opt],
+                                                    vec![UserOption::ok()],
                                                     MessageSeverity::Error);
                             match s {
-                                UserSelection::UserOption(uo) => {
-                                    if uo.short_label == "j" {
-                                        let usel = UserSelection::ProvidedPassword(pwd.clone(), salt_pos);
-                                        let _ = handle_provided_password_for_init(usel, filename, safe, configuration, editor, false);
-                                        user_selection = UserSelection::GoTo(Menu::Main);
-                                        safe.get_entries_decrypted()
-                                    } else {
-                                        user_selection = UserSelection::GoTo(Menu::TryPass);
-                                        Vec::new()
-                                    }
-                                }
                                 _ => {
                                     user_selection = UserSelection::GoTo(Menu::TryPass);
                                     Vec::new()
@@ -542,7 +528,7 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
         }
         UserSelection::GoTo(Menu::Exit) => {
             debug!("UserSelection::GoTo(Menu::Exit) was called before providing credentials");
-            let cr = file_handler::create_bcryptor(filename, "dummy".to_string(), 33, false, true, true).unwrap();
+            let cr = file_handler::create_bcryptor(filename, "dummy".to_string(), 33, false, true).unwrap();
             let exit_selection = UserSelection::GoTo(Menu::ForceExit);
             (exit_selection, cr)
         }

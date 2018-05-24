@@ -71,17 +71,16 @@ impl BcryptAes {
                cost: u32,
                iv: Vec<u8>,
                salt_position: usize,
-               hash_bytes: Vec<u8>,
-               expand_to_32: bool)
+               hash_bytes: Vec<u8>)
                -> BcryptAes {
         // Create bcrypt password for the current encrypted data
-        let key = BcryptAes::create_new_bcrypt_key(&password, &salt, cost, expand_to_32);
+        let key = BcryptAes::create_new_bcrypt_key(&password, &salt, cost, true);
 
         // Create 10 new salt-key pairs to use them for encryption
         let mut salt_key_pairs = Vec::new();
         for _ in 0..NUMBER_OF_SALT_KEY_PAIRS {
             let s = create_random(16);
-            let k = BcryptAes::create_new_bcrypt_key(&password, &s, cost, expand_to_32);
+            let k = BcryptAes::create_new_bcrypt_key(&password, &s, cost, true);
             salt_key_pairs.push((s, RklSecret::new(k)));
         }
 
@@ -919,7 +918,7 @@ mod test_crypt {
         bytes.append(&mut tmp);
 
         // Create the cryptor
-        let cryptor = super::BcryptAes::new("password".to_string(), iv, 1, salt, 33, hash, true);
+        let cryptor = super::BcryptAes::new("password".to_string(), iv, 1, salt, 33, hash);
         let result = cryptor.decrypt(&bytes);
         assert!(result.is_err());
         match result.err() {
