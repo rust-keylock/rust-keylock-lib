@@ -26,6 +26,7 @@ use std::time::{self, SystemTime, UNIX_EPOCH};
 use std::sync::mpsc::{self, Sender, Receiver};
 use std::iter::FromIterator;
 use std::collections::HashMap;
+use std::path::PathBuf;
 pub use async::nextcloud;
 
 mod file_handler;
@@ -249,18 +250,37 @@ Warning: Saving will discard all the entries that could not be recovered.
             }
             UserSelection::ExportTo(path) => {
                 debug!("UserSelection::ExportTo(path)");
-                let rkl_content = RklContent::from((&safe, &configuration.nextcloud, &configuration.system));
-                let res = rkl_content.and_then(|c| file_handler::save(c, &path, &cryptor, false));
-                match res {
-                    Ok(_) => {
-                        let _ = editor.show_message("Export completed successfully!", vec![UserOption::ok()], MessageSeverity::default());
+                let do_export = if file_handler::file_exists(&PathBuf::from(&path)) {
+                    let selection = editor.show_message("This will overwrite an existing file. Do you want to proceed?",
+                                                        vec![UserOption::yes(), UserOption::no()],
+                                                        MessageSeverity::Warn);
+
+                    debug!("The user selected {:?} as an answer for overwritine the file {}", selection, path);
+                    if selection == UserSelection::UserOption(UserOption::yes()) {
+                        true
+                    } else {
+                        false
                     }
-                    Err(error) => {
-                        let _ = editor.show_message("Could not export...", vec![UserOption::ok()], MessageSeverity::Error);
-                        error!("Could not export... {:?}", error);
-                    }
+                } else {
+                    true
                 };
-                UserSelection::GoTo(Menu::Main)
+
+                if do_export {
+                    let rkl_content = RklContent::from((&safe, &configuration.nextcloud, &configuration.system));
+                    let res = rkl_content.and_then(|c| file_handler::save(c, &path, &cryptor, false));
+                    match res {
+                        Ok(_) => {
+                            let _ = editor.show_message("Export completed successfully!", vec![UserOption::ok()], MessageSeverity::default());
+                        }
+                        Err(error) => {
+                            let _ = editor.show_message("Could not export...", vec![UserOption::ok()], MessageSeverity::Error);
+                            error!("Could not export... {:?}", error);
+                        }
+                    };
+                    UserSelection::GoTo(Menu::Main)
+                } else {
+                    UserSelection::GoTo(Menu::ExportEntries)
+                }
             }
             UserSelection::GoTo(Menu::ImportEntries) => {
                 debug!("UserSelection::GoTo(Menu::ImportEntries)");

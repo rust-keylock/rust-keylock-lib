@@ -376,24 +376,25 @@ fn extract_bytes_to_decrypt(input_bytes: &[u8], salt_position: usize) -> Vec<u8>
 
     // We need to extract the bytes to be decrypted in order to create correct toml data.
     let bytes_to_decrypt: Vec<u8> = bytes
-		.iter()
-		// The first 16 bytes are the iv. Skip them.
-		.skip(16)
-		.enumerate()
-		// Filter out the 80 bytes of salt(16) plus hash(64) that are located after the user-selected position
-		.filter(|tup| {
-			if salt_between_data {
-				tup.0 < salt_position || tup.0 >= salt_position + 80
-			} else {
-				tup.0 < bytes.len() - 96
-			}
-		})
-		// The enumerate function created Tuples. Keep only the second tuple element, which is the actual byte.
-		.map(|tup| tup.1.clone())
-		.collect();
+        .iter()
+        // The first 16 bytes are the iv. Skip them.
+        .skip(16)
+        .enumerate()
+        // Filter out the 80 bytes of salt(16) plus hash(64) that are located after the user-selected position
+        .filter(|tup| {
+            if salt_between_data {
+                tup.0 < salt_position || tup.0 >= salt_position + 80
+            } else {
+                tup.0 < bytes.len() - 96
+            }
+        })
+        // The enumerate function created Tuples. Keep only the second tuple element, which is the actual byte.
+        .map(|tup| tup.1.clone())
+        .collect();
 
     bytes_to_decrypt
 }
+
 // The hash position is right after the actual salt position
 // let hash_position = actual_salt_position + 16;
 //
@@ -421,21 +422,21 @@ fn extract_bytes_to_decrypt_fallback_for_v_0_3_0_upgrade(bytes: &[u8], salt_posi
 
     // We need to extract the bytes to be decrypted in order to create correct toml data.
     let bytes_to_decrypt: Vec<u8> = bytes
-		.iter()
-		// The first 16 bytes are the iv. Skip them.
-		.skip(16)
-		.enumerate()
-		// Filter out the 16 bytes of salt that are located after the user-selected position
-		.filter(|tup| {
-			if salt_between_data {
-				tup.0 < salt_position || tup.0 >= salt_position + 16
-			} else {
-				tup.0 < bytes.len() - 32
-			}
-		})
-		// The enumerate function created Tuples. Keep only the second tuple element, which is the actual byte.
-		.map(|tup| tup.1.clone())
-		.collect();
+        .iter()
+        // The first 16 bytes are the iv. Skip them.
+        .skip(16)
+        .enumerate()
+        // Filter out the 16 bytes of salt that are located after the user-selected position
+        .filter(|tup| {
+            if salt_between_data {
+                tup.0 < salt_position || tup.0 >= salt_position + 16
+            } else {
+                tup.0 < bytes.len() - 32
+            }
+        })
+        // The enumerate function created Tuples. Keep only the second tuple element, which is the actual byte.
+        .map(|tup| tup.1.clone())
+        .collect();
 
     bytes_to_decrypt
 }
@@ -469,17 +470,14 @@ fn compose_bytes_to_save(data: &[u8], salt_position: usize, salt: &[u8], iv: &[u
         // Push data bytes before the salt position
         if index < inferred_salt_position {
             bytes_to_save.push(data[index]);
-        }
-        // Start pushing the salt bytes after the position indicated by the user
-        else if index >= inferred_salt_position && index < inferred_salt_position + 16 {
+        } else if index >= inferred_salt_position && index < inferred_salt_position + 16 {
+            // Start pushing the salt bytes after the position indicated by the user
             bytes_to_save.push(salt[index - inferred_salt_position]);
-        }
-        // Start pushing the hash bytes after the salt
-        else if index >= hash_position && index < hash_position + 64 {
+        } else if index >= hash_position && index < hash_position + 64 {
+            // Start pushing the hash bytes after the salt
             bytes_to_save.push(hash_bytes[index - hash_position]);
-        }
-        // Push data bytes after the salt + hash position
-        else {
+        } else {
+            // Push data bytes after the salt + hash position
             bytes_to_save.push(data[index - 80]);
         }
     }
@@ -925,5 +923,13 @@ mod test_crypt {
             Some(super::super::errors::RustKeylockError::IntegrityError(_)) => assert!(true),
             _ => assert!(false),
         }
+    }
+
+    #[test]
+    fn bcrypt_key_size() {
+        let key = super::BcryptAes::create_new_bcrypt_key("123", "saltsaltsaltsalt".as_bytes(), 3, false);
+        assert!(key.len() == 24);
+        let expanded_key = super::BcryptAes::create_new_bcrypt_key("123", "saltsaltsaltsalt".as_bytes(), 3, true);
+        assert!(expanded_key.len() == 32);
     }
 }

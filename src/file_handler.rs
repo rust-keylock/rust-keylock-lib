@@ -90,10 +90,15 @@ pub fn create_bcryptor(filename: &str,
     Ok(BcryptAes::new(password, salt, 3, iv, salt_position, hash_bytes))
 }
 
-/// Returns true if the passwords file exists in the Filesystem, flase otherwise
+/// Returns false if the passwords file exists in the Filesystem, true otherwise
 pub fn is_first_run(filename: &str) -> bool {
     let full_path = default_toml_path(filename);
-    File::open(full_path).is_err()
+    !file_exists(&full_path)
+}
+
+/// Returns true if the file exists in the Filesystem, flase otherwise
+pub fn file_exists(file: &PathBuf) -> bool {
+    File::open(file).is_ok()
 }
 
 /// Loads a toml file with the specified name
@@ -812,6 +817,15 @@ mod test_parser {
         let pb = super::toml_path(filename);
         assert!(pb.to_str().is_some());
         assert!(pb.to_str().unwrap() == filename);
+    }
+
+    #[test]
+    fn is_first_run() {
+        let filename = "is_first_time_run";
+        assert!(super::is_first_run(filename));
+        create_file_with_contents(filename, "contents");
+        assert!(!super::is_first_run(filename));
+        delete_file(filename)
     }
 
     fn create_file_with_toml_contents(name: &str) {
