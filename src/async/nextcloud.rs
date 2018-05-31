@@ -381,7 +381,7 @@ impl Synchronizer {
             Err(errors::RustKeylockError::SyncError(format!("{:?}", stat)))
         } else {
             let tmp_file_name = format!("tmp_{}", filename);
-            file_handler::save_bytes(&tmp_file_name, &resp_bytes)?;
+            file_handler::save_bytes(&tmp_file_name, &resp_bytes, false)?;
             Ok(tmp_file_name)
         }
     }

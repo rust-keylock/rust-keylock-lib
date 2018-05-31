@@ -6,6 +6,7 @@ use std::io::prelude::*;
 #[cfg(not(target_os = "android"))]
 use std::env;
 use std::io;
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::fs::{self, File};
 use std::path::PathBuf;
 use toml::value::{Table, Value};
@@ -135,24 +136,51 @@ pub fn get_file(filename: &str) -> errors::Result<File> {
     Ok(File::open(full_path)?)
 }
 
-/// Saves a File with a given name in the default directory
-pub fn save_bytes(filename: &str, bytes: &[u8]) -> errors::Result<()> {
+/// Saves a `File` with a given name in the default directory.
+pub fn save_bytes(filename: &str, bytes: &[u8], do_backup: bool) -> errors::Result<()> {
     let full_path = default_toml_path(filename);
-    let mut file = try!(File::create(full_path));
-    try!(file.write_all(&bytes));
+
+    if do_backup && file_exists(&full_path) {
+        backup(filename)?;
+    }
+    let full_path = default_toml_path(filename);
+    let mut file = File::create(full_path)?;
+    file.write_all(&bytes)?;
     info!("File saved in {}. Syncing...", filename);
-    Ok(try!(file.sync_all()))
+    Ok(file.sync_all()?)
 }
 
+/// Backs up a `File` with a given name to the default backup directory.
+pub fn backup(filename: &str) -> errors::Result<()> {
+    let mut dest_path = default_rustkeylock_location();
+    dest_path.push("backups");
+    let _ = fs::create_dir(&dest_path);
+    let now = SystemTime::now().duration_since(UNIX_EPOCH)?;
+    let dest_file_name = format!("{}_{}", now.as_secs(), filename);
+    dest_path.push(&dest_file_name);
+
+    let mut source_file = get_file(filename)?;
+    let mut file_bytes: Vec<_> = Vec::new();
+    source_file.read_to_end(&mut file_bytes)?;
+
+    let mut target_file = try!(File::create(dest_path));
+    target_file.write_all(&file_bytes)?;
+    debug!("Data backed up in file {}. Syncing...", dest_file_name);
+    Ok(target_file.sync_all()?)
+}
+
+/// Replaces a target `File` with a source one, deleting the source file. Similarly with the mv command.
+/// The source and target are names of files in the default directory.
 pub fn replace(source: &str, target: &str) -> errors::Result<()> {
     let mut source_file = get_file(source)?;
     let mut file_bytes: Vec<_> = Vec::new();
     source_file.read_to_end(&mut file_bytes)?;
 
-    save_bytes(target, &file_bytes)?;
+    save_bytes(target, &file_bytes, true)?;
     delete_file(source)
 }
 
+/// Deletes the file with a given name in the default directory.
 fn delete_file(name: &str) -> errors::Result<()> {
     let path_buf = default_toml_path(name);
     let path = path_buf.to_str().unwrap();
@@ -160,7 +188,7 @@ fn delete_file(name: &str) -> errors::Result<()> {
     Ok(())
 }
 
-/// Loads a toml file with the specified name
+/// Loads a toml file with the specified name.
 /// If the file does not exist, it is created.
 pub fn load_properties(filename: &str) -> Result<Props, RustKeylockError> {
     debug!("Loading Properties from {}", filename);
@@ -226,7 +254,7 @@ pub fn default_rustkeylock_location() -> PathBuf {
 
 #[cfg(target_os = "android")]
 pub fn create_certs_path() -> errors::Result<PathBuf> {
-	let mut rust_keylock_home = default_rustkeylock_location();
+    let mut rust_keylock_home = default_rustkeylock_location();
     rust_keylock_home.push("/sdcard/Download/rust-keylock/etc/ssl/certs");
     let _ = fs::create_dir_all(rust_keylock_home.clone())?;
     Ok(rust_keylock_home)
@@ -254,21 +282,21 @@ fn transform_to_dtos(table: &Table, recover: bool) -> Result<Vec<Entry>, RustKey
                 Some(array) => {
                     let iter = array.into_iter();
                     let vec: Vec<Option<Entry>> = iter.map(|value| {
-                            let conversion_result = match value.as_table() {
-                                Some(value_table) => Entry::from_table(value_table),
-                                None => Err(RustKeylockError::ParseError("Entry value should be a table".to_string())),
-                            };
+                        let conversion_result = match value.as_table() {
+                            Some(value_table) => Entry::from_table(value_table),
+                            None => Err(RustKeylockError::ParseError("Entry value should be a table".to_string())),
+                        };
 
-                            match conversion_result {
-                                Ok(entry) => Some(entry),
-                                Err(error) => {
-                                    if recover {
-                                        error!("Error during parsing Entry: {}", error);
-                                    }
-                                    None
+                        match conversion_result {
+                            Ok(entry) => Some(entry),
+                            Err(error) => {
+                                if recover {
+                                    error!("Error during parsing Entry: {}", error);
                                 }
+                                None
                             }
-                        })
+                        }
+                    })
                         .collect();
 
                     if vec.contains(&None) {
@@ -381,6 +409,10 @@ pub fn save(rkl_content: RklContent, filename: &str, cryptor: &Cryptor, use_defa
         toml_path(filename)
     };
 
+    if file_exists(&path_buf) {
+        let _ = backup(filename).map_err(|err| warn!("Could not take a backup before saving... {:?}", err));
+    }
+
     let tables_vec = rkl_content.entries
         .iter()
         .map(|entry| Value::Table(entry.to_table()))
@@ -396,15 +428,15 @@ pub fn save(rkl_content: RklContent, filename: &str, cryptor: &Cryptor, use_defa
     let toml_string = if rkl_content.entries.len() == 0 && !rkl_content.nextcloud_conf.is_filled() {
         "".to_string()
     } else {
-        try!(toml::ser::to_string(&table))
+        toml::ser::to_string(&table)?
     };
 
-    let ebytes = try!(cryptor.encrypt(toml_string.as_bytes()));
+    let ebytes = cryptor.encrypt(toml_string.as_bytes())?;
     debug!("Encrypted entries");
-    let mut file = try!(File::create(path_buf));
-    try!(file.write_all(&ebytes));
+    let mut file = File::create(path_buf)?;
+    file.write_all(&ebytes)?;
     info!("Entries saved in {}. Syncing...", filename);
-    Ok(try!(file.sync_all()))
+    Ok(file.sync_all()?)
 }
 
 /// Saves the specified Props to a toml file with the specified name
@@ -421,7 +453,7 @@ pub fn save_props(props: &Props, filename: &str) -> errors::Result<()> {
 }
 
 #[cfg(test)]
-mod test_parser {
+mod test_file_handler {
     use super::super::{Entry, Props, SystemConfiguration};
     use super::super::datacrypt::{self, NoCryptor, Cryptor};
     use super::super::async::nextcloud::NextcloudConfiguration;
@@ -828,6 +860,78 @@ mod test_parser {
         delete_file(filename)
     }
 
+    #[test]
+    fn delete() {
+        let filename = "delete";
+        create_file_with_contents(filename, "contents");
+        let res = super::delete_file(filename);
+        assert!(res.is_ok());
+
+        let path_buf = super::default_toml_path(filename);
+        assert!(!super::file_exists(&path_buf));
+    }
+
+    #[test]
+    fn exists() {
+        let filename = "exists";
+        let path_buf = super::default_toml_path(filename);
+        assert!(!super::file_exists(&path_buf));
+    }
+
+    #[test]
+    fn replace() {
+        let filename1 = "replace-source";
+        let filename2 = "replace-target";
+        let path_buf1 = super::default_toml_path(filename1);
+        let path_buf2 = super::default_toml_path(filename2);
+
+        create_file_with_contents(filename1, "contents");
+
+        assert!(super::file_exists(&path_buf1));
+        assert!(!super::file_exists(&path_buf2));
+
+        let res = super::replace(filename1, filename2);
+
+        assert!(res.is_ok());
+        assert!(!super::file_exists(&path_buf1));
+        assert!(super::file_exists(&path_buf2));
+
+        delete_file(filename2);
+    }
+
+    #[test]
+    fn save_bytes_and_backup() {
+        let filename = "save_bytes";
+        let mut path_buf = super::default_toml_path(filename);
+
+        let res1 = super::save_bytes(filename, "some data".as_bytes(), false);
+        assert!(res1.is_ok());
+        assert!(super::file_exists(&path_buf));
+
+        let res2 = super::save_bytes(filename, "other data".as_bytes(), false);
+        assert!(res2.is_ok());
+        assert!(super::file_exists(&path_buf));
+
+        path_buf.pop();
+        path_buf.push("backups");
+        let mut read_dir_res = fs::read_dir(&path_buf);
+
+        let files_in_backup_dir = match read_dir_res {
+            Ok(res) => res.count(),
+            Err(_) => 0,
+        };
+
+        let res3 = super::save_bytes(filename, "other data".as_bytes(), true);
+        assert!(res3.is_ok());
+        assert!(super::file_exists(&path_buf));
+
+        read_dir_res = fs::read_dir(&path_buf);
+        assert!(read_dir_res.is_ok());
+        assert!(read_dir_res.unwrap().count() == (files_in_backup_dir + 1));
+
+        delete_file(filename);
+    }
+
     fn create_file_with_toml_contents(name: &str) {
         // Create the file with some toml contents
         let contents = r#"
@@ -1014,13 +1118,11 @@ mod test_parser {
             // Push data bytes before the salt position
             if index < inferred_salt_position {
                 bytes_to_save.push(data[index]);
-            }
-            // Start pushing the salt bytes after the position indicated by the user
-            else if index >= inferred_salt_position && index < inferred_salt_position + 16 {
+            } else if index >= inferred_salt_position && index < inferred_salt_position + 16 {
+                // Start pushing the salt bytes after the position indicated by the user
                 bytes_to_save.push(salt[index - inferred_salt_position]);
-            }
-            // Push data bytes after the salt position
-            else {
+            } else {
+                // Push data bytes after the salt position
                 bytes_to_save.push(data[index - 16]);
             }
         }
@@ -1036,23 +1138,22 @@ mod test_parser {
 
         // We need to extract the bytes to be decrypted in order to create correct toml data.
         let bytes_to_decrypt: Vec<u8> = bytes
-		.iter()
-		// The first 16 bytes are the iv. Skip them.
-		.skip(16)
-		.enumerate()
-		// Filter out the 16 bytes of salt that are located after the user-selected position
-		.filter(|tup| {
-			if salt_between_data {
-				tup.0 < salt_position || tup.0 >= salt_position + 16
-			} else {
-				tup.0 < bytes.len() - 32
-			}
-		})
-		// The enumerate function created Tuples. Keep only the second tuple element, which is the actual byte.
-		.map(|tup| tup.1.clone())
-		.collect();
+            .iter()
+            // The first 16 bytes are the iv. Skip them.
+            .skip(16)
+            .enumerate()
+            // Filter out the 16 bytes of salt that are located after the user-selected position
+            .filter(|tup| {
+                if salt_between_data {
+                    tup.0 < salt_position || tup.0 >= salt_position + 16
+                } else {
+                    tup.0 < bytes.len() - 32
+                }
+            })
+            // The enumerate function created Tuples. Keep only the second tuple element, which is the actual byte.
+            .map(|tup| tup.1.clone())
+            .collect();
 
         bytes_to_decrypt
     }
-
 }
