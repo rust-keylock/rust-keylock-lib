@@ -9,6 +9,7 @@ use std::io;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::fs::{self, File};
 use std::path::PathBuf;
+use std::cmp::Ordering;
 use toml::value::{Table, Value};
 use toml;
 
@@ -150,7 +151,7 @@ pub fn save_bytes(filename: &str, bytes: &[u8], do_backup: bool) -> errors::Resu
     Ok(file.sync_all()?)
 }
 
-/// Backs up a `File` with a given name to the default backup directory.
+/// Backs up a File with a given name to the default backup directory.
 pub fn backup(filename: &str) -> errors::Result<()> {
     let mut dest_path = default_rustkeylock_location();
     dest_path.push("backups");
@@ -166,7 +167,66 @@ pub fn backup(filename: &str) -> errors::Result<()> {
     let mut target_file = try!(File::create(dest_path));
     target_file.write_all(&file_bytes)?;
     debug!("Data backed up in file {}. Syncing...", dest_file_name);
-    Ok(target_file.sync_all()?)
+    target_file.sync_all()?;
+
+    clean_backup_dir()
+}
+
+/// Cleans the backup directory in order to always contain 10 files.
+/// The number 10 is currently hard-coded, but will be part of the properties in the future.
+pub fn clean_backup_dir() -> errors::Result<()> {
+    // TODO: Use the properties to take the value 10
+    let max_files_in_backup_dir = 10;
+    let mut backup_path = default_rustkeylock_location();
+    backup_path.push("backups");
+    let read_dir_res = fs::read_dir(&backup_path);
+
+    let files_in_backup_dir = match read_dir_res {
+        Ok(res) => res.count(),
+        Err(_) => 0,
+    };
+
+    if files_in_backup_dir > max_files_in_backup_dir {
+        debug!("Cleaning files in the backups directory...");
+        let mut dir_files: Vec<FileAndPath> = fs::read_dir(&backup_path)?
+            .map(|dir_entry_res| {
+                dir_entry_res.and_then(|dir_entry| {
+                    Ok(dir_entry.path())
+                })
+            })
+            .flat_map(|d| d)
+            .map(|pb| {
+                File::open(pb.clone()).and_then(|f| Ok(FileAndPath::new(f, pb)))
+            })
+            .flat_map(|d| d)
+            .collect();
+
+        dir_files.sort_by(|fap1, fap2| {
+            match (fap1.file.metadata().and_then(|md| md.modified()), fap2.file.metadata().and_then(|md| md.modified())) {
+                (Ok(c1), Ok(c2)) => {
+                    c2.cmp(&c1)
+                }
+                (_, _) => Ordering::Greater,
+            }
+        });
+
+        for fap in dir_files.iter().skip(max_files_in_backup_dir) {
+            let _ = fs::remove_file(&fap.path).map_err(|err| warn!("Could not remove file {:?} while cleaning the backup directory: {:?}", fap.path, err));
+        }
+    }
+
+    Ok(())
+}
+
+struct FileAndPath {
+    file: File,
+    path: PathBuf,
+}
+
+impl FileAndPath {
+    fn new(file: File, path: PathBuf) -> FileAndPath {
+        FileAndPath {file, path}
+    }
 }
 
 /// Replaces a target `File` with a source one, deleting the source file. Similarly with the mv command.
@@ -458,8 +518,8 @@ mod test_file_handler {
     use super::super::datacrypt::{self, NoCryptor, Cryptor};
     use super::super::async::nextcloud::NextcloudConfiguration;
     use std::io::prelude::*;
-    use std::fs;
-    use std::fs::File;
+    use std::fs::{self,File};
+    use std::{thread, time};
     use toml;
     use rand::{Rng, OsRng};
     use std::iter::repeat;
@@ -914,22 +974,33 @@ mod test_file_handler {
 
         path_buf.pop();
         path_buf.push("backups");
-        let mut read_dir_res = fs::read_dir(&path_buf);
-
-        let files_in_backup_dir = match read_dir_res {
-            Ok(res) => res.count(),
-            Err(_) => 0,
-        };
 
         let res3 = super::save_bytes(filename, "other data".as_bytes(), true);
         assert!(res3.is_ok());
         assert!(super::file_exists(&path_buf));
 
-        read_dir_res = fs::read_dir(&path_buf);
+        let read_dir_res = fs::read_dir(&path_buf);
         assert!(read_dir_res.is_ok());
-        assert!(read_dir_res.unwrap().count() == (files_in_backup_dir + 1));
 
         delete_file(filename);
+
+        // The test clean_backup_dir should not be done in parallel with the test save_bytes_and_backup
+        clean_backup_dir();
+    }
+
+    fn clean_backup_dir() {
+        let filename = "backup_dir";
+        let mut backups_path_buf = super::default_toml_path(filename);
+        backups_path_buf.pop();
+        backups_path_buf.push("backups");
+
+        // Create 11 files in the directory
+        for _ in 0..12 {
+            assert!(super::save_bytes(filename, "some data".as_bytes(), true).is_ok());
+            thread::sleep(time::Duration::from_millis(100));
+        }
+        // Assert 10 files exist in the backup directory
+        assert!(fs::read_dir(&backups_path_buf).unwrap().count() == 10);
     }
 
     fn create_file_with_toml_contents(name: &str) {
