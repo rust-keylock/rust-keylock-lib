@@ -997,7 +997,7 @@ mod test_file_handler {
         // Create 11 files in the directory
         for _ in 0..12 {
             assert!(super::save_bytes(filename, "some data".as_bytes(), true).is_ok());
-            thread::sleep(time::Duration::from_millis(100));
+            thread::sleep(time::Duration::from_millis(1000));
         }
         // Assert 10 files exist in the backup directory
         assert!(fs::read_dir(&backups_path_buf).unwrap().count() == 10);
