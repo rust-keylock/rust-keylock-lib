@@ -724,6 +724,40 @@ mod api_unit_tests {
         assert!(m2 == "EntriesList");
         let m3 = Menu::EditEntry(33).get_name();
         assert!(m3 == "EditEntry");
+        let m4 = Menu::DeleteEntry(1).get_name();
+        assert!(m4 == "DeleteEntry");
+        let m5 = Menu::NewEntry.get_name();
+        assert!(m5 == "NewEntry");
+        let m6 = Menu::ForceExit.get_name();
+        assert!(m6 == "ForceExit");
+        let m7 = Menu::ChangePass.get_name();
+        assert!(m7 == "ChangePass");
+        let m8 = Menu::Save.get_name();
+        assert!(m8 == "Save");
+        let m9 = Menu::Exit.get_name();
+        assert!(m9 == "Exit");
+        let m10 = Menu::Main.get_name();
+        assert!(m10 == "Main");
+        let m11 = Menu::Current.get_name();
+        assert!(m11 == "Current");
+        let m12 = Menu::EditEntry(1).get_name();
+        assert!(m12 == "EditEntry");
+        let m13 = Menu::EntriesList("".to_owned()).get_name();
+        assert!(m13 == "EntriesList");
+        let m14 = Menu::ExportEntries.get_name();
+        assert!(m14 == "ExportEntries");
+        let m15 = Menu::ImportEntries.get_name();
+        assert!(m15 == "ImportEntries");
+        let m16 = Menu::ShowConfiguration.get_name();
+        assert!(m16 == "ShowConfiguration");
+        let m17 = Menu::ShowEntry(1).get_name();
+        assert!(m17 == "ShowEntry");
+        let m18 = Menu::Synchronize.get_name();
+        assert!(m18 == "Synchronize");
+        let m19 = Menu::TryFileRecovery.get_name();
+        assert!(m19 == "TryFileRecovery");
+        let m20 = Menu::TryPass.get_name();
+        assert!(m20 == "TryPass");
     }
 
     #[test]
