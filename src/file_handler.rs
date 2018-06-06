@@ -608,7 +608,7 @@ mod test_file_handler {
         let new_opt = super::load_properties(filename);
         assert!(new_opt.is_ok());
         let new_props = new_opt.unwrap();
-        assert!(new_props.idle_timeout_seconds == 60);
+        assert!(new_props == Props::new(60));
         delete_file(filename);
     }
 
@@ -1001,6 +1001,7 @@ mod test_file_handler {
         }
         // Assert 10 files exist in the backup directory
         assert!(fs::read_dir(&backups_path_buf).unwrap().count() == 10);
+        delete_file(filename);
     }
 
     fn create_file_with_toml_contents(name: &str) {

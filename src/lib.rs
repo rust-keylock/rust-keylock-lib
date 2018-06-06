@@ -19,14 +19,29 @@ extern crate hyper_tls;
 extern crate native_tls;
 extern crate xml;
 extern crate openssl_probe;
+//extern crate clipboard;
 
-use toml::value::Table;
 use std::error::Error;
-use std::time::{self, SystemTime, UNIX_EPOCH};
+use std::time::{self, SystemTime};
 use std::sync::mpsc::{self, Sender, Receiver};
-use std::iter::FromIterator;
-use std::collections::HashMap;
 use std::path::PathBuf;
+//use clipboard::{ClipboardProvider, ClipboardContext};
+use api::{
+    RklContent,
+    SystemConfiguration,
+    Props,
+};
+
+pub use api::{
+    Entry as Entry,
+    UserSelection as UserSelection,
+    Menu as Menu,
+    UserOption as UserOption,
+    MessageSeverity as MessageSeverity,
+    RklConfiguration as RklConfiguration,
+    safe::Safe as Safe,
+};
+
 pub use async::nextcloud;
 
 mod file_handler;
@@ -34,6 +49,7 @@ mod errors;
 mod protected;
 pub mod datacrypt;
 mod async;
+mod api;
 
 /// Takes a reference of `Editor` implementation as argument and executes the _rust-keylock_ logic.
 /// The `Editor` is responsible for the interaction with the user. Currently there are `Editor` implementations for __shell__ and for __Android__.
@@ -98,7 +114,7 @@ pub fn execute<T: Editor>(editor: &T) {
         async_channel_check(&nextcloud_rx, editor, filename, &mut user_selection);
         // Idle time check only on selections other than GoTo::Main
         if user_selection != UserSelection::GoTo(Menu::Main) {
-            user_selection = user_selection_after_idle_check(&last_action_time, props.idle_timeout_seconds, user_selection, editor);
+            user_selection = user_selection_after_idle_check(&last_action_time, props.idle_timeout_seconds(), user_selection, editor);
         }
         // Update the action time
         last_action_time = SystemTime::now();
@@ -582,769 +598,6 @@ fn spawn_nextcloud_async_task(filename: &str,
     (rx, async_task_control_tx)
 }
 
-/// Struct to use for retrieving and saving data from/to the file
-pub struct RklContent {
-    entries: Vec<Entry>,
-    nextcloud_conf: async::nextcloud::NextcloudConfiguration,
-    system_conf: SystemConfiguration,
-}
-
-impl RklContent {
-    pub fn new(entries: Vec<Entry>,
-               nextcloud_conf: async::nextcloud::NextcloudConfiguration,
-               system_conf: SystemConfiguration)
-               -> RklContent {
-        RklContent {
-            entries: entries,
-            nextcloud_conf: nextcloud_conf,
-            system_conf: system_conf,
-        }
-    }
-
-    pub fn from(tup: (&Safe, &async::nextcloud::NextcloudConfiguration, &SystemConfiguration)) -> errors::Result<RklContent> {
-        let entries = tup.0.get_entries_decrypted();
-        let nextcloud_conf = async::nextcloud::NextcloudConfiguration::new(tup.1.server_url.clone(),
-                                                                           tup.1.username.clone(),
-                                                                           tup.1.decrypted_password()?,
-                                                                           tup.1.use_self_signed_certificate);
-        let system_conf = SystemConfiguration::new(tup.2.saved_at, tup.2.version, tup.2.last_sync_version);
-
-        Ok(RklContent::new(entries, nextcloud_conf?, system_conf))
-    }
-}
-
-/// Keeps the Configuration
-#[derive(Debug, PartialEq)]
-pub struct RklConfiguration {
-    pub system: SystemConfiguration,
-    pub nextcloud: async::nextcloud::NextcloudConfiguration,
-}
-
-impl RklConfiguration {
-    pub fn update_system_for_save(&mut self) -> errors::Result<()> {
-        self.system.version = Some((self.system.version.unwrap_or(0)) + 1);
-        // When uploaded, the last_sync_version should be the same with the version
-        self.system.last_sync_version = self.system.version;
-        let local_time_seconds = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
-        self.system.saved_at = Some(local_time_seconds as i64);
-        Ok(())
-    }
-}
-
-impl From<(async::nextcloud::NextcloudConfiguration, SystemConfiguration)> for RklConfiguration {
-    fn from(confs: (async::nextcloud::NextcloudConfiguration, SystemConfiguration)) -> Self {
-        RklConfiguration {
-            system: confs.1,
-            nextcloud: confs.0,
-        }
-    }
-}
-
-/// System - internal configuration
-#[derive(Debug, PartialEq, Clone)]
-pub struct SystemConfiguration {
-    /// When the passwords were saved
-    pub saved_at: Option<i64>,
-    /// A number that gets incremented with each persisted change
-    pub version: Option<i64>,
-    /// The version that was set upon the last sync. This is the same with the version once the data is uploaded to the server
-    pub last_sync_version: Option<i64>,
-}
-
-impl SystemConfiguration {
-    pub fn new(saved_at: Option<i64>, version: Option<i64>, last_sync_version: Option<i64>) -> SystemConfiguration {
-        SystemConfiguration {
-            saved_at: saved_at,
-            version: version,
-            last_sync_version: last_sync_version,
-        }
-    }
-
-    pub fn from_table(table: &Table) -> Result<SystemConfiguration, errors::RustKeylockError> {
-        let saved_at = table.get("saved_at").and_then(|value| value.as_integer().and_then(|int_ref| Some(int_ref)));
-        let version = table.get("version").and_then(|value| value.as_integer().and_then(|int_ref| Some(int_ref)));
-        let last_sync_version = table.get("last_sync_version").and_then(|value| value.as_integer().and_then(|int_ref| Some(int_ref)));
-        Ok(SystemConfiguration::new(saved_at, version, last_sync_version))
-    }
-
-    pub fn to_table(&self) -> errors::Result<Table> {
-        let mut table = Table::new();
-        if self.saved_at.is_some() {
-            table.insert("saved_at".to_string(), toml::Value::Integer(self.saved_at.unwrap()));
-        }
-        if self.version.is_some() {
-            table.insert("version".to_string(), toml::Value::Integer(self.version.unwrap()));
-        }
-        if self.last_sync_version.is_some() {
-            table.insert("last_sync_version".to_string(), toml::Value::Integer(self.last_sync_version.unwrap()));
-        }
-
-        Ok(table)
-    }
-}
-
-impl Default for SystemConfiguration {
-    fn default() -> SystemConfiguration {
-        SystemConfiguration {
-            saved_at: None,
-            version: None,
-            last_sync_version: None,
-        }
-    }
-}
-
-/// Struct that defines a password entry.
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Entry {
-    /// The name of the Entry
-    ///
-    /// It is used as a label to distinguish among other Entries
-    pub name: String,
-    /// The username
-    pub user: String,
-    /// The password
-    pub pass: String,
-    /// A description of the `Entry`
-    pub desc: String,
-    /// Whether the Entry has encrypted elements (like password)
-    pub encrypted: bool,
-}
-
-impl Entry {
-    /// Creates a new `Entry` using the provided name, username, password and description
-    pub fn new(name: String, user: String, pass: String, desc: String) -> Entry {
-        Entry {
-            name: name,
-            user: user,
-            pass: pass,
-            desc: desc,
-            encrypted: false,
-        }
-    }
-
-    /// Creates an empty `Entry`
-    pub fn empty() -> Entry {
-        Entry {
-            name: "".to_string(),
-            user: "".to_string(),
-            pass: "".to_string(),
-            desc: "".to_string(),
-            encrypted: false,
-        }
-    }
-
-    fn from_table(table: &Table) -> Result<Entry, errors::RustKeylockError> {
-        let name = table.get("name").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
-        let user = table.get("user").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
-        let pass = table.get("pass").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
-        let desc = table.get("desc").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
-
-        match (name, user, pass, desc) {
-            (Some(n), Some(u), Some(p), Some(d)) => Ok(Self::new(n, u, p, d)),
-            _ => Err(errors::RustKeylockError::ParseError(toml::ser::to_string(&table).unwrap_or("Cannot serialize toml".to_string()))),
-        }
-    }
-
-    fn to_table(&self) -> Table {
-        let mut table = Table::new();
-        table.insert("name".to_string(), toml::Value::String(self.name.clone()));
-        table.insert("user".to_string(), toml::Value::String(self.user.clone()));
-        table.insert("pass".to_string(), toml::Value::String(self.pass.clone()));
-        table.insert("desc".to_string(), toml::Value::String(self.desc.clone()));
-
-        table
-    }
-
-    fn encrypted(&self, cryptor: &datacrypt::EntryPasswordCryptor) -> Entry {
-        let (encrypted_password, encryption_succeeded) = match cryptor.encrypt_str(&self.pass) {
-            Ok(encrypted) => (encrypted, true),
-            Err(_) => {
-                error!("Could not encrypt password for {}. Defaulting in keeping it in plain...", &self.name);
-                (self.pass.clone(), false)
-            }
-        };
-        Entry {
-            name: self.name.clone(),
-            user: self.user.clone(),
-            pass: encrypted_password,
-            desc: self.desc.clone(),
-            encrypted: encryption_succeeded,
-        }
-    }
-
-    pub fn decrypted(&self, cryptor: &datacrypt::EntryPasswordCryptor) -> Entry {
-        let decrypted_password = if self.encrypted {
-            match cryptor.decrypt_str(&self.pass) {
-                Ok(decrypted) => decrypted,
-                Err(_) => self.pass.clone(),
-            }
-        } else {
-            self.pass.clone()
-        };
-        Entry::new(self.name.clone(), self.user.clone(), decrypted_password, self.desc.clone())
-    }
-}
-
-/// Holds the data that should be safe and secret.
-///
-/// This includes the password entries and a Cryptor that is used to encrypt the passwords of the entries when they are stored in memory
-/// and decrypt them when needed (to be presented to the User)
-pub struct Safe {
-    entries: Vec<Entry>,
-    filtered_entries: Vec<Entry>,
-    /// Maps the filtered Entries to the Vec that contains all the entries.
-    map_filtered_to_unfiltered: HashMap<usize, usize>,
-    password_cryptor: datacrypt::EntryPasswordCryptor,
-    filter: String,
-}
-
-impl Default for Safe {
-    fn default() -> Self {
-        Safe {
-            entries: Vec::new(),
-            filtered_entries: Vec::new(),
-            map_filtered_to_unfiltered: HashMap::new(),
-            password_cryptor: datacrypt::EntryPasswordCryptor::new(),
-            filter: "".to_string(),
-        }
-    }
-}
-
-impl Safe {
-    pub fn new() -> Safe {
-        Safe {
-            entries: Vec::new(),
-            filtered_entries: Vec::new(),
-            map_filtered_to_unfiltered: HashMap::new(),
-            password_cryptor: datacrypt::EntryPasswordCryptor::new(),
-            filter: "".to_string(),
-        }
-    }
-
-    /// Adds an Entry to the Safe, with the Entry password encrypted
-    fn add_entry(&mut self, new_entry: Entry) {
-        self.entries.push(new_entry.encrypted(&self.password_cryptor));
-        self.apply_filter();
-    }
-
-    /// Replaces an Entry in the Safe, with a new Entry that has the password encrypted
-    fn replace_entry(&mut self, index: usize, entry: Entry) -> errors::Result<()> {
-        // Push the Entry
-        self.entries.push(entry.encrypted(&self.password_cryptor));
-        // Find the correct index of the edited entry in the main Entries Vec
-        let res = match &self.map_filtered_to_unfiltered.get(&index) {
-            &Some(index_in_main_vec) => {
-                // Replace
-                self.entries.swap_remove(*index_in_main_vec);
-                Ok(())
-            }
-            &None => {
-                Err(errors::RustKeylockError::GeneralError("The entry being replaced was not found in the Entries... If the entries \
-                                                            changed meanwhile, this is normal. If not, please consider opening a bug to \
-                                                            the developers."
-                    .to_string()))
-            }
-        };
-        // Apply the filter once again
-        self.apply_filter();
-        res
-    }
-
-    /// Removes an Entry from the Safe
-    fn remove_entry(&mut self, index: usize) -> errors::Result<()> {
-        let res = match &self.map_filtered_to_unfiltered.get(&index) {
-            &Some(index_in_main_vec) => {
-                // Remove
-                self.entries.remove(*index_in_main_vec);
-                Ok(())
-            }
-            &None => {
-                Err(errors::RustKeylockError::GeneralError("The entry being replaced was not found in the Entries... If the entries \
-                                                            changed meanwhile, this is normal. If not, please consider opening a bug to \
-                                                            the developers."
-                    .to_string()))
-            }
-        };
-        // Apply the filter once again
-        self.apply_filter();
-        res
-    }
-
-    /// Merges the Entries, by appending the incoming elements that are not the same with some existing one in Safe
-    fn merge(&mut self, incoming: Vec<Entry>) {
-        let mut to_add = {
-            incoming.into_iter()
-                .filter(|entry| {
-                    let mut main_iter = self.entries.iter();
-                    let opt = main_iter.find(|main_entry| {
-                        let enrypted_entry = entry.encrypted(&self.password_cryptor);
-                        main_entry.name == enrypted_entry.name && main_entry.user == enrypted_entry.user &&
-                            main_entry.pass == enrypted_entry.pass && main_entry.desc == enrypted_entry.desc
-                    });
-                    opt.is_none()
-                })
-                .map(|entry| entry.encrypted(&self.password_cryptor))
-                .collect()
-        };
-
-        self.entries.append(&mut to_add);
-        self.apply_filter();
-    }
-
-    /// Adds the Entries in the Safe
-    fn add_all(&mut self, incoming: Vec<Entry>) {
-        let mut to_add = {
-            incoming.into_iter()
-                .map(|entry| entry.encrypted(&self.password_cryptor))
-                .collect()
-        };
-
-        self.entries.append(&mut to_add);
-        self.apply_filter();
-    }
-
-    /// Retrieves an Entry at a given index, after applying the filter to the Vector
-    pub fn get_entry(&self, index: usize) -> &Entry {
-        &self.get_entries()[index]
-    }
-
-    /// Retrieves an Entry at a given index with the password decrypted
-    pub fn get_entry_decrypted(&self, index: usize) -> Entry {
-        self.get_entry(index).decrypted(&self.password_cryptor)
-    }
-
-    /// Retrieves the existing entries, after applying the filter to the Vector
-    pub fn get_entries(&self) -> &[Entry] {
-        &self.filtered_entries
-    }
-
-    /// Retrieves __all__ the Entries with the passwords decrypted
-    fn get_entries_decrypted(&self) -> Vec<Entry> {
-        self.get_entries()
-            .into_iter()
-            .map(|entry| entry.decrypted(&self.password_cryptor))
-            .collect()
-    }
-
-    /// Sets a filter to be applied when retrieving the entries
-    pub fn set_filter(&mut self, filter: String) {
-        self.filter = filter;
-        self.apply_filter();
-    }
-
-    /// Gets the filter of the Safe
-    pub fn get_filter(&self) -> String {
-        self.filter.clone()
-    }
-
-    fn apply_filter(&mut self) {
-        let m: Vec<Entry> = if self.filter.len() > 0 {
-            let ref lower_filter = self.filter.to_lowercase();
-            let mut indexes_vec = Vec::new();
-            let mut vec = Vec::new();
-
-            {
-                let iter = self.entries
-                    .iter()
-                    .enumerate()
-                    .filter(|&(_, entry)| {
-                        entry.name.to_lowercase().contains(lower_filter) || entry.user.to_lowercase().contains(lower_filter) ||
-                            entry.desc.to_lowercase().contains(lower_filter)
-                    });
-                for tup in iter {
-                    // Push the entry in the vec
-                    vec.push(tup.1.clone());
-                    // Push the index in the indexes vec
-                    indexes_vec.push(tup.0);
-                }
-            }
-
-            // Put the indexes mapping in the map_filtered_to_unfiltered
-            self.map_filtered_to_unfiltered.clear();
-            indexes_vec.iter().enumerate().for_each(|(index_in_filtered_vec, index_in_main_vec)| {
-                self.map_filtered_to_unfiltered.insert(index_in_filtered_vec, *index_in_main_vec);
-            });
-
-            vec
-        } else {
-            // Put the indexes mapping in the map_filtered_to_unfiltered.
-            // The mapping here is one-to-one
-            self.map_filtered_to_unfiltered.clear();
-            for index in 0..self.entries.len() {
-                self.map_filtered_to_unfiltered.insert(index, index);
-            }
-            self.entries.clone()
-        };
-
-        self.filtered_entries = m;
-    }
-
-    pub fn clear(&mut self) {
-        self.filtered_entries = Vec::new();
-        self.entries = Vec::new();
-        self.map_filtered_to_unfiltered.clear();
-        self.filter = "".to_string();
-    }
-}
-
-/// A struct that allows storing general configuration values.
-/// The configuration values are stored in plaintext.
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Props {
-    /// Inactivity timeout seconds
-    idle_timeout_seconds: i64,
-}
-
-impl Default for Props {
-    fn default() -> Self {
-        Props { idle_timeout_seconds: 300 }
-    }
-}
-
-impl Props {
-    fn new(idle_timeout_seconds: i64) -> Props {
-        Props { idle_timeout_seconds: idle_timeout_seconds }
-    }
-
-    fn from_table(table: &Table) -> Result<Props, errors::RustKeylockError> {
-        let idle_timeout_seconds = table.get("idle_timeout_seconds").and_then(|value| value.as_integer().and_then(|i_ref| Some(i_ref)));
-
-        match idle_timeout_seconds {
-            Some(s) => Ok(Self::new(s)),
-            _ => Err(errors::RustKeylockError::ParseError(toml::ser::to_string(&table).unwrap_or("Cannot serialize toml".to_string()))),
-        }
-    }
-
-    #[allow(dead_code)]
-    fn to_table(&self) -> Table {
-        let mut table = Table::new();
-        table.insert("idle_timeout_seconds".to_string(), toml::Value::Integer(self.idle_timeout_seconds));
-
-        table
-    }
-}
-
-/// Enumeration of the several different Menus that an `Editor` implementation should handle.
-#[derive(Debug, PartialEq)]
-pub enum Menu {
-    /// The User should provide a password and a number.
-    TryPass,
-    /// The User should provide a new password and a new number.
-    ChangePass,
-    /// The User should be presented with the main menu.
-    Main,
-    /// The User should be presented with a list of all the saved password `Entries`, filtered by the string provided as argument
-    EntriesList(String),
-    /// The User should create a new `Entry`
-    NewEntry,
-    /// The User should be presented with a selected `Entry`.
-    ///
-    /// The index of the `Entry` inside the `Entries` list is provided.
-    ShowEntry(usize),
-    /// The User should edit a selected `Entry`.
-    ///
-    /// The index of the `Entry` inside the `Entries` list is provided.
-    EditEntry(usize),
-    /// The User deletes a selected `Entry`.
-    ///
-    /// The index of the `Entry` inside the `Entries` list is provided.
-    DeleteEntry(usize),
-    /// The User encrypts and saves all the existing `Entries` list.
-    Save,
-    /// The User selects to Exit _rust-keylock_
-    Exit,
-    /// The User selects to Exit _rust-keylock_, even if there is unsaved data.
-    ForceExit,
-    /// Parsing the `Entries` _after_ decrypting them may lead to wrong data. This Menu informs the User about the situation and offers an attempt to recover anything that is recoverable.
-    TryFileRecovery,
-    /// The user should be able to import password `Entries`.
-    ImportEntries,
-    /// The user should be able to export password `Entries`.
-    ExportEntries,
-    /// The user should be presented with the configuration menu
-    ShowConfiguration,
-    /// Perform Synchronization
-    Synchronize,
-}
-
-impl Menu {
-    /// Returns the name of a `Menu`.
-    pub fn get_name(&self) -> String {
-        match self {
-            &Menu::TryPass => format!("{:?}", Menu::TryPass),
-            &Menu::ChangePass => format!("{:?}", Menu::ChangePass),
-            &Menu::Main => format!("{:?}", Menu::Main),
-            &Menu::EntriesList(_) => "EntriesList".to_string(),
-            &Menu::NewEntry => format!("{:?}", Menu::NewEntry),
-            &Menu::ShowEntry(_) => "ShowEntry".to_string(),
-            &Menu::EditEntry(_) => "EditEntry".to_string(),
-            &Menu::DeleteEntry(_) => "DeleteEntry".to_string(),
-            &Menu::Save => format!("{:?}", Menu::Save),
-            &Menu::Exit => format!("{:?}", Menu::Exit),
-            &Menu::ForceExit => format!("{:?}", Menu::ForceExit),
-            &Menu::TryFileRecovery => format!("{:?}", Menu::TryFileRecovery),
-            &Menu::ImportEntries => format!("{:?}", Menu::ImportEntries),
-            &Menu::ExportEntries => format!("{:?}", Menu::ExportEntries),
-            &Menu::ShowConfiguration => format!("{:?}", Menu::ShowConfiguration),
-            &Menu::Synchronize => format!("{:?}", Menu::Synchronize),
-        }
-    }
-
-    /// Parses a String and creates a `Menu`.
-    ///
-    /// Menus that have additional `usize` and `String` arguments exist. Thus the existence of the `Option`al arguments during parsing.
-    pub fn from(name: String, opt_num: Option<usize>, opt_string: Option<String>) -> Menu {
-        debug!("Creating Menu from name {} and additional arguments usize: {:?}, String: {:?}", &name, &opt_num, &opt_string);
-        match (name, opt_num, opt_string.clone()) {
-            (ref n, None, None) if &Menu::TryPass.get_name() == n => Menu::TryPass,
-            (ref n, None, None) if &Menu::ChangePass.get_name() == n => Menu::ChangePass,
-            (ref n, None, None) if &Menu::Main.get_name() == n => Menu::Main,
-            (ref n, None, Some(ref arg)) if &Menu::EntriesList(arg.clone()).get_name() == n => Menu::EntriesList(arg.clone()),
-            (ref n, None, None) if &Menu::NewEntry.get_name() == n => Menu::NewEntry,
-            (ref n, Some(arg), None) if &Menu::ShowEntry(arg).get_name() == n => Menu::ShowEntry(arg),
-            (ref n, Some(arg), None) if &Menu::EditEntry(arg).get_name() == n => Menu::EditEntry(arg),
-            (ref n, Some(arg), None) if &Menu::DeleteEntry(arg).get_name() == n => Menu::DeleteEntry(arg),
-            (ref n, None, None) if &Menu::Save.get_name() == n => Menu::Save,
-            (ref n, None, None) if &Menu::Exit.get_name() == n => Menu::Exit,
-            (ref n, None, None) if &Menu::ForceExit.get_name() == n => Menu::ForceExit,
-            (ref n, None, None) if &Menu::TryFileRecovery.get_name() == n => Menu::TryFileRecovery,
-            (ref n, None, None) if &Menu::ImportEntries.get_name() == n => Menu::ImportEntries,
-            (ref n, None, None) if &Menu::ExportEntries.get_name() == n => Menu::ExportEntries,
-            (ref n, None, None) if &Menu::ShowConfiguration.get_name() == n => Menu::ShowConfiguration,
-            (ref n, None, None) if &Menu::Synchronize.get_name() == n => Menu::Synchronize,
-            (ref other, _, _) => {
-                let message = format!("Cannot create Menu from String '{}' and arguments usize: '{:?}', String: '{:?}'. Please, consider \
-                                       opening a bug to the developers.",
-                                      other,
-                                      opt_num,
-                                      opt_string);
-                error!("{}", message);
-                panic!(message);
-            }
-        }
-    }
-}
-
-/// Represents a User selection that is returned after showing a `Menu`.
-#[derive(Debug, PartialEq)]
-pub enum UserSelection {
-    /// The User selected an `Entry`.
-    NewEntry(Entry),
-    /// The User updated an `Entry`.
-    ReplaceEntry(usize, Entry),
-    /// The User deleted an `Entry`.
-    DeleteEntry(usize),
-    /// The User selected to go to a `Menu`.
-    GoTo(Menu),
-    /// The User provided a password and a number.
-    ProvidedPassword(String, usize),
-    /// The User acknowledges something.
-    Ack,
-    /// The User selected to export the password `Entries` to a path.
-    ExportTo(String),
-    /// The User selected to import the password `Entries` from a path.
-    ImportFrom(String, String, usize),
-    /// The User selected to import the password `Entries` from a file in the default location.
-    ImportFromDefaultLocation(String, String, usize),
-    /// The User may be offered to select one of the Options.
-    UserOption(UserOption),
-    /// The User updates the configuration
-    UpdateConfiguration(nextcloud::NextcloudConfiguration),
-}
-
-impl UserSelection {
-    pub fn is_same_variant_with(&self, other: &UserSelection) -> bool {
-        self.ordinal() == other.ordinal()
-    }
-
-    fn ordinal(&self) -> i8 {
-        match self {
-            UserSelection::NewEntry(_) => 1,
-            UserSelection::ReplaceEntry(_, _) => 2,
-            UserSelection::DeleteEntry(_) => 3,
-            UserSelection::GoTo(_) => 4,
-            UserSelection::ProvidedPassword(_, _) => 5,
-            UserSelection::Ack => 6,
-            UserSelection::ExportTo(_) => 7,
-            UserSelection::ImportFrom(_, _, _) => 8,
-            UserSelection::ImportFromDefaultLocation(_, _, _) => 9,
-            UserSelection::UserOption(_) => 10,
-            UserSelection::UpdateConfiguration(_) => 11,
-        }
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct UserOption {
-    pub label: String,
-    pub value: UserOptionType,
-    pub short_label: String,
-}
-
-impl<'a> From<&'a UserOption> for UserOption {
-    fn from(uo: &UserOption) -> Self {
-        UserOption {
-            label: uo.label.clone(),
-            value: uo.value.clone(),
-            short_label: uo.short_label.clone(),
-        }
-    }
-}
-
-impl From<(String, String, String)> for UserOption {
-    fn from(f: (String, String, String)) -> Self {
-        UserOption {
-            label: f.0,
-            value: UserOptionType::from(f.1.as_ref()),
-            short_label: f.2,
-        }
-    }
-}
-
-impl UserOption {
-    pub fn new(label: &str, option_type: UserOptionType, short_label: &str) -> UserOption {
-        UserOption {
-            label: label.to_string(),
-            value: option_type,
-            short_label: short_label.to_string(),
-        }
-    }
-
-    pub fn empty() -> UserOption {
-        UserOption {
-            label: "".to_string(),
-            value: UserOptionType::None,
-            short_label: "".to_string(),
-        }
-    }
-
-    pub fn ok() -> UserOption {
-        UserOption {
-            label: "Ok".to_string(),
-            value: UserOptionType::String("Ok".to_string()),
-            short_label: "o".to_string(),
-        }
-    }
-
-    pub fn cancel() -> UserOption {
-        UserOption {
-            label: "Cancel".to_string(),
-            value: UserOptionType::String("Cancel".to_string()),
-            short_label: "c".to_string(),
-        }
-    }
-
-    pub fn yes() -> UserOption {
-        UserOption {
-            label: "Yes".to_string(),
-            value: UserOptionType::String("Yes".to_string()),
-            short_label: "y".to_string(),
-        }
-    }
-
-    pub fn no() -> UserOption {
-        UserOption {
-            label: "No".to_string(),
-            value: UserOptionType::String("No".to_string()),
-            short_label: "n".to_string(),
-        }
-    }
-}
-
-/// Represents a type for a `UserOption`
-#[derive(Debug, PartialEq, Clone)]
-pub enum UserOptionType {
-    Number(isize),
-    String(String),
-    None,
-}
-
-impl UserOptionType {
-    fn extract_value_from_string(str: &str) -> errors::Result<String> {
-        let s = str.clone();
-        let start = s.find("(");
-        if s.ends_with(")") {
-            match start {
-                Some(st) => {
-                    let i = s.chars().skip(st + 1).take(str.len() - st - 2);
-                    let s = String::from_iter(i);
-                    Ok(s)
-                }
-                _ => {
-                    Err(errors::RustKeylockError::ParseError(format!("Could not extract UserOptionType value from {}. The \
-                                                                      UserOptionType can be extracted from strings like String(value)",
-                                                                     str)))
-                }
-            }
-        } else {
-            Err(errors::RustKeylockError::ParseError(format!("Could not extract UserOptionType value from {}. The UserOptionType can be \
-                                                              extracted from strings like String(value)",
-                                                             str)))
-        }
-    }
-}
-
-impl ToString for UserOptionType {
-    fn to_string(&self) -> String {
-        match self {
-            &UserOptionType::String(ref s) => format!("String({})", s),
-            _ => String::from(format!("{:?}", &self)),
-        }
-    }
-}
-
-impl<'a> From<&'a str> for UserOptionType {
-    fn from(string: &str) -> Self {
-        match string {
-            ref s if s.starts_with("String") => {
-                match Self::extract_value_from_string(s) {
-                    Ok(value) => UserOptionType::String(value),
-                    Err(error) => {
-                        error!("Could not create UserOptionType from {}: {:?}. Please consider opening a bug to the developers.", s, error);
-                        UserOptionType::None
-                    }
-                }
-            }
-            ref s if s.starts_with("Number") => {
-                let m = Self::extract_value_from_string(s).and_then(|value| {
-                    value.parse::<i64>().map_err(|_| errors::RustKeylockError::ParseError(format!("Could not parse {} to i64", value)))
-                });
-                match m {
-                    Ok(num) => UserOptionType::Number(num as isize),
-                    Err(error) => {
-                        error!("Could not create UserOptionType from {}: {:?}. Please consider opening a bug to the developers.", s, error);
-                        UserOptionType::None
-                    }
-                }
-            }
-            other => {
-                error!("Could not create UserOptionType from {}. Please consider opening a bug to the developers.", other);
-                UserOptionType::None
-            }
-        }
-    }
-}
-
-/// Severity for the messages presented to the Users
-#[derive(Debug, PartialEq)]
-pub enum MessageSeverity {
-    Info,
-    Warn,
-    Error,
-}
-
-impl Default for MessageSeverity {
-    fn default() -> Self {
-        MessageSeverity::Info
-    }
-}
-
-impl ToString for MessageSeverity {
-    fn to_string(&self) -> String {
-        String::from(format!("{:?}", &self))
-    }
-}
-
 /// Trait to be implemented by various different `Editor`s (Shell, Web, Android, other...).
 ///
 /// It drives the interaction with the Users
@@ -1369,551 +622,205 @@ pub trait Editor {
 
 #[cfg(test)]
 mod unit_tests {
-    use toml;
-    use super::{Menu, Entry, UserSelection, UserOption};
-    use super::datacrypt::EntryPasswordCryptor;
+    use super::api::{Menu, UserSelection, UserOption, Entry};
     use std::time::SystemTime;
+    use std::sync::Mutex;
     use std;
-
-    #[test]
-    fn entry_from_table_success() {
-        let toml = r#"
-			name = "name1"
-			user = "user1"
-			pass = "123"
-			desc = "some description"
-		"#;
-
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
-        let entry_opt = super::Entry::from_table(&table);
-        assert!(entry_opt.is_ok());
-        let entry = entry_opt.unwrap();
-        assert!(entry.name == "name1");
-        assert!(entry.user == "user1");
-        assert!(entry.pass == "123");
-        assert!(entry.desc == "some description");
-    }
-
-    #[test]
-    fn entry_from_table_failure_wrong_key() {
-        let toml = r#"
-			wrong_key = "name1"
-			user = "user1"
-			pass = "123"
-			desc = "some description"
-		"#;
-
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
-        let entry_opt = super::Entry::from_table(&table);
-        assert!(entry_opt.is_err());
-    }
-
-    #[test]
-    fn entry_from_table_failure_wrong_value() {
-        let toml = r#"
-			name = 1
-			user = "user1"
-			pass = "123"
-			desc = "some description"
-		"#;
-
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
-        let entry_opt = super::Entry::from_table(&table);
-        assert!(entry_opt.is_err());
-    }
-
-    #[test]
-    fn entry_to_table() {
-        let toml = r#"
-			name = "name1"
-			user = "user1"
-			pass = "123"
-			desc = "some description"
-		"#;
-
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
-        let entry_opt = super::Entry::from_table(&table);
-        assert!(entry_opt.is_ok());
-        let entry = entry_opt.unwrap();
-        let new_table = entry.to_table();
-        assert!(table == &new_table);
-    }
-
-    #[test]
-    fn entry_to_encrypted() {
-        let cryptor = EntryPasswordCryptor::new();
-        let entry = super::Entry::new("name".to_string(), "user".to_string(), "pass".to_string(), "desc".to_string());
-        let enc_entry = entry.encrypted(&cryptor);
-        assert!(enc_entry.name == entry.name);
-        assert!(enc_entry.user == entry.user);
-        assert!(enc_entry.pass != entry.pass);
-        assert!(enc_entry.desc == entry.desc);
-        let dec_entry = enc_entry.decrypted(&cryptor);
-        assert!(dec_entry.pass == entry.pass);
-    }
-
-    #[test]
-    fn entry_to_encrypted_encryption_may_fail() {
-        let cryptor = EntryPasswordCryptor::new();
-        let entry = super::Entry::new("name".to_string(), "user".to_string(), "pass".to_string(), "desc".to_string());
-        let dec_entry = entry.decrypted(&cryptor);
-        assert!(dec_entry.pass == entry.pass);
-    }
-
-    #[test]
-    fn props_from_table_success() {
-        let toml = r#"idle_timeout_seconds = 33"#;
-
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
-        let props_opt = super::Props::from_table(&table);
-        assert!(props_opt.is_ok());
-        let props = props_opt.unwrap();
-        assert!(props.idle_timeout_seconds == 33);
-    }
-
-    #[test]
-    fn props_from_table_failure_wrong_key() {
-        let toml = r#"wrong_key = "alas""#;
-
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
-        let props_opt = super::Props::from_table(&table);
-        assert!(props_opt.is_err());
-    }
-
-    #[test]
-    fn props_from_table_failure_wrong_value() {
-        let toml = r#"salt = 1"#;
-
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
-        let props_opt = super::Props::from_table(&table);
-        assert!(props_opt.is_err());
-    }
-
-    #[test]
-    fn props_to_table() {
-        let toml = r#"idle_timeout_seconds = 33"#;
-
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
-        let props_opt = super::Props::from_table(&table);
-        assert!(props_opt.is_ok());
-        let props = props_opt.unwrap();
-        let new_table = props.to_table();
-        assert!(table == &new_table);
-    }
-
-    #[test]
-    fn menu_get_name() {
-        let m1 = Menu::TryPass.get_name();
-        assert!(m1 == "TryPass");
-        let m2 = Menu::EntriesList("".to_string()).get_name();
-        assert!(m2 == "EntriesList");
-        let m3 = Menu::EditEntry(33).get_name();
-        assert!(m3 == "EditEntry");
-    }
-
-    #[test]
-    fn menu_from_name() {
-        let m1 = Menu::from("TryPass".to_string(), None, None);
-        assert!(m1 == Menu::TryPass);
-        let m2 = Menu::from("EntriesList".to_string(), None, Some("".to_string()));
-        assert!(m2 == Menu::EntriesList("".to_string()));
-        let m3 = Menu::from("ShowEntry".to_string(), Some(1), None);
-        assert!(m3 == Menu::ShowEntry(1));
-    }
-
-    #[test]
-    fn merge_entries() {
-        let mut safe = super::Safe::new();
-        assert!(safe.entries.len() == 0);
-
-        // Add some initial Entries
-        let all = vec![Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "1".to_string()),
-                       Entry::new("2".to_string(), "2".to_string(), "2".to_string(), "2".to_string())];
-        safe.add_all(all);
-
-        // This one should be added
-        let first = vec![Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string())];
-        safe.merge(first);
-        assert!(safe.entries.len() == 3);
-
-        // This one should not be added
-        let second = vec![Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "1".to_string())];
-        safe.merge(second);
-        assert!(safe.entries.len() == 3);
-
-        // This one should not be added either (the description is not the same with any of the existing ones
-        let third = vec![Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "3".to_string())];
-        safe.merge(third);
-        assert!(safe.entries.len() == 4);
-    }
-
-    #[test]
-    fn add_entry() {
-        let mut safe = super::Safe::new();
-        let entry = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
-        safe.add_entry(entry.clone());
-        assert!(safe.entries.len() == 1);
-        assert!(safe.entries[0].name == entry.name);
-        assert!(safe.entries[0].user == entry.user);
-        assert!(safe.entries[0].pass != entry.pass);
-        assert!(safe.entries[0].desc == entry.desc);
-    }
-
-    #[test]
-    fn replace_entry() {
-        let mut safe = super::Safe::new();
-        let entry = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
-        safe.add_entry(entry.clone());
-        let new_entry = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string());
-        let _ = safe.replace_entry(0, new_entry.clone());
-
-        assert!(safe.entries.len() == 1);
-        let replaced_entry = safe.get_entry_decrypted(0);
-        assert!(replaced_entry.name == new_entry.name);
-        assert!(replaced_entry.user == new_entry.user);
-        assert!(replaced_entry.pass == new_entry.pass);
-        assert!(replaced_entry.desc == new_entry.desc);
-    }
-
-    #[test]
-    fn replace_entry_after_filter() {
-        let mut safe = super::Safe::new();
-        let entry1 = Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "1".to_string());
-        let entry2 = Entry::new("2".to_string(), "2".to_string(), "2".to_string(), "2".to_string());
-        let entry3 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
-        safe.add_entry(entry1.clone());
-        safe.add_entry(entry2.clone());
-        safe.add_entry(entry3.clone());
-        let new_entry = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string());
-
-        safe.set_filter("3".to_string());
-        let _ = safe.replace_entry(0, new_entry.clone());
-        safe.set_filter("".to_string());
-
-        assert!(safe.entries.len() == 3);
-        let replaced_entry = safe.get_entry_decrypted(2);
-        assert!(replaced_entry.name == new_entry.name);
-        assert!(replaced_entry.user == new_entry.user);
-        assert!(replaced_entry.pass == new_entry.pass);
-        assert!(replaced_entry.desc == new_entry.desc);
-    }
-
-    #[test]
-    fn remove_entry() {
-        let mut safe = super::Safe::new();
-        let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
-        let entry2 = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string());
-        safe.add_entry(entry1.clone());
-        safe.add_entry(entry2.clone());
-
-        let _ = safe.remove_entry(1);
-
-        assert!(safe.entries.len() == 1);
-        assert!(safe.entries[0].name == entry1.name);
-        assert!(safe.entries[0].user == entry1.user);
-        assert!(safe.entries[0].pass != entry1.pass);
-        assert!(safe.entries[0].desc == entry1.desc);
-    }
-
-    #[test]
-    fn remove_entry_after_filter() {
-        let mut safe = super::Safe::new();
-        let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
-        let entry2 = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string());
-        safe.add_entry(entry1.clone());
-        safe.add_entry(entry2.clone());
-
-        safe.set_filter("33".to_string());
-        let _ = safe.remove_entry(0);
-        safe.set_filter("".to_string());
-
-        assert!(safe.entries.len() == 1);
-        let decrypted_entry = safe.get_entry_decrypted(0);
-        assert!(decrypted_entry.name == entry1.name);
-        assert!(decrypted_entry.user == entry1.user);
-        assert!(decrypted_entry.pass == entry1.pass);
-        assert!(decrypted_entry.desc == entry1.desc);
-    }
-
-    #[test]
-    fn add_all() {
-        let mut safe = super::Safe::new();
-        let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
-        let entry2 = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string());
-        let entries = vec![entry1.clone(), entry2.clone()];
-
-        safe.add_all(entries);
-
-        assert!(safe.entries.len() == 2);
-        assert!(safe.entries[0].pass != entry1.pass && safe.entries[0].pass != entry2.pass);
-        assert!(safe.entries[1].pass != entry1.pass && safe.entries[0].pass != entry2.pass);
-    }
-
-    #[test]
-    fn get_entry() {
-        let mut safe = super::Safe::new();
-        let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
-        let entry2 = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string());
-        let entries = vec![entry1.clone(), entry2.clone()];
-        safe.add_all(entries);
-
-        let got_entry = safe.get_entry(1);
-        assert!(got_entry.name == entry2.name);
-        assert!(got_entry.user == entry2.user);
-        assert!(got_entry.pass != entry2.pass);
-        assert!(got_entry.desc == entry2.desc);
-    }
-
-    #[test]
-    fn get_entry_decrypted() {
-        let mut safe = super::Safe::new();
-        let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
-        let entry2 = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string());
-        let entries = vec![entry1.clone(), entry2.clone()];
-        safe.add_all(entries);
-
-        let got_entry = safe.get_entry_decrypted(1);
-        assert!(got_entry.name == entry2.name);
-        assert!(got_entry.user == entry2.user);
-        assert!(got_entry.pass == entry2.pass);
-        assert!(got_entry.desc == entry2.desc);
-    }
-
-    #[test]
-    fn get_entries() {
-        let mut safe = super::Safe::new();
-        let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
-        let entry2 = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string());
-        let entries = vec![entry1.clone(), entry2.clone()];
-        safe.add_all(entries);
-
-        let got_entries = safe.get_entries();
-        assert!(got_entries.len() == 2);
-    }
-
-    #[test]
-    fn get_entries_decrypted() {
-        let mut safe = super::Safe::new();
-        let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
-        let entry2 = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string());
-        let entries = vec![entry1.clone(), entry2.clone()];
-        safe.add_all(entries);
-
-        let got_entries = safe.get_entries_decrypted();
-        assert!(got_entries.len() == 2);
-        assert!(got_entries[0].pass == entry1.pass);
-        assert!(got_entries[1].pass == entry2.pass);
-    }
-
-    #[test]
-    fn set_filter() {
-        let mut safe = super::Safe::new();
-        let entry1 = Entry::new("1".to_string(), "2".to_string(), "4".to_string(), "3".to_string());
-        let entry2 = Entry::new("11".to_string(), "12".to_string(), "14".to_string(), "13".to_string());
-        let entries = vec![entry1, entry2];
-        safe.add_all(entries);
-
-        // Assert that the filter can be applied on name, user and desc fields of Entries
-        safe.set_filter("1".to_string());
-        assert!(safe.get_entries().len() == 2);
-        safe.set_filter("11".to_string());
-        assert!(safe.get_entries().len() == 1);
-
-        safe.set_filter("2".to_string());
-        assert!(safe.get_entries().len() == 2);
-        safe.set_filter("12".to_string());
-        assert!(safe.get_entries().len() == 1);
-
-        safe.set_filter("3".to_string());
-        assert!(safe.get_entries().len() == 2);
-        safe.set_filter("13".to_string());
-        assert!(safe.get_entries().len() == 1);
-
-        // The filter cannot be applied on password
-        safe.set_filter("4".to_string());
-        assert!(safe.get_entries().len() == 0);
-
-        // The filter should by applied ignoring the case
-        let entry3 = Entry::new("NAME".to_string(), "User".to_string(), "pass".to_string(), "Desc".to_string());
-        safe.add_entry(entry3);
-        safe.set_filter("name".to_string());
-        assert!(safe.get_entries().len() == 1);
-    }
-
-    #[test]
-    fn get_filter() {
-        let mut safe = super::Safe::new();
-        safe.set_filter("33".to_string());
-        assert!(safe.get_filter() == "33".to_string());
-    }
-
-    #[test]
-    fn clear() {
-        let mut safe = super::Safe::new();
-        let entry = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
-        safe.add_entry(entry.clone());
-        safe.set_filter("a_filter".to_string());
-
-        safe.clear();
-
-        assert!(safe.entries.len() == 0);
-        assert!(safe.filtered_entries.len() == 0);
-        assert!(safe.filter.len() == 0);
-    }
 
     #[test]
     fn user_selection_after_idle_check_timed_out() {
         let time = SystemTime::now();
         std::thread::sleep(std::time::Duration::new(2, 0));
-        let user_selection = super::user_selection_after_idle_check(&time, 1, UserSelection::GoTo(Menu::Main), &DummyEditor::new());
+        let user_selection = super::user_selection_after_idle_check(
+            &time,
+            1,
+            UserSelection::GoTo(Menu::Main),
+            &TestEditor::new(vec![UserSelection::ProvidedPassword("dummy".to_string(), 0)]));
         assert!(user_selection == UserSelection::GoTo(Menu::TryPass));
     }
 
     #[test]
     fn user_selection_after_idle_check_not_timed_out() {
         let time = SystemTime::now();
-        let user_selection = super::user_selection_after_idle_check(&time, 10, UserSelection::GoTo(Menu::Main), &DummyEditor::new());
+        let user_selection = super::user_selection_after_idle_check(
+            &time,
+            10,
+            UserSelection::GoTo(Menu::Main),
+            &TestEditor::new(vec![UserSelection::ProvidedPassword("dummy".to_string(), 0)]));
         assert!(user_selection == UserSelection::GoTo(Menu::Main));
     }
 
     #[test]
-    fn user_option_constructors() {
-        let opt1 = super::UserOption::cancel();
-        assert!(&opt1.label == "Cancel");
-        assert!(opt1.value == super::UserOptionType::String("Cancel".to_string()));
-        assert!(&opt1.short_label == "c");
-
-        let opt2 = super::UserOption::empty();
-        assert!(&opt2.label == "");
-        assert!(opt2.value == super::UserOptionType::None);
-        assert!(&opt2.short_label == "");
-
-        let opt3 = super::UserOption::ok();
-        assert!(&opt3.label == "Ok");
-        assert!(opt3.value == super::UserOptionType::String("Ok".to_string()));
-        assert!(&opt3.short_label == "o");
+    fn execution_cases() {
+        execute_try_pass();
+        execute_add_entry();
+        execute_delete_entry();
+        execute_change_pass();
     }
 
-    #[test]
-    fn user_option_type_extract_value_from_string() {
-        let s1 = "String(my string)";
-        let sr1 = super::UserOptionType::extract_value_from_string(&s1).unwrap();
-        assert!(sr1 == "my string");
+    fn execute_try_pass() {
+        println!("===========execute_try_pass");
+        let editor = TestEditor::new(vec![
+            // Login
+            UserSelection::ProvidedPassword("123".to_string(), 0),
+            // Save
+            UserSelection::GoTo(Menu::Save),
+            // Ack saved message
+            UserSelection::UserOption(UserOption::ok()),
+            // Exit
+            UserSelection::GoTo(Menu::ForceExit)]);
 
-        let s2 = "String(wrong";
-        assert!(super::UserOptionType::extract_value_from_string(&s2).is_err());
-
-        let s3 = "String wrong)";
-        assert!(super::UserOptionType::extract_value_from_string(&s3).is_err());
-
-        let s4 = "String((my string))";
-        let sr4 = super::UserOptionType::extract_value_from_string(&s4).unwrap();
-        assert!(sr4 == "(my string)");
+        super::execute(&editor);
+        assert!(editor.all_selections_executed());
     }
 
-    #[test]
-    fn user_option_type_from_string() {
-        assert!(super::UserOptionType::from("String(my string)") == super::UserOptionType::String("my string".to_string()));
-        assert!(super::UserOptionType::from("Number(33)") == super::UserOptionType::Number(33));
-        assert!(super::UserOptionType::from("Other(33)") == super::UserOptionType::None);
+    fn execute_add_entry() {
+        println!("===========execute_add_entry");
+        let editor = TestEditor::new(vec![
+            // Login
+            UserSelection::ProvidedPassword("123".to_string(), 0),
+            // Add an entry
+            UserSelection::NewEntry(Entry::new("n".to_owned(), "u".to_owned(), "p".to_owned(), "s".to_owned())),
+            // Save
+            UserSelection::GoTo(Menu::Save),
+            // Ack saved message
+            UserSelection::UserOption(UserOption::ok()),
+            // Exit
+            UserSelection::GoTo(Menu::ForceExit)]);
+
+        super::execute(&editor);
+        assert!(editor.all_selections_executed());
     }
 
-    #[test]
-    fn user_option_type_to_string_from_string() {
-        let user_option_type = super::UserOptionType::String("my string".to_string());
-        let string = user_option_type.to_string();
-        assert!(string == "String(my string)");
-        let s: &str = &string;
-        assert!(super::UserOptionType::from(s) == super::UserOptionType::String("my string".to_string()));
+    fn execute_delete_entry() {
+        println!("===========execute_delete_entry");
+        let editor = TestEditor::new(vec![
+            // Login
+            UserSelection::ProvidedPassword("123".to_string(), 0),
+            // Add an entry
+            UserSelection::NewEntry(Entry::new("11nn".to_owned(), "11un".to_owned(), "11pn".to_owned(), "11sn".to_owned())),
+            // Delete the first entry
+            UserSelection::DeleteEntry(0),
+            // Save
+            UserSelection::GoTo(Menu::Save),
+            // Ack saved message
+            UserSelection::UserOption(UserOption::ok()),
+            // Exit
+            UserSelection::GoTo(Menu::ForceExit)]);
+
+        super::execute(&editor);
+        assert!(editor.all_selections_executed());
     }
 
-    #[test]
-    fn system_configuration_to_table() {
-        let toml = r#"
-			saved_at = 123
-			version = 1
-		"#;
+    fn execute_change_pass() {
+        println!("===========execute_change_pass");
+        let editor1 = TestEditor::new(vec![
+            // Login
+            UserSelection::ProvidedPassword("123".to_string(), 0),
+            // Go to change pass
+            UserSelection::GoTo(Menu::ChangePass),
+            // Return the new password
+            UserSelection::ProvidedPassword("321".to_string(), 1),
+            // Save
+            UserSelection::GoTo(Menu::Save),
+            // Ack saved message
+            UserSelection::UserOption(UserOption::ok()),
+            // Exit
+            UserSelection::GoTo(Menu::ForceExit)]);
 
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
-        let res = super::SystemConfiguration::from_table(&table);
-        assert!(res.is_ok());
-        let conf = res.unwrap();
-        let new_table = conf.to_table().unwrap();
-        assert!(table == &new_table);
+        super::execute(&editor1);
+        assert!(editor1.all_selections_executed());
+
+        // Assert the password is changed
+        let editor2 = TestEditor::new(vec![
+            // Login
+            UserSelection::ProvidedPassword("321".to_string(), 1),
+            // Exit
+            UserSelection::GoTo(Menu::ForceExit)]);
+
+        super::execute(&editor2);
+        assert!(editor2.all_selections_executed());
+
+        // Change the password back to the previous one
+        let editor3 = TestEditor::new(vec![
+            // Login
+            UserSelection::ProvidedPassword("321".to_string(), 1),
+            // Go to change pass
+            UserSelection::GoTo(Menu::ChangePass),
+            // Return the new password
+            UserSelection::ProvidedPassword("123".to_string(), 0),
+            // Save
+            UserSelection::GoTo(Menu::Save),
+            // Ack saved message
+            UserSelection::UserOption(UserOption::ok()),
+            // Exit
+            UserSelection::GoTo(Menu::ForceExit)]);
+
+        super::execute(&editor3);
+        assert!(editor3.all_selections_executed());
     }
 
-    #[test]
-    fn system_configuration_from_table_success() {
-        let toml = r#"
-			saved_at = 123
-			version = 1
-		"#;
-
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
-        let res = super::SystemConfiguration::from_table(&table);
-        assert!(res.is_ok());
-        let conf = res.unwrap();
-        assert!(conf.saved_at == Some(123));
-        assert!(conf.version == Some(1));
+    struct TestEditor {
+        selections_to_execute: Mutex<Vec<UserSelection>>,
     }
 
-    #[test]
-    fn user_selection_ordinal() {
-        assert!(UserSelection::NewEntry(Entry::empty()).ordinal() == 1);
-        assert!(UserSelection::ReplaceEntry(1, Entry::empty()).ordinal() == 2);
-        assert!(UserSelection::DeleteEntry(1).ordinal() == 3);
-        assert!(UserSelection::GoTo(Menu::TryPass).ordinal() == 4);
-        assert!(UserSelection::ProvidedPassword("".to_owned(), 33).ordinal() == 5);
-        assert!(UserSelection::Ack.ordinal() == 6);
-        assert!(UserSelection::ExportTo("".to_owned()).ordinal() == 7);
-        assert!(UserSelection::ImportFrom("".to_owned(), "".to_owned(), 1).ordinal() == 8);
-        assert!(UserSelection::ImportFromDefaultLocation("".to_owned(), "".to_owned(), 1).ordinal() == 9);
-        assert!(UserSelection::UserOption(UserOption::empty()).ordinal() == 10);
-        assert!(UserSelection::UpdateConfiguration(super::nextcloud::NextcloudConfiguration::default()).ordinal() == 11);
-    }
+    impl TestEditor {
+        pub fn new(selections_to_execute: Vec<UserSelection>) -> TestEditor {
+            let mut selections_to_execute_mut = selections_to_execute;
+            selections_to_execute_mut.reverse();
+            TestEditor { selections_to_execute: Mutex::new(selections_to_execute_mut) }
+        }
 
-    #[test]
-    fn is_same_variant_with() {
-        assert!(UserSelection::ProvidedPassword("".to_owned(), 33).is_same_variant_with(&UserSelection::ProvidedPassword("other".to_owned(), 11)));
-    }
+        fn return_first_selection(&self) -> UserSelection {
+            let mut available_selections_mut = self.selections_to_execute.lock().unwrap();
+            let to_ret = match available_selections_mut.pop() {
+                Some(sel) => sel,
+                None => panic!("Don't have more user selections to execute"),
+            };
 
-    struct DummyEditor;
+            to_ret
+        }
 
-    impl DummyEditor {
-        pub fn new() -> DummyEditor {
-            DummyEditor {}
+        pub fn all_selections_executed(&self) -> bool {
+            let available_selections_mut = self.selections_to_execute.lock().unwrap();
+            available_selections_mut.len() == 0
         }
     }
 
-    impl super::Editor for DummyEditor {
+    impl super::Editor for TestEditor {
         fn show_password_enter(&self) -> UserSelection {
-            UserSelection::ProvidedPassword("dummy".to_string(), 0)
+            println!("TestEditor::show_password_enter");
+            let to_ret = self.return_first_selection();
+            println!("Returning {:?}", to_ret);
+            to_ret
         }
 
         fn show_change_password(&self) -> UserSelection {
-            self.show_password_enter()
+            println!("TestEditor::show_change_password");
+            let to_ret = self.return_first_selection();
+            println!("Returning {:?}", to_ret);
+            to_ret
         }
 
-        fn show_menu(&self, _: &Menu, _: &super::Safe, _: &super::RklConfiguration) -> UserSelection {
-            UserSelection::GoTo(Menu::Main)
+        fn show_menu(&self, m: &Menu, s: &super::Safe, _: &super::RklConfiguration) -> UserSelection {
+            println!("TestEditor::show_menu {:?} with entries: {:?}", m, s.get_entries());
+            let to_ret = self.return_first_selection();
+            println!("Returning {:?}", to_ret);
+            to_ret
         }
 
-        fn exit(&self, _: bool) -> UserSelection {
-            UserSelection::Ack
+        fn exit(&self, force: bool) -> UserSelection {
+            println!("TestEditor::exit {}", force);
+            let to_ret = self.return_first_selection();
+            println!("Returning {:?}", to_ret);
+            to_ret
         }
 
-        fn show_message(&self, _: &str, _: Vec<super::UserOption>, _: super::MessageSeverity) -> UserSelection {
-            UserSelection::Ack
+        fn show_message(&self, m: &str, _: Vec<super::UserOption>, _: super::MessageSeverity) -> UserSelection {
+            println!("TestEditor::show_message {}", m);
+            let to_ret = self.return_first_selection();
+            println!("Returning {:?}", to_ret);
+            to_ret
         }
     }
 }
