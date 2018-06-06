@@ -39,8 +39,9 @@ pub use api::{
     UserOption as UserOption,
     MessageSeverity as MessageSeverity,
     RklConfiguration as RklConfiguration,
-    safe::Safe as Safe,
 };
+
+pub use api::safe::Safe as Safe;
 
 pub use async::nextcloud;
 
