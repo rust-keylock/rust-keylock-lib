@@ -3,7 +3,8 @@ pub mod safe;
 use ::{async, errors, datacrypt, nextcloud};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::iter::FromIterator;
-use toml::{self, value::Table};
+use toml::value::Table;
+use toml;
 use self::safe::Safe;
 
 /// Struct to use for retrieving and saving data from/to the file
