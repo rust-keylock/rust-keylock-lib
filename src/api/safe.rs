@@ -121,7 +121,7 @@ impl Safe {
     }
 
     /// Retrieves an Entry at a given index, after applying the filter to the Vector
-    pub(crate) fn get_entry(&self, index: usize) -> &Entry {
+    pub fn get_entry(&self, index: usize) -> &Entry {
         &self.get_entries()[index]
     }
 
