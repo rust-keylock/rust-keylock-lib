@@ -681,7 +681,7 @@ mod unit_tests {
             // Login
             UserSelection::ProvidedPassword("123".to_string(), 0),
             // Add an entry
-            UserSelection::NewEntry(Entry::new("n".to_owned(), "u".to_owned(), "p".to_owned(), "s".to_owned())),
+            UserSelection::NewEntry(Entry::new("n".to_owned(), "url".to_owned(), "u".to_owned(), "p".to_owned(), "s".to_owned())),
             // Save
             UserSelection::GoTo(Menu::Save),
             // Ack saved message
@@ -699,7 +699,7 @@ mod unit_tests {
             // Login
             UserSelection::ProvidedPassword("123".to_string(), 0),
             // Add an entry
-            UserSelection::NewEntry(Entry::new("11nn".to_owned(), "11un".to_owned(), "11pn".to_owned(), "11sn".to_owned())),
+            UserSelection::NewEntry(Entry::new("11nn".to_owned(), "11url".to_owned(), "11un".to_owned(), "11pn".to_owned(), "11sn".to_owned())),
             // Delete the first entry
             UserSelection::DeleteEntry(0),
             // Save

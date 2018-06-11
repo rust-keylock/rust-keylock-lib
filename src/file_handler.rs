@@ -551,7 +551,7 @@ mod test_file_handler {
         assert!(res.is_ok());
         let rkl_content = res.unwrap();
         let mut vec = rkl_content.entries;
-        vec.push(Entry::new("name".to_string(), "user".to_string(), "pass".to_string(), "desc".to_string()));
+        vec.push(Entry::new("name".to_string(), "url".to_string(), "user".to_string(), "pass".to_string(), "desc".to_string()));
         let nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), true)
             .unwrap();
         let sys_conf = SystemConfiguration::new(Some(0), Some(1), Some(2));
@@ -565,7 +565,7 @@ mod test_file_handler {
         let new_nc_conf = new_rkl_content.nextcloud_conf;
         let new_sys_conf = new_rkl_content.system_conf;
 
-        assert!(new_vec.contains(&Entry::new("name".to_string(), "user".to_string(), "pass".to_string(), "desc".to_string())));
+        assert!(new_vec.contains(&Entry::new("name".to_string(), "url".to_string(), "user".to_string(), "pass".to_string(), "desc".to_string())));
 
         assert!(new_nc_conf.server_url == "nc_url");
         assert!(new_nc_conf.username == "nc_user");
@@ -698,7 +698,7 @@ mod test_file_handler {
         let password = "123".to_string();
 
         let mut entries = Vec::new();
-        entries.push(Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "1".to_string()));
+        entries.push(Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "1".to_string(), "1".to_string()));
         let nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), true)
             .unwrap();
         let sys_conf = SystemConfiguration::new(Some(0), Some(1), Some(2));
@@ -733,7 +733,7 @@ mod test_file_handler {
         let password_import = "333".to_string();
 
         let mut entries_import = Vec::new();
-        entries_import.push(Entry::new("1_import".to_string(), "1_import".to_string(), "1_import".to_string(), "1_import".to_string()));
+        entries_import.push(Entry::new("1_import".to_string(), "1_import".to_string(), "1_import".to_string(), "1_import".to_string(), "1_import".to_string()));
         let nc_conf_import = NextcloudConfiguration::new("nc_url_import".to_string(),
                                                          "nc_user_import".to_string(),
                                                          "nc_pass_import".to_string(),
@@ -755,7 +755,7 @@ mod test_file_handler {
         let password = "123".to_string();
 
         let mut entries = Vec::new();
-        entries.push(Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "1".to_string()));
+        entries.push(Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "1".to_string(), "1".to_string()));
         let nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), false)
             .unwrap();
         let sys_conf = SystemConfiguration::new(Some(2), Some(3), Some(2));
@@ -883,7 +883,7 @@ mod test_file_handler {
         let salt_position = 33;
         let password = "123".to_string();
 
-        let entries = vec![Entry::new("name".to_string(), "user".to_string(), "pass".to_string(), "desc".to_string())];
+        let entries = vec![Entry::new("name".to_string(), "url".to_string(), "user".to_string(), "pass".to_string(), "desc".to_string())];
         let nc_conf = NextcloudConfiguration::default();
         let sys_conf = SystemConfiguration::default();
 

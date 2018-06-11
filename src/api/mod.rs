@@ -125,21 +125,24 @@ pub struct Entry {
     ///
     /// It is used as a label to distinguish among other Entries
     pub name: String,
+    /// A URL (optional)
+    pub url: String,
     /// The username
     pub user: String,
     /// The password
     pub pass: String,
-    /// A description of the `Entry`
+    /// A description of the `Entry` (Optional)
     pub desc: String,
     /// Whether the Entry has encrypted elements (like password)
     pub encrypted: bool,
 }
 
 impl Entry {
-    /// Creates a new `Entry` using the provided name, username, password and description
-    pub fn new(name: String, user: String, pass: String, desc: String) -> Entry {
+    /// Creates a new `Entry` using the provided name, url, username, password and description
+    pub fn new(name: String, url: String, user: String, pass: String, desc: String) -> Entry {
         Entry {
             name: name,
+            url: url,
             user: user,
             pass: pass,
             desc: desc,
@@ -151,6 +154,7 @@ impl Entry {
     pub fn empty() -> Entry {
         Entry {
             name: "".to_string(),
+            url: "".to_string(),
             user: "".to_string(),
             pass: "".to_string(),
             desc: "".to_string(),
@@ -160,12 +164,14 @@ impl Entry {
 
     pub fn from_table(table: &Table) -> Result<Entry, errors::RustKeylockError> {
         let name = table.get("name").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
+        let url = table.get("url").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
         let user = table.get("user").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
         let pass = table.get("pass").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
         let desc = table.get("desc").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
-
-        match (name, user, pass, desc) {
-            (Some(n), Some(u), Some(p), Some(d)) => Ok(Self::new(n, u, p, d)),
+        match (name, url, user, pass, desc) {
+            // TODO: match the url as a Some in the release after 0.6.0. This is temporary to support previous releases
+            // where the url field did not exist.
+            (Some(n), ul, Some(u), Some(p), Some(d)) => Ok(Self::new(n, ul.unwrap_or("".to_owned()), u, p, d)),
             _ => Err(errors::RustKeylockError::ParseError(toml::ser::to_string(&table).unwrap_or("Cannot serialize toml".to_string()))),
         }
     }
@@ -173,6 +179,7 @@ impl Entry {
     pub fn to_table(&self) -> Table {
         let mut table = Table::new();
         table.insert("name".to_string(), toml::Value::String(self.name.clone()));
+        table.insert("url".to_string(), toml::Value::String(self.url.clone()));
         table.insert("user".to_string(), toml::Value::String(self.user.clone()));
         table.insert("pass".to_string(), toml::Value::String(self.pass.clone()));
         table.insert("desc".to_string(), toml::Value::String(self.desc.clone()));
@@ -190,6 +197,7 @@ impl Entry {
         };
         Entry {
             name: self.name.clone(),
+            url: self.url.clone(),
             user: self.user.clone(),
             pass: encrypted_password,
             desc: self.desc.clone(),
@@ -206,7 +214,7 @@ impl Entry {
         } else {
             self.pass.clone()
         };
-        Entry::new(self.name.clone(), self.user.clone(), decrypted_password, self.desc.clone())
+        Entry::new(self.name.clone(), self.url.clone(), self.user.clone(), decrypted_password, self.desc.clone())
     }
 }
 
@@ -583,7 +591,7 @@ mod api_unit_tests {
     use super::{Menu, Entry, UserSelection, UserOption};
 
     #[test]
-    fn entry_from_table_success() {
+    fn entry_from_table_before_v0_6_0_success() {
         let toml = r#"
 			name = "name1"
 			user = "user1"
@@ -603,9 +611,32 @@ mod api_unit_tests {
     }
 
     #[test]
+    fn entry_from_table_success() {
+        let toml = r#"
+			name = "name1"
+			url = "url1"
+			user = "user1"
+			pass = "123"
+			desc = "some description"
+		"#;
+
+        let value = toml.parse::<toml::value::Value>().unwrap();
+        let table = value.as_table().unwrap();
+        let entry_opt = Entry::from_table(&table);
+        assert!(entry_opt.is_ok());
+        let entry = entry_opt.unwrap();
+        assert!(entry.name == "name1");
+        assert!(entry.url == "url1");
+        assert!(entry.user == "user1");
+        assert!(entry.pass == "123");
+        assert!(entry.desc == "some description");
+    }
+
+    #[test]
     fn entry_from_table_failure_wrong_key() {
         let toml = r#"
 			wrong_key = "name1"
+			url = "url"
 			user = "user1"
 			pass = "123"
 			desc = "some description"
@@ -621,6 +652,7 @@ mod api_unit_tests {
     fn entry_from_table_failure_wrong_value() {
         let toml = r#"
 			name = 1
+			url = "url"
 			user = "user1"
 			pass = "123"
 			desc = "some description"
@@ -636,6 +668,7 @@ mod api_unit_tests {
     fn entry_to_table() {
         let toml = r#"
 			name = "name1"
+			url = "url1"
 			user = "user1"
 			pass = "123"
 			desc = "some description"
@@ -653,9 +686,10 @@ mod api_unit_tests {
     #[test]
     fn entry_to_encrypted() {
         let cryptor = EntryPasswordCryptor::new();
-        let entry = super::Entry::new("name".to_string(), "user".to_string(), "pass".to_string(), "desc".to_string());
+        let entry = super::Entry::new("name".to_string(), "url".to_string(), "user".to_string(), "pass".to_string(), "desc".to_string());
         let enc_entry = entry.encrypted(&cryptor);
         assert!(enc_entry.name == entry.name);
+        assert!(enc_entry.url == entry.url);
         assert!(enc_entry.user == entry.user);
         assert!(enc_entry.pass != entry.pass);
         assert!(enc_entry.desc == entry.desc);
@@ -666,7 +700,7 @@ mod api_unit_tests {
     #[test]
     fn entry_to_encrypted_encryption_may_fail() {
         let cryptor = EntryPasswordCryptor::new();
-        let entry = super::Entry::new("name".to_string(), "user".to_string(), "pass".to_string(), "desc".to_string());
+        let entry = super::Entry::new("name".to_string(), "url".to_string(), "user".to_string(), "pass".to_string(), "desc".to_string());
         let dec_entry = entry.decrypted(&cryptor);
         assert!(dec_entry.pass == entry.pass);
     }
