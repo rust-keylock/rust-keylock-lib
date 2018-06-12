@@ -47,6 +47,7 @@ pub(crate) fn add_to_clipboard(content: String, editor: &Editor) -> UserSelectio
 mod selection_handling_unit_tests {
     use clipboard::{ClipboardProvider, ClipboardContext};
     use ::Editor;
+    use std;
     use ::api::{UserSelection, Menu, RklConfiguration, UserOption, MessageSeverity};
     use ::api::safe::Safe;
 
@@ -55,10 +56,14 @@ mod selection_handling_unit_tests {
         let content = String::from("This is content");
         let u = super::add_to_clipboard(content.clone(), &TestEditor::new());
         assert!(u == UserSelection::GoTo(Menu::Current));
-        let mut ctx: ClipboardContext = ClipboardProvider::new().expect("Cannot create ClipboardProvider in tests");
-        let clip_res = ctx.get_contents();
-        assert!(clip_res.is_ok());
-        assert!(clip_res.unwrap() == content);
+        match ClipboardProvider::new() as Result<ClipboardContext, Box<std::error::Error>> {
+            Ok(mut ctx) => {
+                let clip_res = ctx.get_contents();
+                assert!(clip_res.is_ok());
+                assert!(clip_res.unwrap() == content);
+            }
+            Err(_) => assert!(true),
+        };
     }
 
     struct TestEditor {}
@@ -69,7 +74,7 @@ mod selection_handling_unit_tests {
         }
     }
 
-    impl super::Editor for TestEditor {
+    impl Editor for TestEditor {
         fn show_password_enter(&self) -> UserSelection {
             UserSelection::Ack
         }
