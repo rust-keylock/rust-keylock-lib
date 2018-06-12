@@ -217,7 +217,7 @@ impl Cryptor for BcryptAes {
 }
 
 /// Encrypts and decrypts passwords of Entries in order not to be kept in the memory in plain.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct EntryPasswordCryptor {
     /// The encryption/decryption key
     key: RklSecret,

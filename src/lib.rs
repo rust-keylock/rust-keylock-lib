@@ -35,13 +35,12 @@ extern crate hyper_tls;
 extern crate native_tls;
 extern crate xml;
 extern crate openssl_probe;
-//extern crate clipboard;
+extern crate clipboard;
 
 use std::error::Error;
 use std::time::{self, SystemTime};
 use std::sync::mpsc::{self, Sender, Receiver};
 use std::path::PathBuf;
-//use clipboard::{ClipboardProvider, ClipboardContext};
 use api::{
     RklContent,
     SystemConfiguration,
@@ -67,6 +66,7 @@ mod protected;
 pub mod datacrypt;
 mod async;
 mod api;
+mod selection_handling;
 
 /// Takes a reference of `Editor` implementation as argument and executes the _rust-keylock_ logic.
 /// The `Editor` is responsible for the interaction with the user. Currently there are `Editor` implementations for __shell__ and for __Android__.
@@ -399,6 +399,14 @@ Warning: Saving will discard all the entries that could not be recovered.
                 let _ = loop_ctrl_tx.send(true);
                 // Return the result
                 to_ret
+            }
+            UserSelection::AddToClipboard(content) => {
+                debug!("UserSelection::AddToClipboard");
+                selection_handling::add_to_clipboard(content, editor)
+            }
+            UserSelection::GoTo(Menu::Current) => {
+                debug!("UserSelection::GoTo(Menu::Current)");
+                editor.show_menu(&Menu::Current, &safe, &configuration)
             }
             other => {
                 let message = format!("Bug: User Selection '{:?}' should not be handled in the main loop. Please, consider opening a bug \

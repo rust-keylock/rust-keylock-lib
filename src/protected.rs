@@ -16,7 +16,7 @@
 use secstr::SecStr;
 use std::borrow::Borrow;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct RklSecret {
     sec: SecStr,
 }

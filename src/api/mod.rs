@@ -275,7 +275,7 @@ impl Props {
 }
 
 /// Enumeration of the several different Menus that an `Editor` implementation should handle.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Menu {
     /// The User should provide a password and a number.
     TryPass,
@@ -380,7 +380,7 @@ impl Menu {
 }
 
 /// Represents a User selection that is returned after showing a `Menu`.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum UserSelection {
     /// The User selected an `Entry`.
     NewEntry(Entry),
@@ -402,8 +402,10 @@ pub enum UserSelection {
     ImportFromDefaultLocation(String, String, usize),
     /// The User may be offered to select one of the Options.
     UserOption(UserOption),
-    /// The User updates the configuration
+    /// The User updates the configuration.
     UpdateConfiguration(nextcloud::NextcloudConfiguration),
+    /// The user copies content to the clipboard.
+    AddToClipboard(String)
 }
 
 impl UserSelection {
@@ -424,11 +426,12 @@ impl UserSelection {
             UserSelection::ImportFromDefaultLocation(_, _, _) => 9,
             UserSelection::UserOption(_) => 10,
             UserSelection::UpdateConfiguration(_) => 11,
+            UserSelection::AddToClipboard(_) => 12,
         }
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct UserOption {
     pub label: String,
     pub value: UserOptionType,
@@ -915,6 +918,7 @@ mod api_unit_tests {
         assert!(UserSelection::ImportFromDefaultLocation("".to_owned(), "".to_owned(), 1).ordinal() == 9);
         assert!(UserSelection::UserOption(UserOption::empty()).ordinal() == 10);
         assert!(UserSelection::UpdateConfiguration(super::nextcloud::NextcloudConfiguration::default()).ordinal() == 11);
+        assert!(UserSelection::AddToClipboard("".to_owned()).ordinal() == 12);
     }
 
     #[test]

@@ -581,7 +581,7 @@ enum ParseWebDavResponse {
 }
 
 /// The configuration that is retrieved from the rust-keylock encrypted file
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct NextcloudConfiguration {
     /// The server base URL (eg. https://my.nextcloud.server/nextcloud)
     pub server_url: String,

@@ -33,7 +33,7 @@ native-tls = "0.1"
 tokio-core = "0.1"
 xml-rs = "0.7"
 openssl-probe = "0.1"
-#clipboard = "0.4"
+clipboard = "0.4"
 
 [profile.dev]
 panic = "abort"
