@@ -1,3 +1,18 @@
+// Copyright 2017 astonbitecode
+// This file is part of rust-keylock password manager.
+//
+// rust-keylock is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// rust-keylock is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
 use std::sync::mpsc::Sender;
 use std::str::FromStr;
 use super::super::SystemConfiguration;
@@ -195,7 +210,6 @@ impl Synchronizer {
                               version_local: &Option<i64>,
                               last_sync_version: &Option<i64>)
                               -> errors::Result<ParseWebDavResponse> {
-
         debug!("The file '{}' on the server was saved at {} with version {}",
                filename,
                web_dav_response.last_modified,
@@ -272,7 +286,7 @@ impl Synchronizer {
                     if name.to_string() == "{DAV:}d:response" {
                         // Check if the file is the one where the passwords are stored and that the gathered data are all present
                         if web_dav_resp.href.ends_with(filename) && web_dav_resp.href != "" && web_dav_resp.last_modified != "" &&
-                           web_dav_resp.status != "" && web_dav_resp.version != "" {
+                            web_dav_resp.status != "" && web_dav_resp.version != "" {
                             if web_dav_resp.status.contains("200 OK") {
                                 web_dav_resp_result = Ok(web_dav_resp);
                             } else {
@@ -304,7 +318,6 @@ impl Synchronizer {
                                client: &Box<RequestClient>,
                                core: &mut Core)
                                -> errors::Result<()> {
-
         let mut headers = Headers::new();
         headers.set(Authorization(Basic {
             username: username.to_owned(),
@@ -347,7 +360,6 @@ impl Synchronizer {
            core: &mut Core,
            filename: &str)
            -> errors::Result<String> {
-
         let mut headers = Headers::new();
         headers.set(Authorization(Basic {
             username: username.to_owned(),
@@ -396,7 +408,6 @@ impl Synchronizer {
            local_saved_at: &Option<i64>,
            local_version: &Option<i64>)
            -> errors::Result<()> {
-
         let mut file = file_handler::get_file(filename)?;
         let mut file_bytes: Vec<_> = Vec::new();
         file.read_to_end(&mut file_bytes)?;
@@ -477,7 +488,6 @@ impl Synchronizer {
         } else {
             Ok(())
         }
-
     }
 
     fn connect_with_http(handle: &Handle) -> Box<RequestClient> {
@@ -816,7 +826,7 @@ mod nextcloud_tests {
 
         // Assert that the file is ready to be downloaded
         assert!(rx.recv_timeout(timeout).unwrap().unwrap() ==
-                super::SyncStatus::NewAvailable("tmp_download_a_file_from_the_server".to_string()));
+            super::SyncStatus::NewAvailable("tmp_download_a_file_from_the_server".to_string()));
 
         // Delete the dummy file
         delete_file(filename);
@@ -1189,7 +1199,7 @@ mod nextcloud_tests {
         type Request = Request;
         type Response = Response;
         type Error = hyper::Error;
-        type Future = Box<Future<Item = Self::Response, Error = Self::Error>>;
+        type Future = Box<Future<Item=Self::Response, Error=Self::Error>>;
 
         fn call(&self, req: Request) -> Self::Future {
             match self.command {
