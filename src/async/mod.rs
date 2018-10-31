@@ -13,8 +13,9 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
+
 use std::{thread, time};
-use std::sync::mpsc::{self, Sender, Receiver, TryRecvError};
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 
 pub mod nextcloud;
 
@@ -28,7 +29,7 @@ pub fn execute_task<T: 'static>(task: Box<AsyncTask<T=T>>, every: time::Duration
         debug!("Spawned async task");
         loop {
             mut_task.execute();
-            thread::sleep(every);
+            thread::park_timeout(every);
             // Check if the loop should be stopped
             match rx_loop_control.try_recv() {
                 Ok(stop) => {
@@ -62,8 +63,8 @@ pub trait AsyncTask: Send {
 
 #[cfg(test)]
 mod async_tests {
+    use std::sync::mpsc::{self, Receiver, Sender};
     use std::time;
-    use std::sync::mpsc::{self, Sender, Receiver};
     use super::super::errors;
 
     #[test]

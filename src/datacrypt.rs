@@ -15,20 +15,21 @@
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
 
 //! Defines the `Cryptor` trait and implements the encryption and decryption for the _rust-keylock_
-use rand::{Rng, OsRng};
-use std::iter::repeat;
-use std::fmt::Debug;
-use std::cmp::PartialEq;
-use crypto::bcrypt::bcrypt;
-use crypto::{buffer, aes, aessafe};
-use crypto::blockmodes::CtrModeX8;
-use crypto::aes::KeySize;
-use crypto::buffer::{ReadBuffer, WriteBuffer, BufferResult};
-use crypto::symmetriccipher::{Encryptor, Decryptor, SynchronousStreamCipher};
-use super::errors::RustKeylockError;
 use base64;
-use super::protected::RklSecret;
+use crypto::{aes, aessafe, buffer};
+use crypto::aes::KeySize;
+use crypto::bcrypt::bcrypt;
+use crypto::blockmodes::CtrModeX8;
+use crypto::buffer::{BufferResult, ReadBuffer, WriteBuffer};
+use crypto::symmetriccipher::{Decryptor, Encryptor, SynchronousStreamCipher};
+use rand::{Rng, RngCore};
+use rand::rngs::OsRng;
 use sha3::{Digest, Sha3_512};
+use std::cmp::PartialEq;
+use std::fmt::Debug;
+use std::iter::repeat;
+use super::errors::RustKeylockError;
+use super::protected::RklSecret;
 
 const NUMBER_OF_SALT_KEY_PAIRS: usize = 10;
 

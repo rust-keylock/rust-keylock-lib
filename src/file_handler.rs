@@ -13,20 +13,22 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
-use super::{RklContent, Entry, Props, SystemConfiguration};
-use super::datacrypt::{Cryptor, BcryptAes};
-use super::errors::{self, RustKeylockError};
-use super::async::nextcloud::NextcloudConfiguration;
-use std::io::prelude::*;
+
+use dirs;
+use std::cmp::Ordering;
 #[cfg(not(target_os = "android"))]
 use std::env;
-use std::io;
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::fs::{self, File};
+use std::io;
+use std::io::prelude::*;
 use std::path::PathBuf;
-use std::cmp::Ordering;
-use toml::value::{Table, Value};
+use std::time::{SystemTime, UNIX_EPOCH};
+use super::{Entry, Props, RklContent, SystemConfiguration};
+use super::async::nextcloud::NextcloudConfiguration;
+use super::datacrypt::{BcryptAes, Cryptor};
+use super::errors::{self, RustKeylockError};
 use toml;
+use toml::value::{Table, Value};
 
 pub fn create_bcryptor(filename: &str,
                        password: String,
@@ -240,7 +242,7 @@ struct FileAndPath {
 
 impl FileAndPath {
     fn new(file: File, path: PathBuf) -> FileAndPath {
-        FileAndPath {file, path}
+        FileAndPath { file, path }
     }
 }
 
@@ -319,7 +321,7 @@ pub fn default_rustkeylock_location() -> PathBuf {
 
 #[cfg(not(target_os = "android"))]
 pub fn default_rustkeylock_location() -> PathBuf {
-    let mut home_dir = match env::home_dir() {
+    let mut home_dir = match dirs::home_dir() {
         Some(pb) => pb,
         None => env::current_dir().unwrap(),
     };
@@ -529,23 +531,23 @@ pub fn save_props(props: &Props, filename: &str) -> errors::Result<()> {
 
 #[cfg(test)]
 mod test_file_handler {
-    use super::super::{Entry, Props, SystemConfiguration};
-    use super::super::datacrypt::{self, NoCryptor, Cryptor};
-    use super::super::async::nextcloud::NextcloudConfiguration;
-    use std::io::prelude::*;
-    use std::fs::{self,File};
-    use std::{thread, time};
-    use toml;
-    use rand::{Rng, OsRng};
-    use std::iter::repeat;
-    use crypto::bcrypt::bcrypt;
-    use crypto::{buffer, aes, aessafe};
-    use crypto::blockmodes::CtrModeX8;
+    use crypto::{aes, aessafe, buffer};
     use crypto::aes::KeySize;
-    use crypto::buffer::{ReadBuffer, WriteBuffer, BufferResult};
-    use crypto::symmetriccipher::{Encryptor, Decryptor, SynchronousStreamCipher};
+    use crypto::bcrypt::bcrypt;
+    use crypto::blockmodes::CtrModeX8;
+    use crypto::buffer::{BufferResult, ReadBuffer, WriteBuffer};
+    use crypto::symmetriccipher::{Decryptor, Encryptor, SynchronousStreamCipher};
+    use rand::{OsRng, Rng};
+    use std::{thread, time};
+    use std::fs::{self, File};
+    use std::io::prelude::*;
+    use std::iter::repeat;
+    use super::super::{Entry, Props, SystemConfiguration};
+    use super::super::async::nextcloud::NextcloudConfiguration;
+    use super::super::datacrypt::{self, Cryptor, NoCryptor};
     use super::super::errors::RustKeylockError;
     use super::super::protected::RklSecret;
+    use toml;
 
     #[test]
     fn use_existing_file() {

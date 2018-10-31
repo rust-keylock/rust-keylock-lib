@@ -13,18 +13,26 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
-use std::error::Error;
-use std::{result, fmt, time};
-use crypto::symmetriccipher::SymmetricCipherError;
-use std::string::FromUtf8Error;
-use std::io;
+
 use base64::DecodeError;
-use toml;
+use crypto::symmetriccipher::SymmetricCipherError;
+use http;
 use hyper;
 use native_tls;
+use std::{fmt, result, time};
+use std::error::Error;
+use std::fmt::Debug;
+use std::io;
 use std::num::ParseIntError;
+use std::string::FromUtf8Error;
+use toml;
 
 pub type Result<T> = result::Result<T, RustKeylockError>;
+
+pub fn debug_error_string<T>(error: T) -> String
+    where T: Error + Debug {
+    format!("{:?}", error)
+}
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum RustKeylockError {
@@ -98,8 +106,8 @@ impl From<toml::ser::Error> for RustKeylockError {
     }
 }
 
-impl From<hyper::error::UriError> for RustKeylockError {
-    fn from(err: hyper::error::UriError) -> RustKeylockError {
+impl From<http::Error> for RustKeylockError {
+    fn from(err: http::Error) -> RustKeylockError {
         RustKeylockError::GeneralError(format!("{:?}", err))
     }
 }

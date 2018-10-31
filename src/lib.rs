@@ -20,45 +20,46 @@
 //!
 //! This library is the executor of the _rust-keylock_ logic. `Editor` references are used to interact with the _rust-keylock_ users.
 
+extern crate base64;
+extern crate clipboard;
+extern crate crypto;
+extern crate dirs;
+extern crate futures;
+extern crate http;
+extern crate hyper;
+extern crate hyper_tls;
 #[macro_use]
 extern crate log;
-extern crate toml;
-extern crate crypto;
-extern crate sha3;
-extern crate base64;
+extern crate native_tls;
+extern crate openssl_probe;
 extern crate rand;
 extern crate secstr;
-extern crate futures;
-extern crate hyper;
-extern crate tokio_core;
-extern crate hyper_tls;
-extern crate native_tls;
+extern crate sha3;
+extern crate toml;
 extern crate xml;
-extern crate openssl_probe;
-extern crate clipboard;
+#[cfg(test)]
+#[macro_use]
+extern crate lazy_static;
 
-use std::error::Error;
-use std::time::{self, SystemTime};
-use std::sync::mpsc::{self, Sender, Receiver};
-use std::path::PathBuf;
 use api::{
+    Props,
     RklContent,
     SystemConfiguration,
-    Props,
 };
-
 pub use api::{
     Entry as Entry,
-    UserSelection as UserSelection,
     Menu as Menu,
-    UserOption as UserOption,
     MessageSeverity as MessageSeverity,
     RklConfiguration as RklConfiguration,
+    UserOption as UserOption,
+    UserSelection as UserSelection,
 };
-
 pub use api::safe::Safe as Safe;
-
 pub use async::nextcloud;
+use std::error::Error;
+use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::time::{self, SystemTime};
 
 mod file_handler;
 mod errors;
@@ -647,10 +648,10 @@ pub trait Editor {
 
 #[cfg(test)]
 mod unit_tests {
-    use super::api::{Menu, UserSelection, UserOption, Entry};
-    use std::time::SystemTime;
-    use std::sync::Mutex;
     use std;
+    use std::sync::Mutex;
+    use std::time::SystemTime;
+    use super::api::{Entry, Menu, UserOption, UserSelection};
 
     #[test]
     fn user_selection_after_idle_check_timed_out() {

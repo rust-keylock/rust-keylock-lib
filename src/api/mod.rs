@@ -13,14 +13,15 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
-pub mod safe;
 
-use ::{async, errors, datacrypt, nextcloud};
-use std::time::{SystemTime, UNIX_EPOCH};
-use std::iter::FromIterator;
-use toml::value::Table;
-use toml;
+use ::{async, datacrypt, errors, nextcloud};
 use self::safe::Safe;
+use std::iter::FromIterator;
+use std::time::{SystemTime, UNIX_EPOCH};
+use toml;
+use toml::value::Table;
+
+pub mod safe;
 
 /// Struct to use for retrieving and saving data from/to the file
 pub struct RklContent {
@@ -405,7 +406,7 @@ pub enum UserSelection {
     /// The User updates the configuration.
     UpdateConfiguration(nextcloud::NextcloudConfiguration),
     /// The user copies content to the clipboard.
-    AddToClipboard(String)
+    AddToClipboard(String),
 }
 
 impl UserSelection {
@@ -604,9 +605,9 @@ impl ToString for MessageSeverity {
 
 #[cfg(test)]
 mod api_unit_tests {
-    use ::toml;
     use ::datacrypt::EntryPasswordCryptor;
-    use super::{Menu, Entry, UserSelection, UserOption};
+    use ::toml;
+    use super::{Entry, Menu, UserOption, UserSelection};
 
     #[test]
     fn entry_from_table_before_v0_6_0_success() {

@@ -1,6 +1,6 @@
 [package]
 name = "rust_keylock"
-version = "0.6.0"
+version = "0.7.0"
 authors = ["aston <astonbitecode@gmail.com>"]
 description = "A password manager with goals to be Secure, Simple to use, Portable and Extensible"
 keywords = ["password", "manager", "safe", "encryption", "key"]
@@ -20,20 +20,21 @@ crate-type = ["rlib", "dylib"]
 
 [dependencies]
 rust-crypto = "0.2"
-sha3 = "0.6"
+sha3 = "0.8"
 toml = "0.4"
-base64 = "0.7"
-rand = "0.3"
-log = "0.3"
+base64 = "0.9"
+rand = "0.5"
+log = "0.4"
 secstr = "0.3"
+hyper = "0.12"
+http = "0.1"
 futures = "0.1"
-hyper = "0.11"
-hyper-tls = "0.1"
-native-tls = "0.1"
-tokio-core = "0.1"
-xml-rs = "0.7"
+hyper-tls = "0.3"
+native-tls = "0.2"
+xml-rs = "0.8"
 openssl-probe = "0.1"
-clipboard = "0.4"
+clipboard = "0.5"
+dirs = "1.0"
 
 [profile.dev]
 panic = "abort"
@@ -41,5 +42,5 @@ panic = "abort"
 [profile.release]
 panic = "abort"
 
-[profile.test]
-panic = "abort"
+[dev-dependencies]
+lazy_static = "1.1"
