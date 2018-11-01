@@ -24,7 +24,7 @@ use std::io::prelude::*;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use super::{Entry, Props, RklContent, SystemConfiguration};
-use super::async::nextcloud::NextcloudConfiguration;
+use super::asynch::nextcloud::NextcloudConfiguration;
 use super::datacrypt::{BcryptAes, Cryptor};
 use super::errors::{self, RustKeylockError};
 use toml;
@@ -130,8 +130,8 @@ pub fn load(filename: &str, cryptor: &Cryptor, use_default_location: bool) -> Re
         toml_path(filename)
     };
     debug!("Full Path to load: {:?}", full_path);
-    let toml = try!(load_existing_file(&full_path, Some(cryptor)));
-    let value = try!(toml.as_str().parse::<Value>());
+    let toml = load_existing_file(&full_path, Some(cryptor))?;
+    let value = toml.as_str().parse::<Value>()?;
     match value.as_table() {
         Some(table) => {
             let entries = transform_to_dtos(table, false)?;
@@ -181,7 +181,7 @@ pub fn backup(filename: &str) -> errors::Result<()> {
     let mut file_bytes: Vec<_> = Vec::new();
     source_file.read_to_end(&mut file_bytes)?;
 
-    let mut target_file = try!(File::create(dest_path));
+    let mut target_file = File::create(dest_path)?;
     target_file.write_all(&file_bytes)?;
     debug!("Data backed up in file {}. Syncing...", dest_file_name);
     target_file.sync_all()?;
@@ -271,12 +271,12 @@ pub fn load_properties(filename: &str) -> Result<Props, RustKeylockError> {
     debug!("Loading Properties from {}", filename);
     let full_path = default_toml_path(filename);
     debug!("Full Path to load properties from: {:?}", full_path);
-    let toml = try!(load_existing_file(&full_path, None));
+    let toml = load_existing_file(&full_path, None)?;
 
     if toml.len() == 0 {
         Ok(Props::default())
     } else {
-        let value = try!(toml.as_str().parse::<Value>());
+        let value = toml.as_str().parse::<Value>()?;
         match value.as_table() {
             Some(table) => transform_to_props(table),
             None => Err(RustKeylockError::ParseError("No Table found in the toml while loading properties.".to_string())),
@@ -289,9 +289,9 @@ pub fn recover(filename: &str, cryptor: &Cryptor) -> Result<Vec<Entry>, RustKeyl
     info!("Trying to recover {}", filename);
     let full_path = default_toml_path(filename);
     info!("Full path of file to recover {:?}", full_path);
-    let toml = try!(load_existing_file(&full_path, Some(cryptor)));
+    let toml = load_existing_file(&full_path, Some(cryptor))?;
 
-    let value = try!(toml.as_str().parse::<Value>());
+    let value = toml.as_str().parse::<Value>()?;
 
     match value.as_table() {
         Some(table) => transform_to_dtos(table, true),
@@ -449,7 +449,7 @@ fn load_existing_file<'a>(file_path: &PathBuf, cryptor_opt: Option<&Cryptor>) ->
             if bytes.len() > 0 {
                 debug!("Decrypting passwords file...");
                 match cryptor.decrypt(&bytes) {
-                    Ok(dbytes) => Ok(try!(String::from_utf8(dbytes))),
+                    Ok(dbytes) => Ok(String::from_utf8(dbytes)?),
                     Err(errors::RustKeylockError::IntegrityError(dbytes)) => {
                         match String::from_utf8(dbytes) {
                             Ok(toml_string) => {
@@ -521,12 +521,12 @@ pub fn save(rkl_content: RklContent, filename: &str, cryptor: &Cryptor, use_defa
 pub fn save_props(props: &Props, filename: &str) -> errors::Result<()> {
     info!("Saving Properties in {}", filename);
     let path_buf = default_toml_path(filename);
-    let mut file = try!(File::create(path_buf));
+    let mut file = File::create(path_buf)?;
     let table = props.to_table();
-    let toml_string = try!(toml::ser::to_string(&table));
-    try!(file.write_all(toml_string.as_bytes()));
+    let toml_string = toml::ser::to_string(&table)?;
+    file.write_all(toml_string.as_bytes())?;
     info!("Properties saved in {}. Syncing...", filename);
-    Ok(try!(file.sync_all()))
+    Ok(file.sync_all()?)
 }
 
 #[cfg(test)]
@@ -543,7 +543,7 @@ mod test_file_handler {
     use std::io::prelude::*;
     use std::iter::repeat;
     use super::super::{Entry, Props, SystemConfiguration};
-    use super::super::async::nextcloud::NextcloudConfiguration;
+    use super::super::asynch::nextcloud::NextcloudConfiguration;
     use super::super::datacrypt::{self, Cryptor, NoCryptor};
     use super::super::errors::RustKeylockError;
     use super::super::protected::RklSecret;
@@ -1132,7 +1132,7 @@ mod test_file_handler {
                 let mut write_buffer = buffer::RefWriteBuffer::new(&mut buffer);
 
                 loop {
-                    let result = try!(decryptor.decrypt(&mut read_buffer, &mut write_buffer, true));
+                    let result = decryptor.decrypt(&mut read_buffer, &mut write_buffer, true)?;
                     final_result.extend(write_buffer.take_read_buffer().take_remaining().iter().cloned());
                     match result {
                         BufferResult::BufferUnderflow => break,
@@ -1166,7 +1166,7 @@ mod test_file_handler {
                 let mut write_buffer = buffer::RefWriteBuffer::new(&mut buffer);
 
                 loop {
-                    let result = try!(encryptor.encrypt(&mut read_buffer, &mut write_buffer, true));
+                    let result = encryptor.encrypt(&mut read_buffer, &mut write_buffer, true)?;
 
                     encryption_result.extend(write_buffer.take_read_buffer().take_remaining().iter().cloned());
 

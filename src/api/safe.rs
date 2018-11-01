@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
 
-use ::{datacrypt, errors};
+use crate::{datacrypt, errors};
 use std::collections::HashMap;
 use super::Entry;
 
@@ -222,7 +222,7 @@ impl Safe {
 
 #[cfg(test)]
 mod safe_unit_tests {
-    use ::api::Entry;
+    use crate::api::Entry;
 
     #[test]
     fn merge_entries() {

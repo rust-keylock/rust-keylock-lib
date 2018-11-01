@@ -158,7 +158,7 @@ impl Cryptor for BcryptAes {
             let mut write_buffer = buffer::RefWriteBuffer::new(&mut buffer);
 
             loop {
-                let result = try!(decryptor.decrypt(&mut read_buffer, &mut write_buffer, true));
+                let result = decryptor.decrypt(&mut read_buffer, &mut write_buffer, true)?;
                 final_result.extend(write_buffer.take_read_buffer().take_remaining().iter().cloned());
                 match result {
                     BufferResult::BufferUnderflow => break,
@@ -200,7 +200,7 @@ impl Cryptor for BcryptAes {
             let mut write_buffer = buffer::RefWriteBuffer::new(&mut buffer);
 
             loop {
-                let result = try!(encryptor.encrypt(&mut read_buffer, &mut write_buffer, true));
+                let result = encryptor.encrypt(&mut read_buffer, &mut write_buffer, true)?;
 
                 encryption_result.extend(write_buffer.take_read_buffer().take_remaining().iter().cloned());
 
@@ -249,15 +249,15 @@ impl EntryPasswordCryptor {
 
     /// Gets a String input and returns it encrypted and Base64-encoded
     pub fn encrypt_str(&self, input: &str) -> Result<String, RustKeylockError> {
-        let encrypted = try!(self.encrypt(input.as_bytes()));
+        let encrypted = self.encrypt(input.as_bytes())?;
         Ok(base64::encode(&encrypted))
     }
 
     /// Gets a Base64-encoded String input and returns it decrypted
     pub fn decrypt_str(&self, input: &str) -> Result<String, RustKeylockError> {
-        let encrypted = try!(base64::decode(&input));
-        let decrypted_bytes = try!(self.decrypt(&encrypted));
-        Ok(try!(String::from_utf8(decrypted_bytes)))
+        let encrypted = base64::decode(&input)?;
+        let decrypted_bytes = self.decrypt(&encrypted)?;
+        Ok(String::from_utf8(decrypted_bytes)?)
     }
 }
 
@@ -273,7 +273,7 @@ impl Cryptor for EntryPasswordCryptor {
             let mut write_buffer = buffer::RefWriteBuffer::new(&mut buffer);
 
             loop {
-                let result = try!(decryptor.decrypt(&mut read_buffer, &mut write_buffer, true));
+                let result = decryptor.decrypt(&mut read_buffer, &mut write_buffer, true)?;
                 final_result.extend(write_buffer.take_read_buffer().take_remaining().iter().cloned());
                 match result {
                     BufferResult::BufferUnderflow => break,
@@ -297,7 +297,7 @@ impl Cryptor for EntryPasswordCryptor {
         let mut write_buffer = buffer::RefWriteBuffer::new(&mut buffer);
 
         loop {
-            let result = try!(encryptor.encrypt(&mut read_buffer, &mut write_buffer, true));
+            let result = encryptor.encrypt(&mut read_buffer, &mut write_buffer, true)?;
 
             encryption_result.extend(write_buffer.take_read_buffer().take_remaining().iter().cloned());
 

@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
 
-use ::{async, datacrypt, errors, nextcloud};
+use super::{asynch, datacrypt, errors, nextcloud};
 use self::safe::Safe;
 use std::iter::FromIterator;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -26,13 +26,13 @@ pub mod safe;
 /// Struct to use for retrieving and saving data from/to the file
 pub struct RklContent {
     pub entries: Vec<Entry>,
-    pub nextcloud_conf: async::nextcloud::NextcloudConfiguration,
+    pub nextcloud_conf: asynch::nextcloud::NextcloudConfiguration,
     pub system_conf: SystemConfiguration,
 }
 
 impl RklContent {
     pub fn new(entries: Vec<Entry>,
-               nextcloud_conf: async::nextcloud::NextcloudConfiguration,
+               nextcloud_conf: asynch::nextcloud::NextcloudConfiguration,
                system_conf: SystemConfiguration)
                -> RklContent {
         RklContent {
@@ -42,9 +42,9 @@ impl RklContent {
         }
     }
 
-    pub fn from(tup: (&Safe, &async::nextcloud::NextcloudConfiguration, &SystemConfiguration)) -> errors::Result<RklContent> {
+    pub fn from(tup: (&Safe, &asynch::nextcloud::NextcloudConfiguration, &SystemConfiguration)) -> errors::Result<RklContent> {
         let entries = tup.0.get_entries_decrypted();
-        let nextcloud_conf = async::nextcloud::NextcloudConfiguration::new(tup.1.server_url.clone(),
+        let nextcloud_conf = asynch::nextcloud::NextcloudConfiguration::new(tup.1.server_url.clone(),
                                                                            tup.1.username.clone(),
                                                                            tup.1.decrypted_password()?,
                                                                            tup.1.use_self_signed_certificate);
@@ -58,7 +58,7 @@ impl RklContent {
 #[derive(Debug, PartialEq)]
 pub struct RklConfiguration {
     pub system: SystemConfiguration,
-    pub nextcloud: async::nextcloud::NextcloudConfiguration,
+    pub nextcloud: asynch::nextcloud::NextcloudConfiguration,
 }
 
 impl RklConfiguration {
@@ -72,8 +72,8 @@ impl RklConfiguration {
     }
 }
 
-impl From<(async::nextcloud::NextcloudConfiguration, SystemConfiguration)> for RklConfiguration {
-    fn from(confs: (async::nextcloud::NextcloudConfiguration, SystemConfiguration)) -> Self {
+impl From<(asynch::nextcloud::NextcloudConfiguration, SystemConfiguration)> for RklConfiguration {
+    fn from(confs: (asynch::nextcloud::NextcloudConfiguration, SystemConfiguration)) -> Self {
         RklConfiguration {
             system: confs.1,
             nextcloud: confs.0,
@@ -605,8 +605,8 @@ impl ToString for MessageSeverity {
 
 #[cfg(test)]
 mod api_unit_tests {
-    use ::datacrypt::EntryPasswordCryptor;
-    use ::toml;
+    use crate::datacrypt::EntryPasswordCryptor;
+    use toml;
     use super::{Entry, Menu, UserOption, UserSelection};
 
     #[test]

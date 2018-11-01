@@ -141,7 +141,6 @@ impl Synchronizer {
             .uri(uri)
             .extension("PROPFIND")
             .header(header::AUTHORIZATION, basic_auth(capsule.username().as_ref(), capsule.password().as_ref()))
-            // The body() returns a Result
             .body(Body::from(xml_body.as_bytes()))
             .map_err(|error| RustKeylockError::SyncError(debug_error_string(error)));
 

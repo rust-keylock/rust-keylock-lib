@@ -41,12 +41,12 @@ extern crate xml;
 #[macro_use]
 extern crate lazy_static;
 
-use api::{
+use self::api::{
     Props,
     RklContent,
     SystemConfiguration,
 };
-pub use api::{
+pub use self::api::{
     Entry as Entry,
     Menu as Menu,
     MessageSeverity as MessageSeverity,
@@ -54,8 +54,8 @@ pub use api::{
     UserOption as UserOption,
     UserSelection as UserSelection,
 };
-pub use api::safe::Safe as Safe;
-pub use async::nextcloud;
+pub use self::api::safe::Safe as Safe;
+pub use self::asynch::nextcloud;
 use std::error::Error;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -65,7 +65,7 @@ mod file_handler;
 mod errors;
 mod protected;
 pub mod datacrypt;
-mod async;
+mod asynch;
 mod api;
 mod selection_handling;
 
@@ -93,10 +93,10 @@ pub fn execute<T: Editor>(editor: &T) {
     // Keeps the sensitive data
     let mut safe = Safe::new();
     // Keeps the configuration data
-    let mut configuration = RklConfiguration::from((async::nextcloud::NextcloudConfiguration::default(), SystemConfiguration::default()));
+    let mut configuration = RklConfiguration::from((asynch::nextcloud::NextcloudConfiguration::default(), SystemConfiguration::default()));
     // Signals changes that are not saved
     let mut contents_changed = false;
-    let mut nextcloud_rx: Option<Receiver<errors::Result<async::nextcloud::SyncStatus>>> = None;
+    let mut nextcloud_rx: Option<Receiver<errors::Result<asynch::nextcloud::SyncStatus>>> = None;
     let mut nextcloud_loop_ctrl_tx: Option<Sender<bool>> = None;
 
     // Create a Cryptor
@@ -371,7 +371,7 @@ Warning: Saving will discard all the entries that could not be recovered.
             }
             UserSelection::GoTo(Menu::Synchronize) => {
                 debug!("UserSelection::GoTo(Menu::Synchronize)");
-                let mut tmp_nextcloud_loop_ctrl_tx: Option<Sender<bool>> = None;
+                let tmp_nextcloud_loop_ctrl_tx: Option<Sender<bool>> = None;
                 let (nc_rx, loop_ctrl_tx) = spawn_nextcloud_async_task(&filename, &configuration, &tmp_nextcloud_loop_ctrl_tx);
                 let timeout = time::Duration::from_millis(30000);
                 let to_ret = match nc_rx.recv_timeout(timeout) {
@@ -421,7 +421,7 @@ Warning: Saving will discard all the entries that could not be recovered.
     info!("Exiting rust-keylock...");
 }
 
-fn async_channel_check(nextcloud_rx: &Option<Receiver<errors::Result<async::nextcloud::SyncStatus>>>,
+fn async_channel_check(nextcloud_rx: &Option<Receiver<errors::Result<asynch::nextcloud::SyncStatus>>>,
                        editor: &Editor,
                        filename: &str,
                        user_selection: &mut UserSelection) {
@@ -447,17 +447,17 @@ fn async_channel_check(nextcloud_rx: &Option<Receiver<errors::Result<async::next
     }
 }
 
-fn handle_sync_status_success(sync_status: async::nextcloud::SyncStatus,
+fn handle_sync_status_success(sync_status: asynch::nextcloud::SyncStatus,
                               editor: &Editor,
                               filename: &str,
                               user_selection: &mut UserSelection,
                               ignore_contents_identical_message: bool) {
     match sync_status {
-        async::nextcloud::SyncStatus::UploadSuccess => {
+        asynch::nextcloud::SyncStatus::UploadSuccess => {
             let _ =
                 editor.show_message("The nextcloud server was updated with the local data", vec![UserOption::ok()], MessageSeverity::Info);
         }
-        async::nextcloud::SyncStatus::NewAvailable(downloaded_filename) => {
+        asynch::nextcloud::SyncStatus::NewAvailable(downloaded_filename) => {
             let selection = editor.show_message("Downloaded new data from the nextcloud server. Do you want to apply them locally now?",
                                                 vec![UserOption::yes(), UserOption::no()],
                                                 MessageSeverity::Info);
@@ -469,7 +469,7 @@ fn handle_sync_status_success(sync_status: async::nextcloud::SyncStatus,
                 *user_selection = UserSelection::GoTo(Menu::TryPass);
             }
         }
-        async::nextcloud::SyncStatus::NewToMerge(downloaded_filename) => {
+        asynch::nextcloud::SyncStatus::NewToMerge(downloaded_filename) => {
             let selection =
                 editor.show_message("Downloaded data from the nextcloud server, but conflicts were identified. The contents will be merged \
                                    but nothing will be saved. You will need to explicitly save after reviewing the merged data. Do you \
@@ -500,7 +500,7 @@ fn handle_sync_status_success(sync_status: async::nextcloud::SyncStatus,
                 }
             }
         }
-        async::nextcloud::SyncStatus::None if !ignore_contents_identical_message => {
+        asynch::nextcloud::SyncStatus::None if !ignore_contents_identical_message => {
             let _ = editor.show_message("No need to sync. The contents are identical", vec![UserOption::ok()], MessageSeverity::Info);
         }
         _ => {
@@ -604,7 +604,7 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
 fn spawn_nextcloud_async_task(filename: &str,
                               configuration: &RklConfiguration,
                               async_task_control_tx_opt: &Option<Sender<bool>>)
-                              -> (Receiver<errors::Result<async::nextcloud::SyncStatus>>, Sender<bool>) {
+                              -> (Receiver<errors::Result<asynch::nextcloud::SyncStatus>>, Sender<bool>) {
     match async_task_control_tx_opt.as_ref() {
         Some(ctrl_tx) => {
             debug!("Stopping a previously spawned nextcloud async task");
@@ -616,11 +616,11 @@ fn spawn_nextcloud_async_task(filename: &str,
     }
     debug!("Spawning nextcloud async task");
     // Create a new channel
-    let (tx, rx): (Sender<errors::Result<async::nextcloud::SyncStatus>>, Receiver<errors::Result<async::nextcloud::SyncStatus>>) =
+    let (tx, rx): (Sender<errors::Result<asynch::nextcloud::SyncStatus>>, Receiver<errors::Result<asynch::nextcloud::SyncStatus>>) =
         mpsc::channel();
     let every = time::Duration::from_millis(10000);
-    let nc = async::nextcloud::Synchronizer::new(&configuration.nextcloud, &configuration.system, tx, filename).unwrap();
-    let async_task_control_tx = async::execute_task(Box::new(nc), every);
+    let nc = asynch::nextcloud::Synchronizer::new(&configuration.nextcloud, &configuration.system, tx, filename).unwrap();
+    let async_task_control_tx = asynch::execute_task(Box::new(nc), every);
     (rx, async_task_control_tx)
 }
 
