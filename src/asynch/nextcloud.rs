@@ -18,7 +18,6 @@ use base64;
 use futures::future::{err, FutureResult, ok, result};
 use http::StatusCode;
 use hyper::{self, Body, Client, Request, Response};
-use hyper::client::ResponseFuture;
 use hyper::header;
 use hyper::rt::{self, Future, Stream};
 use hyper_tls::HttpsConnector;
@@ -73,27 +72,6 @@ impl Synchronizer {
     /// Returns the password decrypted
     fn use_password(&self) -> errors::Result<String> {
         self.conf.decrypted_password()
-    }
-
-    fn _do_request(&self, req: Request<Body>) -> errors::Result<ResponseFuture> {
-        println!("--------------------doing request");
-        if self.conf.server_url.starts_with("http://") {
-            println!("--------------------http");
-            // Use HTTP
-            let client = Client::new();
-            Ok(client.request(req))
-        } else if self.conf.use_self_signed_certificate {
-            // Use HTTPS with a self signed certificate
-            let mut self_signed_cert_path = file_handler::create_certs_path()?;
-            self_signed_cert_path.push("cacert.pem");
-            ::std::env::set_var("SSL_CERT_FILE", self_signed_cert_path.to_str().unwrap());
-            let client = Client::builder().build(HttpsConnector::new(1)?);
-            Ok(client.request(req))
-        } else {
-            // Use HTTPS
-            let client = Client::builder().build(HttpsConnector::new(1)?);
-            Ok(client.request(req))
-        }
     }
 
     fn do_request(req: Request<Body>, is_not_https: bool, use_self_signed: bool) -> impl Future<Item=Response<Body>, Error=RustKeylockError> {
@@ -151,105 +129,9 @@ impl Synchronizer {
             .and_then(|res| Self::to_status_and_body(res))
             // Handle the response
             .and_then(move |(status, body)| {
-                println!("------------{:?}", status);
-                println!("------------{:?}", body);
                 Self::match_propfind_status(status, body, capsule)
             })
     }
-
-    /*
-        fn _do_execute(&self) -> errors::Result<SyncStatus> {
-            let uri = format!("{}/remote.php/dav/files/{}/.rust-keylock/{}", self.conf.server_url, self.conf.username, self.file_name);
-            println!("Syncing with {}", uri);
-
-            // Set the body of the request so that it returns the oc:rklsavedat and oc:rklversion properties
-            let xml_body = r#"<d:propfind xmlns:d="DAV:"><d:prop xmlns:oc="http://owncloud.org/ns"><oc:rklsavedat/><oc:rklversion/></d:prop></d:propfind>"#;
-            let mut req_builder = Request::builder();
-            let req = req_builder
-                .uri(uri)
-                .extension("PROPFIND")
-                .header(header::AUTHORIZATION, basic_auth(self.conf.username.as_ref(), self.use_password()?.as_ref()))
-                .body(Body::from(xml_body.as_bytes()))?;
-
-            let mut resp_bytes: Vec<u8> = Vec::new();
-            let mut http_status = None;
-    //        {
-    //            let f = self.do_request(req)?.and_then(|res| {
-    //                http_status = Some(res.status());
-    //                debug!("PROPFIND returned: {}", res.status());
-    //
-    //                res.into_body().for_each(|chunk| {
-    //                    resp_bytes.write_all(&chunk)
-    //                        .map(|_| ())
-    //                        .map_err(|error| panic!("Cannot retrieve the response bytes: {:?}", error))
-    //                })
-    //            })
-    //                .map_err(|error| panic!("0000000000"));
-    //            rt::run(f);
-    //        }
-
-            println!("--------------------OK!");
-            match http_status {
-                Some(hyper::StatusCode::NOT_FOUND) => {
-                    if self.version_local.is_some() {
-                        info!("Creating rust-keylock-resources on the server");
-                        self.create_rust_keylock_col(&self.conf.username, self.use_password()?, &self.conf.server_url)?;
-                        self.put(&self.conf.username,
-                                 self.use_password()?,
-                                 &self.conf.server_url,
-                                 &self.file_name,
-                                 &self.saved_at_local,
-                                 &self.version_local)?;
-                        Ok(SyncStatus::UploadSuccess)
-                    } else {
-                        debug!("Resources not found on the server, but nothing is yet saved locally. Save needs to be performed first.");
-                        Ok(SyncStatus::None)
-                    }
-                }
-                Some(hyper::StatusCode::MULTI_STATUS) => {
-                    debug!("Parsing nextcoud response");
-                    let web_dav_resp = Self::parse_xml(resp_bytes.as_slice(), &self.file_name)?;
-                    match Self::parse_web_dav_response(&web_dav_resp,
-                                                       &self.file_name,
-                                                       &self.saved_at_local,
-                                                       &self.version_local,
-                                                       &self.last_sync_version)? {
-                        ParseWebDavResponse::Download => {
-                            info!("Downloading file from the server");
-                            let tmp_file_name = self.get(&self.conf.username,
-                                                         self.use_password()?,
-                                                         &self.conf.server_url,
-                                                         &self.file_name)?;
-                            Ok(SyncStatus::NewAvailable(tmp_file_name))
-                        }
-                        ParseWebDavResponse::Ignore => {
-                            debug!("No sync is needed");
-                            Ok(SyncStatus::None)
-                        }
-                        ParseWebDavResponse::Upload => {
-                            info!("Uploading file on the server");
-                            self.put(&self.conf.username,
-                                     self.use_password()?,
-                                     &self.conf.server_url,
-                                     &self.file_name,
-                                     &self.saved_at_local,
-                                     &self.version_local)?;
-                            Ok(SyncStatus::UploadSuccess)
-                        }
-                        ParseWebDavResponse::DownloadMergeAndUpload => {
-                            let tmp_file_name = self.get(&self.conf.username,
-                                                         self.use_password()?,
-                                                         &self.conf.server_url,
-                                                         &self.file_name)?;
-                            Ok(SyncStatus::NewToMerge(tmp_file_name))
-                        }
-                    }
-                }
-                Some(other) => Err(errors::RustKeylockError::SyncError(format!("Encountered WebDav error response: {:?}", other))),
-                None => Err(errors::RustKeylockError::SyncError("Could not execute sync http request".to_string())),
-            }
-        }
-    */
 
     fn match_propfind_status(http_status: hyper::StatusCode, body: Vec<u8>, capsule: ArgsCapsule) -> Box<dyn Future<Item=SyncStatus, Error=RustKeylockError> + Send> {
         match http_status {
