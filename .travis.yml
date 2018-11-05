@@ -8,23 +8,39 @@ addons:
   apt:
     packages:
       - libssl-dev
+      - libcurl4-openssl-dev
+      - libelf-dev
+      - libdw-dev
+      - cmake
+      - gcc
+      - binutils-dev
+      - zlib1g-dev
+      - libiberty-dev
+
+env:
+  - RUSTFLAGS='-C link-dead-code'
+
 rust:
   - stable
   - beta
   - nightly
 
-script:
-  - |
-      cargo clean &&
-      cargo build &&
-      cargo test
+script: cargo test --all
 
 after_success: |
-    if [[ "$TRAVIS_RUST_VERSION" == stable ]]; then
-      bash <(curl https://raw.githubusercontent.com/xd009642/tarpaulin/master/travis-install.sh)
-      # Uncomment the following line for coveralls.io
-      cargo tarpaulin --ciserver travis-ci --coveralls $TRAVIS_JOB_ID
-    fi
+  - |
+      wget https://github.com/SimonKagstrom/kcov/archive/master.tar.gz &&
+      tar xzf master.tar.gz &&
+      cd kcov-master &&
+      mkdir build &&
+      cd build &&
+      cmake .. &&
+      make &&
+      sudo make install &&
+      cd ../.. &&
+      rm -rf kcov-master &&
+      for crate in WORKSPACE_MEMBERS lib; do for file in target/debug/$crate-*[^\.d]; do mkdir -p "target/cov/$(basename $file)"; kcov
+      --exclude-pattern=/.cargo,/usr/lib --verify "target/cov/$(basename $file)" "$file"; done; done
 
 matrix:
   allow_failures:

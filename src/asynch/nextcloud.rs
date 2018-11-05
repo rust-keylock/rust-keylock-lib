@@ -478,7 +478,11 @@ impl Synchronizer {
     }
 
     fn send_to_channel(res: errors::Result<SyncStatus>, tx: Sender<errors::Result<SyncStatus>>) {
-        debug!("Nextcloud Async Task sends to the channel {:?}", &res);
+        match &res {
+            &Ok(ref r) => debug!("Nextcloud Async Task sends to the channel {:?}", r),
+            &Err(ref error) => error!("Nextcloud Async Tasks reported error: {:?}", error),
+        };
+
 
         match tx.send(res) {
             Ok(_) => {
