@@ -27,7 +27,7 @@ rust:
 
 script: cargo test --all
 
-after_success: |
+after_success:
   - |
       wget https://github.com/SimonKagstrom/kcov/archive/master.tar.gz &&
       tar xzf master.tar.gz &&
@@ -39,8 +39,10 @@ after_success: |
       sudo make install &&
       cd ../.. &&
       rm -rf kcov-master &&
-      for crate in rust_keylock; do for file in target/debug/$crate-*[^\.d]; do mkdir -p "target/cov/$(basename $file)"; kcov
-      --exclude-pattern=/.cargo,/usr/lib --verify "target/cov/$(basename $file)" "$file"; done; done
+      for crate in rust_keylock; do for file in target/debug/$crate-*[^\.d]; do mkdir -p "target/cov/$(basename $file)"; \
+      kcov --exclude-pattern=/.cargo,/usr/lib --verify "target/cov/$(basename $file)" "$file"; done; done &&
+      bash <(curl -s https://codecov.io/bash) &&
+      echo "Uploaded code coverage"
 
 matrix:
   allow_failures:
