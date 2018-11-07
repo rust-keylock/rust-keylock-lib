@@ -28,6 +28,9 @@ extern crate futures;
 extern crate http;
 extern crate hyper;
 extern crate hyper_tls;
+#[cfg(test)]
+#[macro_use]
+extern crate lazy_static;
 #[macro_use]
 extern crate log;
 extern crate native_tls;
@@ -37,9 +40,6 @@ extern crate secstr;
 extern crate sha3;
 extern crate toml;
 extern crate xml;
-#[cfg(test)]
-#[macro_use]
-extern crate lazy_static;
 
 use self::api::{
     Props,
@@ -55,11 +55,14 @@ pub use self::api::{
     UserSelection as UserSelection,
 };
 pub use self::api::safe::Safe as Safe;
+use self::api::UiCommand;
+use self::asynch::AsyncEditorFacade;
 pub use self::asynch::nextcloud;
 use std::error::Error;
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::time::{self, SystemTime};
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::thread;
+use std::time;
 
 mod file_handler;
 mod errors;
@@ -71,17 +74,10 @@ mod selection_handling;
 
 /// Takes a reference of `Editor` implementation as argument and executes the _rust-keylock_ logic.
 /// The `Editor` is responsible for the interaction with the user. Currently there are `Editor` implementations for __shell__ and for __Android__.
-pub fn execute<T: Editor>(editor: &T) {
+pub fn execute_async<T: AsyncEditor>(editor: &T) {
     openssl_probe::init_ssl_cert_env_vars();
     info!("Starting rust-keylock...");
-
-    let filename = ".sec";
     let props_filename = ".props";
-    // Holds the UserSelections
-    let mut user_selection;
-    // Holds the time of the latest user action
-    let mut last_action_time;
-
     let props = match file_handler::load_properties(props_filename) {
         Ok(m) => m,
         Err(error) => {
@@ -89,6 +85,167 @@ pub fn execute<T: Editor>(editor: &T) {
             Props::default()
         }
     };
+
+    let (command_tx, command_rx) = mpsc::channel();
+    let (ui_tx, ui_rx) = mpsc::channel();
+    let mut ui_rx_vec = Vec::new();
+
+    let editor_facade = asynch::AsyncEditorFacade::new(ui_rx, command_tx, props);
+
+    let _ = thread::spawn(move || {
+        debug!("Spawned async task");
+        do_execute(&editor_facade);
+    });
+
+    // The select macro is a nightly feature and is going to be deprecated. Use polling until a better solution is found.
+    // https://github.com/rust-lang/rust/issues/27800
+    loop {
+        thread::park_timeout(asynch::ASYNC_EDITOR_PARK_TIMEOUT);
+        match command_rx.try_recv() {
+            Ok(command) => {
+                match command {
+                    UiCommand::ShowPasswordEnter => {
+                        ui_rx_vec.push(editor.show_password_enter());
+                    }
+                    UiCommand::ShowChangePassword => {
+                        ui_rx_vec.push(editor.show_change_password());
+                    }
+                    UiCommand::ShowMenu(menu, safe, rkl_configuration) => {
+                        ui_rx_vec.push(editor.show_menu(&menu, &safe, &rkl_configuration));
+                    }
+                    UiCommand::ShowMessage(message, options, severity) => {
+                        ui_rx_vec.push(editor.show_message(&message, options, severity));
+                    }
+                    UiCommand::Exit(contents_changed) => {
+                        ui_rx_vec.push(editor.exit(contents_changed));
+                    }
+                }
+            }
+            Err(TryRecvError::Disconnected) => {
+                break;
+            }
+            Err(TryRecvError::Empty) => { /* ignore */ }
+        }
+
+        match try_recv_from_vec(&mut ui_rx_vec) {
+            Some(sel) => {
+                let should_break = sel == UserSelection::GoTo(Menu::ForceExit);
+                send(&ui_tx, sel);
+                if should_break {
+                    break;
+                }
+            }
+            None => {}
+        }
+    }
+    info!("Exiting rust-keylock...");
+}
+
+fn try_recv_from_vec(rxs: &mut Vec<Receiver<UserSelection>>) -> Option<UserSelection> {
+    let mut res_opt: Option<UserSelection> = None;
+    let mut i = 0;
+    let mut remove_element = false;
+
+    for rx in rxs.iter() {
+        match rx.try_recv() {
+            Ok(res) => {
+                res_opt = Some(res);
+                remove_element = true;
+                break;
+            }
+            Err(TryRecvError::Disconnected) => {
+                remove_element = true;
+                break;
+            }
+            Err(TryRecvError::Empty) => { /* ignore */ }
+        }
+
+        i = i + 1;
+    }
+
+    if remove_element {
+        rxs.remove(i);
+    }
+    res_opt
+}
+
+pub fn execute<T: Editor>(editor: &T) {
+    openssl_probe::init_ssl_cert_env_vars();
+    info!("Starting rust-keylock...");
+    let props_filename = ".props";
+    let props = match file_handler::load_properties(props_filename) {
+        Ok(m) => m,
+        Err(error) => {
+            error!("Could not load properties. Using defaults. The error was: {}", error.description());
+            Props::default()
+        }
+    };
+
+    let (command_tx, command_rx) = mpsc::channel();
+    let (ui_tx, ui_rx) = mpsc::channel();
+
+    let async_editor = asynch::AsyncEditorFacade::new(ui_rx, command_tx, props);
+
+    let _ = thread::spawn(move || {
+        debug!("Spawned async task");
+        do_execute(&async_editor);
+    });
+
+    loop {
+        match command_rx.recv() {
+            Ok(command) => {
+                match command {
+                    UiCommand::ShowPasswordEnter => {
+                        println!("Showing password");
+                        send(&ui_tx, editor.show_password_enter())
+                    }
+                    UiCommand::ShowChangePassword => {
+                        println!("Showing change password");
+                        send(&ui_tx, editor.show_change_password())
+                    }
+                    UiCommand::ShowMenu(menu, safe, rkl_configuration) => {
+                        println!("Showing menu {:?}", menu);
+                        let sel = editor.show_menu(&menu, &safe, &rkl_configuration);
+                        let should_break = sel == UserSelection::GoTo(Menu::ForceExit);
+                        send(&ui_tx, sel);
+                        if should_break {
+                            break;
+                        }
+                    }
+                    UiCommand::ShowMessage(message, options, severity) => {
+                        println!("Showing message");
+                        send(&ui_tx, editor.show_message(&message, options, severity))
+                    }
+                    UiCommand::Exit(contents_changed) => {
+                        println!("Exiting");
+                        let sel = editor.exit(contents_changed);
+                        let should_break = sel == UserSelection::GoTo(Menu::ForceExit);
+                        send(&ui_tx, sel);
+                        if should_break {
+                            break;
+                        }
+                    }
+                }
+            }
+            Err(error) => {
+                error!("Error while receiving command from spawned execution: {:?}", error);
+            }
+        }
+    }
+    info!("Exiting rust-keylock...");
+}
+
+fn send(tx: &Sender<UserSelection>, user_selection: UserSelection) {
+    match tx.send(user_selection) {
+        Ok(_) => { /* ignore*/ }
+        Err(error) => error!("Could not send User Selection to the core lib: {:?}", error),
+    }
+}
+
+fn do_execute(editor: &AsyncEditorFacade) {
+    let filename = ".sec";
+    // Holds the UserSelections
+    let mut user_selection;
 
     // Keeps the sensitive data
     let mut safe = Safe::new();
@@ -118,24 +275,13 @@ pub fn execute<T: Editor>(editor: &T) {
         }
         // Set the UserSelection
         user_selection = us;
-        // Set the time of the action
-        last_action_time = SystemTime::now();
         cr
     };
-
-    // Start the backround async tasks
-    //    let rx_async_tasks = start_async_tasks(&filename);
 
     loop {
         editor.sort_entries(&mut safe.entries);
         // Check reception of async message
         async_channel_check(&nextcloud_rx, editor, filename, &mut user_selection);
-        // Idle time check only on selections other than GoTo::Main
-        if user_selection != UserSelection::GoTo(Menu::Main) {
-            user_selection = user_selection_after_idle_check(&last_action_time, props.idle_timeout_seconds(), user_selection, editor);
-        }
-        // Update the action time
-        last_action_time = SystemTime::now();
         // Handle
         user_selection = match user_selection {
             UserSelection::GoTo(Menu::TryPass) => {
@@ -418,7 +564,6 @@ Warning: Saving will discard all the entries that could not be recovered.
             }
         }
     }
-    info!("Exiting rust-keylock...");
 }
 
 fn async_channel_check(nextcloud_rx: &Option<Receiver<errors::Result<asynch::nextcloud::SyncStatus>>>,
@@ -509,30 +654,6 @@ fn handle_sync_status_success(sync_status: asynch::nextcloud::SyncStatus,
     }
 }
 
-fn user_selection_after_idle_check(last_action_time: &SystemTime,
-                                   timeout_seconds: i64,
-                                   us: UserSelection,
-                                   editor: &Editor)
-                                   -> UserSelection {
-    match last_action_time.elapsed() {
-        Ok(elapsed) => {
-            let elapsed_seconds = elapsed.as_secs();
-            if elapsed_seconds as i64 > timeout_seconds {
-                warn!("Idle time of {} seconds elapsed! Locking...", timeout_seconds);
-                let message = format!("Idle time of {} seconds elapsed! Locking...", timeout_seconds);
-                let _ = editor.show_message(&message, vec![UserOption::ok()], MessageSeverity::default());
-                UserSelection::GoTo(Menu::TryPass)
-            } else {
-                us
-            }
-        }
-        Err(error) => {
-            error!("Cannot get the elapsed time since the last action of the user: {:?}", &error);
-            us
-        }
-    }
-}
-
 fn handle_provided_password_for_init(provided_password: UserSelection,
                                      filename: &str,
                                      safe: &mut Safe,
@@ -594,9 +715,9 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
             let exit_selection = UserSelection::GoTo(Menu::ForceExit);
             (exit_selection, cr)
         }
-        _ => {
+        other => {
             panic!("Wrong initialization sequence... The editor.show_password_enter must always return a UserSelection::ProvidedPassword. \
-                    Please, consider opening a bug to the developers.")
+                    Please, consider opening a bug to the developers.: {:?}", other)
         }
     }
 }
@@ -646,34 +767,89 @@ pub trait Editor {
     }
 }
 
+
+/// Trait to be implemented by various different `Editor`s (Shell, Web, Android, other...).
+///
+/// It drives the interaction with the Users
+pub trait AsyncEditor {
+    /// Shows the interface for entering a Password and a Number.
+    fn show_password_enter(&self) -> Receiver<UserSelection>;
+    /// Shows the interface for changing a Password and/or a Number.
+    fn show_change_password(&self) -> Receiver<UserSelection>;
+    /// Shows the specified `Menu` to the User.
+    fn show_menu(&self, menu: &Menu, safe: &Safe, configuration: &RklConfiguration) -> Receiver<UserSelection>;
+    /// Shows the Exit `Menu` to the User.
+    fn exit(&self, contents_changed: bool) -> Receiver<UserSelection>;
+    /// Shows a message to the User.
+    /// Along with the message, the user should select one of the offered `UserOption`s.
+    fn show_message(&self, message: &str, options: Vec<UserOption>, severity: MessageSeverity) -> Receiver<UserSelection>;
+
+    /// Sorts the supplied entries.
+    fn sort_entries(&self, entries: &mut [Entry]) {
+        entries.sort_by(|a, b| a.name.to_uppercase().cmp(&b.name.to_uppercase()));
+    }
+}
+
 #[cfg(test)]
 mod unit_tests {
-    use std;
     use std::sync::Mutex;
-    use std::time::SystemTime;
+    use std::sync::mpsc;
+    use std::mem;
     use super::api::{Entry, Menu, UserOption, UserSelection};
 
     #[test]
-    fn user_selection_after_idle_check_timed_out() {
-        let time = SystemTime::now();
-        std::thread::sleep(std::time::Duration::new(2, 0));
-        let user_selection = super::user_selection_after_idle_check(
-            &time,
-            1,
-            UserSelection::GoTo(Menu::Main),
-            &TestEditor::new(vec![UserSelection::ProvidedPassword("dummy".to_string(), 0)]));
-        assert!(user_selection == UserSelection::GoTo(Menu::TryPass));
-    }
+    fn try_recv_from_vec() {
+        let (tx1, rx1) = mpsc::channel();
+        let (tx2, rx2) = mpsc::channel();
+        let (tx3, rx3) = mpsc::channel();
+        let (tx4, rx4) = mpsc::channel();
+        let mut v = Vec::new();
+        v.push(rx1);
+        v.push(rx2);
+        v.push(rx3);
+        v.push(rx4);
 
-    #[test]
-    fn user_selection_after_idle_check_not_timed_out() {
-        let time = SystemTime::now();
-        let user_selection = super::user_selection_after_idle_check(
-            &time,
-            10,
-            UserSelection::GoTo(Menu::Main),
-            &TestEditor::new(vec![UserSelection::ProvidedPassword("dummy".to_string(), 0)]));
-        assert!(user_selection == UserSelection::GoTo(Menu::Main));
+        // No messages arrive yet
+        assert!(super::try_recv_from_vec(&mut v).is_none());
+        assert!(v.len() == 4);
+
+        // Send a message
+        assert!(tx1.send(UserSelection::Ack).is_ok());
+        let m1 = super::try_recv_from_vec(&mut v);
+        // A result is picked
+        assert!(m1.is_some());
+        assert!(m1.unwrap() == UserSelection::Ack);
+        // rx1 is removed from the vec
+        assert!(v.len() == 3);
+        assert!(tx1.send(UserSelection::Ack).is_err());
+        // No more messages exist
+        assert!(super::try_recv_from_vec(&mut v).is_none());
+
+        // Send two messages
+        assert!(tx2.send(UserSelection::GoTo(Menu::Current)).is_ok());
+        assert!(tx3.send(UserSelection::GoTo(Menu::Exit)).is_ok());
+        // Pick the two results
+        let m2_opt = super::try_recv_from_vec(&mut v);
+        let m3_opt = super::try_recv_from_vec(&mut v);
+        assert!(m2_opt.is_some() && m3_opt.is_some());
+        let m2 = m2_opt.unwrap();
+        let m3 = m3_opt.unwrap();
+        assert!(m2 == UserSelection::GoTo(Menu::Current) || m2 == UserSelection::GoTo(Menu::Exit));
+        assert!(m3 == UserSelection::GoTo(Menu::Current) || m3 == UserSelection::GoTo(Menu::Exit));
+        // rx2 and rx3 are removed from the vec
+        assert!(v.len() == 1);
+        assert!(tx2.send(UserSelection::Ack).is_err());
+        assert!(tx3.send(UserSelection::Ack).is_err());
+        // No more messages exist
+        assert!(super::try_recv_from_vec(&mut v).is_none());
+
+        // Drop tx4 to close the channel
+        mem::drop(tx4);
+        assert!(super::try_recv_from_vec(&mut v).is_none());
+        // rx4 is removed from the vec
+        assert!(v.is_empty());
+        // No more messages exist
+        assert!(super::try_recv_from_vec(&mut v).is_none());
     }
 
     #[test]

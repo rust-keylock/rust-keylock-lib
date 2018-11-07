@@ -15,8 +15,7 @@
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
 
 use crate::api::{Menu, MessageSeverity, UserOption, UserSelection};
-use crate::Editor;
-use crate::errors;
+use crate::{errors, Editor};
 use clipboard::{ClipboardContext, ClipboardProvider};
 use std;
 use std::error::Error;

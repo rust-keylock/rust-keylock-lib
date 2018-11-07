@@ -14,10 +14,10 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
 
-use super::{asynch, datacrypt, errors, nextcloud};
 use self::safe::Safe;
 use std::iter::FromIterator;
 use std::time::{SystemTime, UNIX_EPOCH};
+use super::{asynch, datacrypt, errors, nextcloud};
 use toml;
 use toml::value::Table;
 
@@ -45,9 +45,9 @@ impl RklContent {
     pub fn from(tup: (&Safe, &asynch::nextcloud::NextcloudConfiguration, &SystemConfiguration)) -> errors::Result<RklContent> {
         let entries = tup.0.get_entries_decrypted();
         let nextcloud_conf = asynch::nextcloud::NextcloudConfiguration::new(tup.1.server_url.clone(),
-                                                                           tup.1.username.clone(),
-                                                                           tup.1.decrypted_password()?,
-                                                                           tup.1.use_self_signed_certificate);
+                                                                            tup.1.username.clone(),
+                                                                            tup.1.decrypted_password()?,
+                                                                            tup.1.use_self_signed_certificate);
         let system_conf = SystemConfiguration::new(tup.2.saved_at, tup.2.version, tup.2.last_sync_version);
 
         Ok(RklContent::new(entries, nextcloud_conf?, system_conf))
@@ -55,7 +55,7 @@ impl RklContent {
 }
 
 /// Keeps the Configuration
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct RklConfiguration {
     pub system: SystemConfiguration,
     pub nextcloud: asynch::nextcloud::NextcloudConfiguration,
@@ -244,7 +244,7 @@ pub struct Props {
 
 impl Default for Props {
     fn default() -> Self {
-        Props { idle_timeout_seconds: 300 }
+        Props { idle_timeout_seconds: 1800 }
     }
 }
 
@@ -603,11 +603,19 @@ impl ToString for MessageSeverity {
     }
 }
 
+pub(crate) enum UiCommand {
+    ShowPasswordEnter,
+    ShowChangePassword,
+    ShowMenu(Menu, Safe, RklConfiguration),
+    Exit(bool),
+    ShowMessage(String, Vec<UserOption>, MessageSeverity),
+}
+
 #[cfg(test)]
 mod api_unit_tests {
     use crate::datacrypt::EntryPasswordCryptor;
-    use toml;
     use super::{Entry, Menu, UserOption, UserSelection};
+    use toml;
 
     #[test]
     fn entry_from_table_before_v0_6_0_success() {

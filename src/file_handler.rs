@@ -274,7 +274,9 @@ pub fn load_properties(filename: &str) -> Result<Props, RustKeylockError> {
     let toml = load_existing_file(&full_path, None)?;
 
     if toml.len() == 0 {
-        Ok(Props::default())
+        let props = Props::default();
+        save_props(&props, filename)?;
+        Ok(props)
     } else {
         let value = toml.as_str().parse::<Value>()?;
         match value.as_table() {
@@ -600,7 +602,7 @@ mod test_file_handler {
         assert!(opt.is_ok());
         let path_buf = super::default_toml_path(filename);
         let path = path_buf.to_str().unwrap();
-        assert!(fs::remove_file(path).is_err());
+        assert!(fs::remove_file(path).is_ok());
     }
 
     #[test]
