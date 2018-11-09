@@ -14,18 +14,20 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
 
+use self::nextcloud::SyncStatus;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread;
 use std::time::{self, Duration, SystemTime};
 use super::{Editor, Menu, MessageSeverity, Props, RklConfiguration, Safe, UserOption, UserSelection};
 use super::api::UiCommand;
+use super::errors;
 
 pub mod nextcloud;
 
 pub const ASYNC_EDITOR_PARK_TIMEOUT: Duration = time::Duration::from_millis(10);
 
 /// Executes a task in a new thread
-pub fn execute_task<T: 'static>(task: Box<AsyncTask<T=T>>, every: time::Duration) -> Sender<bool> {
+pub fn execute_task<T: 'static>(task: Box<AsyncTask<T=T>>, every: time::Duration) -> AsyncTaskHandle {
     let (tx_loop_control, rx_loop_control): (Sender<bool>, Receiver<bool>) = mpsc::channel();
 
     let mut mut_task = task;
@@ -54,7 +56,7 @@ pub fn execute_task<T: 'static>(task: Box<AsyncTask<T=T>>, every: time::Duration
         }
     });
 
-    tx_loop_control
+    AsyncTaskHandle::new(tx_loop_control)
 }
 
 /// Defines a task that runs asynchronously in the background.
@@ -66,17 +68,47 @@ pub trait AsyncTask: Send {
     fn execute(&self);
 }
 
+/// A handle to a created AsyncTask
+pub struct AsyncTaskHandle {
+    stop_tx: Sender<bool>,
+}
+
+impl AsyncTaskHandle {
+    fn new(stop_tx: Sender<bool>) -> AsyncTaskHandle {
+        AsyncTaskHandle {
+            stop_tx,
+        }
+    }
+
+    pub fn stop(&self) -> errors::Result<()> {
+        debug!("Stopping async task...");
+
+        match self.stop_tx.send(true) {
+            Ok(_) => Ok(()),
+            Err(error) => {
+                warn!("Could not stop async task... {:?}", error);
+                Err(errors::RustKeylockError::from(error))
+            }
+        }
+    }
+}
+
 
 // Used in the execute function
 pub(crate) struct AsyncEditorFacade {
     user_selection_rx: Receiver<UserSelection>,
+    nextcloud_rx: Option<Receiver<errors::Result<SyncStatus>>>,
     command_tx: Sender<UiCommand>,
     props: Props,
 }
 
 impl AsyncEditorFacade {
     pub fn new(user_selection_rx: Receiver<UserSelection>, command_tx: Sender<UiCommand>, props: Props) -> AsyncEditorFacade {
-        AsyncEditorFacade { user_selection_rx, command_tx, props }
+        AsyncEditorFacade { user_selection_rx, nextcloud_rx: None, command_tx, props }
+    }
+
+    pub fn update_nextcloud_rx(&mut self, new_nextcloud_rx: Option<Receiver<errors::Result<SyncStatus>>>) {
+        self.nextcloud_rx = new_nextcloud_rx;
     }
 
     pub fn send(&self, command: UiCommand) {
@@ -106,7 +138,7 @@ impl AsyncEditorFacade {
                 None => { /*ignore*/ }
             };
 
-            // Get a possible input
+            // Get a possible user input
             match self.user_selection_rx.try_recv() {
                 Ok(sel) => {
                     user_selection = sel;
@@ -119,9 +151,95 @@ impl AsyncEditorFacade {
                 }
                 Err(TryRecvError::Empty) => { /* ignore */ }
             }
+
+            if let Some(sel) = self.check_nextcloud_message() {
+                user_selection = sel;
+                break;
+            }
         }
 
         user_selection
+    }
+
+    // Get a possible nextcloud async task message
+    fn check_nextcloud_message(&self) -> Option<UserSelection> {
+        self.nextcloud_rx.as_ref().and_then(|rx| {
+            match rx.try_recv() {
+                Ok(sync_status_res) => {
+                    match sync_status_res {
+                        Ok(sync_status) => Some(self.handle_sync_status_success(sync_status, super::PROPS_FILENAME, true)),
+                        Err(_) => None,
+                    }
+                }
+                _ => None,
+            }
+        })
+    }
+
+    fn handle_sync_status_success(&self,
+                                  sync_status: SyncStatus,
+                                  filename: &str,
+                                  ignore_contents_identical_message: bool) -> UserSelection {
+        match sync_status {
+            SyncStatus::UploadSuccess => {
+                let _ = self.show_message("The nextcloud server was updated with the local data", vec![UserOption::ok()], MessageSeverity::Info);
+                UserSelection::GoTo(Menu::Current)
+            }
+            SyncStatus::NewAvailable(downloaded_filename) => {
+                let selection = self.show_message("Downloaded new data from the nextcloud server. Do you want to apply them locally now?",
+                                                  vec![UserOption::yes(), UserOption::no()],
+                                                  MessageSeverity::Info);
+
+                debug!("The user selected {:?} as an answer for applying the downloaded data locally", &selection);
+                if selection == UserSelection::UserOption(UserOption::yes()) {
+                    debug!("Replacing the local file with the one downloaded from the server");
+                    let _ = super::file_handler::replace(&downloaded_filename, filename);
+                    UserSelection::GoTo(Menu::TryPass)
+                } else {
+                    UserSelection::GoTo(Menu::Current)
+                }
+            }
+            SyncStatus::NewToMerge(downloaded_filename) => {
+                let selection =
+                    self.show_message("Downloaded data from the nextcloud server, but conflicts were identified. The contents will be merged \
+                                   but nothing will be saved. You will need to explicitly save after reviewing the merged data. Do you \
+                                   want to do the merge now?",
+                                        vec![UserOption::yes(), UserOption::no()],
+                                        MessageSeverity::Info);
+
+                debug!("The user selected {:?} as an answer for applying the downloaded data locally", &selection);
+                if selection == UserSelection::UserOption(UserOption::yes()) {
+                    debug!("Merging the local data with the downloaded from the server");
+
+                    match self.show_password_enter() {
+                        UserSelection::ProvidedPassword(pwd, salt_pos) => {
+                            UserSelection::ImportFromDefaultLocation(downloaded_filename, pwd, salt_pos)
+                        }
+                        other => {
+                            let message = format!("Expected a ProvidedPassword but received '{:?}'. Please, consider opening a bug to the \
+                                               developers.",
+                                                  &other);
+                            error!("{}", message);
+                            let _ =
+                                self.show_message("Unexpected result when waiting for password. See the logs for more details. Please \
+                                                 consider opening a but to the developers.",
+                                                    vec![UserOption::ok()],
+                                                    MessageSeverity::Error);
+                            UserSelection::GoTo(Menu::TryPass)
+                        }
+                    }
+                } else {
+                    UserSelection::GoTo(Menu::Current)
+                }
+            }
+            SyncStatus::None if !ignore_contents_identical_message => {
+                let _ = self.show_message("No need to sync. The contents are identical", vec![UserOption::ok()], MessageSeverity::Info);
+                UserSelection::GoTo(Menu::Current)
+            }
+            _ => {
+                UserSelection::GoTo(Menu::Current)
+            }
+        }
     }
 }
 

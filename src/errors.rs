@@ -25,6 +25,7 @@ use std::fmt::Debug;
 use std::io;
 use std::num::ParseIntError;
 use std::string::FromUtf8Error;
+use std::sync::mpsc::{RecvError, RecvTimeoutError, SendError};
 use toml;
 
 pub type Result<T> = result::Result<T, RustKeylockError>;
@@ -133,5 +134,23 @@ impl From<time::SystemTimeError> for RustKeylockError {
 impl From<ParseIntError> for RustKeylockError {
     fn from(err: ParseIntError) -> RustKeylockError {
         RustKeylockError::ParseError(format!("{:?}", err))
+    }
+}
+
+impl<T> From<SendError<T>> for RustKeylockError {
+    fn from(err: SendError<T>) -> RustKeylockError {
+        RustKeylockError::GeneralError(format!("{:?}", err))
+    }
+}
+
+impl From<RecvError> for RustKeylockError {
+    fn from(err: RecvError) -> RustKeylockError {
+        RustKeylockError::GeneralError(format!("{:?}", err))
+    }
+}
+
+impl From<RecvTimeoutError> for RustKeylockError {
+    fn from(err: RecvTimeoutError) -> RustKeylockError {
+        RustKeylockError::GeneralError(format!("{:?}", err))
     }
 }
