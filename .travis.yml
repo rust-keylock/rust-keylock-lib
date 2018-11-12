@@ -17,9 +17,6 @@ addons:
       - zlib1g-dev
       - libiberty-dev
 
-env:
-  - RUSTFLAGS='-C link-dead-code'
-
 rust:
   - stable
   - beta
