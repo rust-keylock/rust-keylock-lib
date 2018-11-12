@@ -760,6 +760,7 @@ mod unit_tests {
     use std::time::SystemTime;
 
     use super::api::{Entry, Menu, UserOption, UserSelection};
+    use super::asynch::nextcloud::NextcloudConfiguration;
     use super::file_handler;
 
     #[test]
@@ -827,7 +828,7 @@ mod unit_tests {
         execute_change_pass();
         execute_export_entries();
         execute_import_entries();
-        execute_show_configuration();
+        execute_update_configuration();
     }
 
     fn execute_try_pass() {
@@ -840,6 +841,7 @@ mod unit_tests {
             // Ack saved message
             UserSelection::UserOption(UserOption::ok()),
             // Exit
+            UserSelection::GoTo(Menu::Exit),
             UserSelection::GoTo(Menu::ForceExit)]);
 
         super::execute(&editor);
@@ -883,6 +885,7 @@ mod unit_tests {
             // Login
             UserSelection::ProvidedPassword("123".to_string(), 0),
             // Add an entry
+            UserSelection::GoTo(Menu::NewEntry),
             UserSelection::NewEntry(Entry::new("n".to_owned(), "url".to_owned(), "u".to_owned(), "p".to_owned(), "s".to_owned())),
             // Save
             UserSelection::GoTo(Menu::Save),
@@ -1009,7 +1012,7 @@ mod unit_tests {
             // Login
             UserSelection::ProvidedPassword("123".to_string(), 0),
             // Export entries
-            UserSelection::GoTo(Menu::ExportEntries),
+            UserSelection::GoTo(Menu::ImportEntries),
             UserSelection::ExportTo(loc_str.clone()),
             // Ack message
             UserSelection::UserOption(UserOption::ok()),
@@ -1028,12 +1031,29 @@ mod unit_tests {
         assert!(editor.all_selections_executed());
     }
 
-    fn execute_show_configuration() {
-        println!("===========execute_show_configuration");
+    fn execute_update_configuration() {
+        println!("===========execute_update_configuration");
+
+        let new_conf = NextcloudConfiguration::new(
+            "u".to_string(),
+            "un".to_string(),
+            "pw".to_string(),
+            false).unwrap();
+
+        let new_empty_conf = NextcloudConfiguration::new(
+            "".to_string(),
+            "".to_string(),
+            "".to_string(),
+            false).unwrap();
+
         let editor = TestEditor::new(vec![
             // Login
             UserSelection::ProvidedPassword("123".to_string(), 0),
+            // Update the configuration
             UserSelection::GoTo(Menu::ShowConfiguration),
+            UserSelection::UpdateConfiguration(new_conf),
+            // Update the configuration with a non-filled one
+            UserSelection::UpdateConfiguration(new_empty_conf),
             // Exit
             UserSelection::GoTo(Menu::ForceExit)]);
 
