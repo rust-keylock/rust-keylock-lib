@@ -41,6 +41,12 @@ extern crate sha3;
 extern crate toml;
 extern crate xml;
 
+use std::error::Error;
+use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::thread;
+use std::time;
+
 use self::api::{
     Props,
     RklContent,
@@ -58,11 +64,6 @@ pub use self::api::safe::Safe as Safe;
 use self::api::UiCommand;
 use self::asynch::{AsyncEditorFacade, AsyncTask};
 pub use self::asynch::nextcloud;
-use std::error::Error;
-use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
-use std::thread;
-use std::time;
 
 mod file_handler;
 mod errors;
@@ -431,7 +432,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                                                         vec![UserOption::yes(), UserOption::no()],
                                                         MessageSeverity::Warn);
 
-                    debug!("The user selected {:?} as an answer for overwritine the file {}", selection, path);
+                    debug!("The user selected {:?} as an answer for overwriting the file {}", selection, path);
                     if selection == UserSelection::UserOption(UserOption::yes()) {
                         true
                     } else {
@@ -756,7 +757,10 @@ mod unit_tests {
     use std::mem;
     use std::sync::mpsc;
     use std::sync::Mutex;
+    use std::time::SystemTime;
+
     use super::api::{Entry, Menu, UserOption, UserSelection};
+    use super::file_handler;
 
     #[test]
     fn try_recv_from_vec() {
@@ -816,9 +820,14 @@ mod unit_tests {
     #[test]
     fn execution_cases() {
         execute_try_pass();
+        execute_show_entry();
         execute_add_entry();
+        execute_edit_entry();
         execute_delete_entry();
         execute_change_pass();
+        execute_export_entries();
+        execute_import_entries();
+        execute_show_configuration();
     }
 
     fn execute_try_pass() {
@@ -830,6 +839,37 @@ mod unit_tests {
             UserSelection::GoTo(Menu::Save),
             // Ack saved message
             UserSelection::UserOption(UserOption::ok()),
+            // Exit
+            UserSelection::GoTo(Menu::ForceExit)]);
+
+        super::execute(&editor);
+        assert!(editor.all_selections_executed());
+    }
+
+    fn execute_show_entry() {
+        println!("===========execute_show_entry");
+        let editor = TestEditor::new(vec![
+            // Login
+            UserSelection::ProvidedPassword("123".to_string(), 0),
+            // Add an entry
+            UserSelection::NewEntry(Entry::new("11nn".to_owned(), "11url".to_owned(), "11un".to_owned(), "11pn".to_owned(), "11sn".to_owned())),
+            // Show the first entry
+            UserSelection::GoTo(Menu::ShowEntry(0)),
+            // Exit
+            UserSelection::GoTo(Menu::ForceExit)]);
+
+        super::execute(&editor);
+        assert!(editor.all_selections_executed());
+    }
+
+    fn execute_edit_entry() {
+        println!("===========execute_edit_entry");
+        let editor = TestEditor::new(vec![
+            // Login
+            UserSelection::ProvidedPassword("123".to_string(), 0),
+            // Edit the first entry
+            UserSelection::GoTo(Menu::EditEntry(0)),
+            UserSelection::ReplaceEntry(0, Entry::new("r".to_owned(), "url".to_owned(), "ru".to_owned(), "rp".to_owned(), "rs".to_owned())),
             // Exit
             UserSelection::GoTo(Menu::ForceExit)]);
 
@@ -863,6 +903,7 @@ mod unit_tests {
             // Add an entry
             UserSelection::NewEntry(Entry::new("11nn".to_owned(), "11url".to_owned(), "11un".to_owned(), "11pn".to_owned(), "11sn".to_owned())),
             // Delete the first entry
+            UserSelection::GoTo(Menu::DeleteEntry(0)),
             UserSelection::DeleteEntry(0),
             // Save
             UserSelection::GoTo(Menu::Save),
@@ -921,6 +962,83 @@ mod unit_tests {
 
         super::execute(&editor3);
         assert!(editor3.all_selections_executed());
+    }
+
+    fn execute_export_entries() {
+        println!("===========execute_export_entries");
+        let mut loc = file_handler::default_rustkeylock_location();
+        let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).expect("Cannot create the duration for the execute_export_entries").as_secs();
+        loc.push(format!("exported{:?}", now));
+        let loc_str = loc.into_os_string().into_string().unwrap();
+        let editor = TestEditor::new(vec![
+            // Login
+            UserSelection::ProvidedPassword("123".to_string(), 0),
+            // Export entries
+            UserSelection::GoTo(Menu::ExportEntries),
+            UserSelection::ExportTo(loc_str.clone()),
+            // Ack message
+            UserSelection::UserOption(UserOption::ok()),
+            // Export to the same path
+            UserSelection::ExportTo(loc_str.clone()),
+            // Select not to overwitre
+            UserSelection::UserOption(UserOption::no()),
+            // Export to the same path once more
+            UserSelection::ExportTo(loc_str.clone()),
+            // Select to overwitre
+            UserSelection::UserOption(UserOption::yes()),
+            // Ack message
+            UserSelection::UserOption(UserOption::ok()),
+            // Try exporting to an invalid path
+            UserSelection::ExportTo(format!("/exported{:?}", now)),
+            // Ack message
+            UserSelection::UserOption(UserOption::ok()),
+            // Exit
+            UserSelection::GoTo(Menu::ForceExit)]);
+
+        super::execute(&editor);
+        assert!(editor.all_selections_executed());
+    }
+
+    fn execute_import_entries() {
+        println!("===========execute_import_entries");
+        let mut loc = file_handler::default_rustkeylock_location();
+        let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).expect("Cannot create the duration for the execute_export_entries").as_secs();
+        loc.push(format!("exported{:?}", now));
+        let loc_str = loc.into_os_string().into_string().unwrap();
+        let editor = TestEditor::new(vec![
+            // Login
+            UserSelection::ProvidedPassword("123".to_string(), 0),
+            // Export entries
+            UserSelection::GoTo(Menu::ExportEntries),
+            UserSelection::ExportTo(loc_str.clone()),
+            // Ack message
+            UserSelection::UserOption(UserOption::ok()),
+            // Import entries
+            UserSelection::ImportFrom(loc_str, "123".to_string(), 0),
+            // Ack message
+            UserSelection::UserOption(UserOption::ok()),
+            // Import a non-existing file
+            UserSelection::ImportFrom("/non-existing".to_string(), "123".to_string(), 0),
+            // Ack message
+            UserSelection::UserOption(UserOption::ok()),
+            // Exit
+            UserSelection::GoTo(Menu::ForceExit)]);
+
+        super::execute(&editor);
+        assert!(editor.all_selections_executed());
+    }
+
+    fn execute_show_configuration() {
+        println!("===========execute_show_configuration");
+        let editor = TestEditor::new(vec![
+            // Login
+            UserSelection::ProvidedPassword("123".to_string(), 0),
+            UserSelection::GoTo(Menu::ShowConfiguration),
+            // Exit
+            UserSelection::GoTo(Menu::ForceExit)]);
+
+        super::execute(&editor);
+        assert!(editor.all_selections_executed());
     }
 
     struct TestEditor {
