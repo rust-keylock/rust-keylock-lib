@@ -347,10 +347,12 @@ fn do_execute(editor: &mut AsyncEditorFacade) {
                         let _ = async_task_handle.as_ref().map(|handle| handle.stop());
                         // Clean the flag for unsaved data
                         contents_changed = false;
-                        // Start a new background async task
-                        let (handle, nextcloud_sync_status_rx) = spawn_nextcloud_async_task(FILENAME, &configuration, &async_task_handle);
-                        async_task_handle = Some(handle);
-                        editor.update_nextcloud_rx(Some(nextcloud_sync_status_rx));
+                        if configuration.nextcloud.is_filled() {
+                            // Start a new background async task
+                            let (handle, nextcloud_sync_status_rx) = spawn_nextcloud_async_task(FILENAME, &configuration, &async_task_handle);
+                            async_task_handle = Some(handle);
+                            editor.update_nextcloud_rx(Some(nextcloud_sync_status_rx));
+                        }
                         let _ = editor.show_message("Encrypted and saved successfully!", vec![UserOption::ok()], MessageSeverity::default());
                     }
                     Err(error) => {
