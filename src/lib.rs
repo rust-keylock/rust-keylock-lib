@@ -637,9 +637,9 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
             let cr = file_handler::create_bcryptor(filename, pwd.clone(), salt_pos, false, true).unwrap();
             // Try to decrypt and load the Entries
             let retrieved_entries = match file_handler::load(filename, &cr, true) {
-                // Success, go to the Main menu
+                // Success, go to the List of entries
                 Ok(rkl_content) => {
-                    user_selection = UserSelection::GoTo(Menu::Main);
+                    user_selection = UserSelection::GoTo(Menu::EntriesList("".to_string()));
                     // Set the retrieved configuration
                     let new_rkl_conf = RklConfiguration::from((rkl_content.nextcloud_conf, rkl_content.system_conf));
                     *configuration = new_rkl_conf;
