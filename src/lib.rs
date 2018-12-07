@@ -29,9 +29,7 @@ extern crate http;
 extern crate hyper;
 extern crate hyper_tls;
 #[cfg(test)]
-#[macro_use]
 extern crate lazy_static;
-#[macro_use]
 extern crate log;
 extern crate native_tls;
 extern crate openssl_probe;
@@ -46,6 +44,8 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread;
 use std::time;
+
+use log::*;
 
 use self::api::{
     Props,

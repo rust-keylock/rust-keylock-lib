@@ -14,12 +14,16 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
 
-use self::safe::Safe;
 use std::iter::FromIterator;
 use std::time::{SystemTime, UNIX_EPOCH};
-use super::{asynch, datacrypt, errors, nextcloud};
+
+use log::*;
 use toml;
 use toml::value::Table;
+
+use super::{asynch, datacrypt, errors, nextcloud};
+
+use self::safe::Safe;
 
 pub mod safe;
 
@@ -613,9 +617,11 @@ pub(crate) enum UiCommand {
 
 #[cfg(test)]
 mod api_unit_tests {
-    use crate::datacrypt::EntryPasswordCryptor;
-    use super::{Entry, Menu, UserOption, UserSelection};
     use toml;
+
+    use crate::datacrypt::EntryPasswordCryptor;
+
+    use super::{Entry, Menu, UserOption, UserSelection};
 
     #[test]
     fn entry_from_table_before_v0_6_0_success() {

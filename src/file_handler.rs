@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
 
-use dirs;
 use std::cmp::Ordering;
 #[cfg(not(target_os = "android"))]
 use std::env;
@@ -23,12 +22,16 @@ use std::io;
 use std::io::prelude::*;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use dirs;
+use log::*;
+use toml;
+use toml::value::{Table, Value};
+
 use super::{Entry, Props, RklContent, SystemConfiguration};
 use super::asynch::nextcloud::NextcloudConfiguration;
 use super::datacrypt::{BcryptAes, Cryptor};
 use super::errors::{self, RustKeylockError};
-use toml;
-use toml::value::{Table, Value};
 
 pub fn create_bcryptor(filename: &str,
                        password: String,
@@ -533,6 +536,11 @@ pub fn save_props(props: &Props, filename: &str) -> errors::Result<()> {
 
 #[cfg(test)]
 mod test_file_handler {
+    use std::{thread, time};
+    use std::fs::{self, File};
+    use std::io::prelude::*;
+    use std::iter::repeat;
+
     use crypto::{aes, aessafe, buffer};
     use crypto::aes::KeySize;
     use crypto::bcrypt::bcrypt;
@@ -540,16 +548,13 @@ mod test_file_handler {
     use crypto::buffer::{BufferResult, ReadBuffer, WriteBuffer};
     use crypto::symmetriccipher::{Decryptor, Encryptor, SynchronousStreamCipher};
     use rand::{OsRng, Rng};
-    use std::{thread, time};
-    use std::fs::{self, File};
-    use std::io::prelude::*;
-    use std::iter::repeat;
+    use toml;
+
     use super::super::{Entry, Props, SystemConfiguration};
     use super::super::asynch::nextcloud::NextcloudConfiguration;
     use super::super::datacrypt::{self, Cryptor, NoCryptor};
     use super::super::errors::RustKeylockError;
     use super::super::protected::RklSecret;
-    use toml;
 
     #[test]
     fn use_existing_file() {

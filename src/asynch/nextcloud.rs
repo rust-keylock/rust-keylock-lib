@@ -14,6 +14,10 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
 
+use std::io::prelude::*;
+use std::str::FromStr;
+use std::sync::mpsc::Sender;
+
 use base64;
 use futures::future::{err, FutureResult, ok, result};
 use http::StatusCode;
@@ -21,16 +25,15 @@ use hyper::{self, Body, Client, Request, Response};
 use hyper::header;
 use hyper::rt::{self, Future, Stream};
 use hyper_tls::HttpsConnector;
-use std::io::prelude::*;
-use std::str::FromStr;
-use std::sync::mpsc::Sender;
+use log::*;
+use toml;
+use toml::value::Table;
+use xml::reader::{EventReader, XmlEvent};
+
 use super::super::{errors, file_handler};
 use super::super::datacrypt::EntryPasswordCryptor;
 use super::super::errors::{debug_error_string, RustKeylockError};
 use super::super::SystemConfiguration;
-use toml;
-use toml::value::Table;
-use xml::reader::{EventReader, XmlEvent};
 
 /// A (Next/Own)cloud synchronizer
 pub struct Synchronizer {
@@ -714,9 +717,7 @@ impl ArgsCapsule {
 
 #[cfg(test)]
 mod nextcloud_tests {
-    use hyper::{self, Body, Request, Response, Server, StatusCode};
-    use hyper::rt::Future;
-    use hyper::service::service_fn_ok;
+    use lazy_static::lazy_static;
     use std::collections::HashMap;
     use std::fs;
     use std::fs::File;
@@ -726,9 +727,14 @@ mod nextcloud_tests {
     use std::sync::Mutex;
     use std::thread;
     use std::time;
+
+    use hyper::{self, Body, Request, Response, Server, StatusCode};
+    use hyper::rt::Future;
+    use hyper::service::service_fn_ok;
+    use toml;
+
     use super::super::AsyncTask;
     use super::super::super::{errors, file_handler, SystemConfiguration};
-    use toml;
 
     lazy_static! {
         static ref TXMAP: Mutex < HashMap < String, Sender < bool > > > = Mutex::new(HashMap::new());

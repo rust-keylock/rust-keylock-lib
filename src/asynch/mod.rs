@@ -14,13 +14,17 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
 
-use self::nextcloud::SyncStatus;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread;
 use std::time::{self, Duration, SystemTime};
+
+use log::*;
+
 use super::{Editor, Menu, MessageSeverity, Props, RklConfiguration, Safe, UserOption, UserSelection};
 use super::api::UiCommand;
 use super::errors;
+
+use self::nextcloud::SyncStatus;
 
 pub mod nextcloud;
 
@@ -204,8 +208,8 @@ impl AsyncEditorFacade {
                     self.show_message("Downloaded data from the nextcloud server, but conflicts were identified. The contents will be merged \
                                    but nothing will be saved. You will need to explicitly save after reviewing the merged data. Do you \
                                    want to do the merge now?",
-                                        vec![UserOption::yes(), UserOption::no()],
-                                        MessageSeverity::Info);
+                                      vec![UserOption::yes(), UserOption::no()],
+                                      MessageSeverity::Info);
 
                 debug!("The user selected {:?} as an answer for applying the downloaded data locally", &selection);
                 if selection == UserSelection::UserOption(UserOption::yes()) {
@@ -223,8 +227,8 @@ impl AsyncEditorFacade {
                             let _ =
                                 self.show_message("Unexpected result when waiting for password. See the logs for more details. Please \
                                                  consider opening a but to the developers.",
-                                                    vec![UserOption::ok()],
-                                                    MessageSeverity::Error);
+                                                  vec![UserOption::ok()],
+                                                  MessageSeverity::Error);
                             UserSelection::GoTo(Menu::TryPass)
                         }
                     }
@@ -292,6 +296,7 @@ fn timeout_check(last_action_time: &SystemTime, timeout_seconds: i64) -> Option<
 mod async_tests {
     use std::sync::mpsc::{self, Receiver, Sender};
     use std::time::{self, SystemTime};
+
     use super::super::errors;
 
     #[test]
