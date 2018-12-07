@@ -2,6 +2,7 @@
 [![crates.io](https://img.shields.io/crates/v/rust_keylock.svg)](https://crates.io/crates/rust_keylock)
 [![codecov](https://codecov.io/gh/rust-keylock/rust-keylock-lib/branch/master/graph/badge.svg)](https://codecov.io/gh/rust-keylock/rust-keylock-lib)
 
+[![For Desktop: Get it from the Snap Store](https://snapcraft.io/static/images/badges/en/snap-store-white.svg)](https://snapcraft.io/rust-keylock-ui)
 ## General
 
 ___rust-keylock___ is a password manager and its goals are to be:
@@ -37,8 +38,6 @@ The core logic is written in [Rust](https://www.rust-lang.org), but the presenta
  * [Shell implementation](https://github.com/rust-keylock/rust-keylock-shell).
  * [JavaFX implementation](https://github.com/rust-keylock/rust-keylock-ui).
     * Using the [j4rs crate](https://github.com/astonbitecode/j4rs)
-    
-    [![For Desktop: Get it from the Snap Store](https://snapcraft.io/static/images/badges/en/snap-store-white.svg)](https://snapcraft.io/rust-keylock-ui)
  * [Android implementation](https://github.com/rust-keylock/rust-keylock-android)
     * Using the [j4rs crate](https://github.com/astonbitecode/j4rs)
 
