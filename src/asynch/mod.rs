@@ -171,7 +171,7 @@ impl AsyncEditorFacade {
             match rx.try_recv() {
                 Ok(sync_status_res) => {
                     match sync_status_res {
-                        Ok(sync_status) => Some(self.handle_sync_status_success(sync_status, super::PROPS_FILENAME, true)),
+                        Ok(sync_status) => self.handle_sync_status_success(sync_status, super::PROPS_FILENAME),
                         Err(_) => None,
                     }
                 }
@@ -180,16 +180,15 @@ impl AsyncEditorFacade {
         })
     }
 
-    fn handle_sync_status_success(&self,
-                                  sync_status: SyncStatus,
-                                  filename: &str,
-                                  ignore_contents_identical_message: bool) -> UserSelection {
+    fn handle_sync_status_success(&self, sync_status: SyncStatus, filename: &str) -> Option<UserSelection> {
         match sync_status {
             SyncStatus::UploadSuccess => {
+                debug!("The nextcloud server was updated with the local data");
                 let _ = self.show_message("The nextcloud server was updated with the local data", vec![UserOption::ok()], MessageSeverity::Info);
-                UserSelection::GoTo(Menu::Current)
+                Some(UserSelection::GoTo(Menu::Current))
             }
             SyncStatus::NewAvailable(downloaded_filename) => {
+                debug!("Downloaded new data from the nextcloud server.");
                 let selection = self.show_message("Downloaded new data from the nextcloud server. Do you want to apply them locally now?",
                                                   vec![UserOption::yes(), UserOption::no()],
                                                   MessageSeverity::Info);
@@ -198,12 +197,13 @@ impl AsyncEditorFacade {
                 if selection == UserSelection::UserOption(UserOption::yes()) {
                     debug!("Replacing the local file with the one downloaded from the server");
                     let _ = super::file_handler::replace(&downloaded_filename, filename);
-                    UserSelection::GoTo(Menu::TryPass)
+                    Some(UserSelection::GoTo(Menu::TryPass))
                 } else {
-                    UserSelection::GoTo(Menu::Current)
+                    Some(UserSelection::GoTo(Menu::Current))
                 }
             }
             SyncStatus::NewToMerge(downloaded_filename) => {
+                debug!("Downloaded data from the nextcloud server, but conflicts were identified. The contents will be merged.");
                 let selection =
                     self.show_message("Downloaded data from the nextcloud server, but conflicts were identified. The contents will be merged \
                                    but nothing will be saved. You will need to explicitly save after reviewing the merged data. Do you \
@@ -217,7 +217,7 @@ impl AsyncEditorFacade {
 
                     match self.show_password_enter() {
                         UserSelection::ProvidedPassword(pwd, salt_pos) => {
-                            UserSelection::ImportFromDefaultLocation(downloaded_filename, pwd, salt_pos)
+                            Some(UserSelection::ImportFromDefaultLocation(downloaded_filename, pwd, salt_pos))
                         }
                         other => {
                             let message = format!("Expected a ProvidedPassword but received '{:?}'. Please, consider opening a bug to the \
@@ -229,19 +229,15 @@ impl AsyncEditorFacade {
                                                  consider opening a but to the developers.",
                                                   vec![UserOption::ok()],
                                                   MessageSeverity::Error);
-                            UserSelection::GoTo(Menu::TryPass)
+                            Some(UserSelection::GoTo(Menu::TryPass))
                         }
                     }
                 } else {
-                    UserSelection::GoTo(Menu::Current)
+                    Some(UserSelection::GoTo(Menu::Current))
                 }
             }
-            SyncStatus::None if !ignore_contents_identical_message => {
-                let _ = self.show_message("No need to sync. The contents are identical", vec![UserOption::ok()], MessageSeverity::Info);
-                UserSelection::GoTo(Menu::Current)
-            }
-            _ => {
-                UserSelection::GoTo(Menu::Current)
+            SyncStatus::None => {
+                None
             }
         }
     }

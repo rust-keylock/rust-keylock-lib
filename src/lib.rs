@@ -524,7 +524,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                         match res {
                             Ok(sync_status) => {
                                 let mut tmp_user_selection = UserSelection::GoTo(Menu::Main);
-                                handle_sync_status_success(sync_status, editor, FILENAME, &mut tmp_user_selection, false);
+                                handle_sync_status_success(sync_status, editor, FILENAME, &mut tmp_user_selection);
                                 tmp_user_selection
                             }
                             Err(error) => {
@@ -565,8 +565,7 @@ Warning: Saving will discard all the entries that could not be recovered.
 fn handle_sync_status_success(sync_status: asynch::nextcloud::SyncStatus,
                               editor: &Editor,
                               filename: &str,
-                              user_selection: &mut UserSelection,
-                              ignore_contents_identical_message: bool) {
+                              user_selection: &mut UserSelection) {
     match sync_status {
         asynch::nextcloud::SyncStatus::UploadSuccess => {
             let _ =
@@ -615,11 +614,9 @@ fn handle_sync_status_success(sync_status: asynch::nextcloud::SyncStatus,
                 }
             }
         }
-        asynch::nextcloud::SyncStatus::None if !ignore_contents_identical_message => {
+        asynch::nextcloud::SyncStatus::None => {
             let _ = editor.show_message("No need to sync. The contents are identical", vec![UserOption::ok()], MessageSeverity::Info);
-        }
-        _ => {
-            // ignore
+            *user_selection = UserSelection::GoTo(Menu::Current);
         }
     }
 }
