@@ -266,7 +266,19 @@ impl Editor for AsyncEditorFacade {
 
     fn show_message(&self, message: &str, options: Vec<UserOption>, severity: MessageSeverity) -> UserSelection {
         self.send(UiCommand::ShowMessage(message.to_string(), options, severity));
-        self.receive()
+        let mut opt = None;
+        while opt.is_none() {
+            opt = match self.receive() {
+                uo @ UserSelection::UserOption(_) => {
+                    Some(uo)
+                }
+                other => {
+                    debug!("Ignoring {:?} while waiting for UserOption.", other);
+                    None
+                }
+            };
+        }
+        opt.unwrap()
     }
 }
 
@@ -294,6 +306,32 @@ mod async_tests {
     use std::time::{self, SystemTime};
 
     use super::super::errors;
+    use super::super::{UserOption, MessageSeverity, UserSelection, Editor};
+
+    #[test]
+    fn facade_show_message() {
+        let (user_selection_tx, user_selection_rx) = mpsc::channel();
+        let (command_tx, _) = mpsc::channel();
+
+        let facade = super::AsyncEditorFacade::new(user_selection_rx, command_tx, super::Props::default());
+        assert!(user_selection_tx.send(UserSelection::UserOption(UserOption::ok())).is_ok());
+        let user_selection = facade.show_message("message", vec![UserOption::ok()], MessageSeverity::Info);
+        assert!(user_selection == UserSelection::UserOption(UserOption::ok()));
+    }
+
+    #[test]
+    fn facade_show_message_waits_only_for_user_options() {
+        let (user_selection_tx, user_selection_rx) = mpsc::channel();
+        let (command_tx, _) = mpsc::channel();
+
+        let facade = super::AsyncEditorFacade::new(user_selection_rx, command_tx, super::Props::default());
+        // Send a non-UserOption first. This should be ignored.
+        assert!(user_selection_tx.send(UserSelection::Ack).is_ok());
+        // Send a UserOption.
+        assert!(user_selection_tx.send(UserSelection::UserOption(UserOption::ok())).is_ok());
+        let user_selection = facade.show_message("message", vec![UserOption::ok()], MessageSeverity::Info);
+        assert!(user_selection == UserSelection::UserOption(UserOption::ok()));
+    }
 
     #[test]
     fn user_selection_after_idle_check_timed_out() {
