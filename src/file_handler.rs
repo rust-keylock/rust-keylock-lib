@@ -547,7 +547,8 @@ mod test_file_handler {
     use crypto::blockmodes::CtrModeX8;
     use crypto::buffer::{BufferResult, ReadBuffer, WriteBuffer};
     use crypto::symmetriccipher::{Decryptor, Encryptor, SynchronousStreamCipher};
-    use rand::{OsRng, Rng};
+    use rand::Rng;
+    use rand::rngs::OsRng;
     use toml;
 
     use super::super::{Entry, Props, SystemConfiguration};
@@ -1156,7 +1157,7 @@ mod test_file_handler {
             // Choose randomly one of the salt-key pairs
             let idx = {
                 let mut rng = OsRng::new().ok().unwrap();
-                rng.gen_range::<usize>(0, 3)
+                rng.gen_range(0, 3)
             };
             let ref salt_key_pair = self.salt_key_pairs[idx];
 

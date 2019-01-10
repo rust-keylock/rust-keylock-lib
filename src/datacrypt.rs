@@ -186,7 +186,7 @@ impl Cryptor for BcryptAes {
         // Choose randomly one of the salt-key pairs
         let idx = {
             let mut rng = OsRng::new().ok().unwrap();
-            rng.gen_range::<usize>(0, NUMBER_OF_SALT_KEY_PAIRS)
+            rng.gen_range(0, NUMBER_OF_SALT_KEY_PAIRS)
         };
         let ref salt_key_pair = self.salt_key_pairs[idx];
 
