@@ -1,1 +1,0 @@
-initSidebarItems({"struct":[["SecStr","A data type suitable for storing sensitive information such as passwords and private keys in memory, that implements:"]]});
