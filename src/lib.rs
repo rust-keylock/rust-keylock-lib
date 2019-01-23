@@ -93,11 +93,11 @@ pub fn execute_async<T: AsyncEditor>(editor: &T) {
     let (ui_tx, ui_rx) = mpsc::channel();
     let mut ui_rx_vec = Vec::new();
 
-    let mut editor_facade = asynch::AsyncEditorFacade::new(ui_rx, command_tx, props);
+    let mut editor_facade = asynch::AsyncEditorFacade::new(ui_rx, command_tx, props.clone());
 
     let _ = thread::spawn(move || {
         debug!("Spawned async task");
-        do_execute(&mut editor_facade);
+        do_execute(&mut editor_facade, props);
     });
 
     // The select macro is a nightly feature and is going to be deprecated. Use polling until a better solution is found.
@@ -186,11 +186,11 @@ pub fn execute<T: Editor>(editor: &T) {
     let (command_tx, command_rx) = mpsc::channel();
     let (ui_tx, ui_rx) = mpsc::channel();
 
-    let mut async_editor = asynch::AsyncEditorFacade::new(ui_rx, command_tx, props);
+    let mut async_editor = asynch::AsyncEditorFacade::new(ui_rx, command_tx, props.clone());
 
     let _ = thread::spawn(move || {
         debug!("Spawned async task");
-        do_execute(&mut async_editor);
+        do_execute(&mut async_editor, props);
     });
 
     loop {
@@ -244,7 +244,8 @@ fn send(tx: &Sender<UserSelection>, user_selection: UserSelection) {
     }
 }
 
-fn do_execute(editor: &mut AsyncEditorFacade) {
+fn do_execute(editor: &mut AsyncEditorFacade, _props: Props) {
+    let mut props = _props;
     // Holds the UserSelections
     let mut user_selection;
 
@@ -266,7 +267,7 @@ fn do_execute(editor: &mut AsyncEditorFacade) {
         };
 
         // Take the provided password and do the initialization
-        let (us, cr) = handle_provided_password_for_init(provided_password, FILENAME, &mut safe, &mut configuration, editor);
+        let (us, cr) = handle_provided_password_for_init(provided_password, FILENAME, &mut safe, &mut configuration, editor, &props);
         // If a valid nextcloud configuration is in place, spawn the background async execution
         if configuration.nextcloud.is_filled() {
             let (handle, nextcloud_sync_status_rx) = spawn_nextcloud_async_task(FILENAME, &configuration, &async_task_handle);
@@ -286,7 +287,7 @@ fn do_execute(editor: &mut AsyncEditorFacade) {
                 // Cancel any pending background tasks
                 let _ = async_task_handle.as_ref().map(|handle| handle.stop());
                 let (user_selection, cr) =
-                    handle_provided_password_for_init(editor.show_password_enter(), FILENAME, &mut safe, &mut configuration, editor);
+                    handle_provided_password_for_init(editor.show_password_enter(), FILENAME, &mut safe, &mut configuration, editor, &props);
                 // If a valid nextcloud configuration is in place, spawn the background async execution
                 if configuration.nextcloud.is_filled() {
                     debug!("A valid configuration for Nextcloud synchronization was found. Spawning async tasks");
@@ -310,7 +311,7 @@ fn do_execute(editor: &mut AsyncEditorFacade) {
             }
             UserSelection::ProvidedPassword(pwd, salt_pos) => {
                 debug!("UserSelection::GoTo(Menu::ProvidedPassword)");
-                cryptor = file_handler::create_bcryptor(FILENAME, pwd, salt_pos, true, true).unwrap();
+                cryptor = file_handler::create_bcryptor(FILENAME, pwd, salt_pos, true, true, props.legacy_handling()).unwrap();
                 UserSelection::GoTo(Menu::Main)
             }
             UserSelection::GoTo(Menu::EntriesList(filter)) => {
@@ -360,6 +361,17 @@ fn do_execute(editor: &mut AsyncEditorFacade) {
                         error!("Could not save... {:?}", error);
                     }
                 };
+                if props.legacy_handling() {
+                    info!("Changing handling from legacy to current");
+                    props.set_legacy_handling(false);
+                    match file_handler::save_props(&props, PROPS_FILENAME) {
+                        Ok(_) => { /* Ignore */ }
+                        Err(error) => {
+                            let _ = editor.show_message("Could not update the properties file to non-legacy...", vec![UserOption::ok()], MessageSeverity::Error);
+                            error!("Could not update the properties file to non-legacy... {:?}", error);
+                        }
+                    };
+                }
                 UserSelection::GoTo(Menu::Main)
             }
             UserSelection::GoTo(Menu::Exit) => {
@@ -475,7 +487,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                 match us {
                     UserSelection::ImportFrom(path, pwd, salt_pos) |
                     UserSelection::ImportFromDefaultLocation(path, pwd, salt_pos) => {
-                        let cr = file_handler::create_bcryptor(&path, pwd, salt_pos, false, import_from_default_location).unwrap();
+                        let cr = file_handler::create_bcryptor(&path, pwd, salt_pos, false, import_from_default_location, props.legacy_handling()).unwrap();
                         debug!("UserSelection::ImportFrom(path, pwd, salt_pos)");
 
                         match file_handler::load(&path, &cr, import_from_default_location) {
@@ -625,13 +637,14 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
                                      filename: &str,
                                      safe: &mut Safe,
                                      configuration: &mut RklConfiguration,
-                                     editor: &Editor)
+                                     editor: &Editor,
+                                     props: &Props)
                                      -> (UserSelection, datacrypt::BcryptAes) {
     let user_selection: UserSelection;
     match provided_password {
         UserSelection::ProvidedPassword(pwd, salt_pos) => {
             // New Cryptor here
-            let cr = file_handler::create_bcryptor(filename, pwd.clone(), salt_pos, false, true).unwrap();
+            let cr = file_handler::create_bcryptor(filename, pwd.clone(), salt_pos, false, true, props.legacy_handling()).unwrap();
             // Try to decrypt and load the Entries
             let retrieved_entries = match file_handler::load(filename, &cr, true) {
                 // Success, go to the List of entries
@@ -656,8 +669,7 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
                             error!("{}", error.description());
                             let s =
                                 editor.show_message("Wrong password or number! Please make sure that both the password and number that you \
-                                                   provide are correct. If this is the case, the rust-keylock data is corrupted and \
-                                                   nothing can be done about it.",
+                                                   provide are correct.",
                                                     vec![UserOption::ok()],
                                                     MessageSeverity::Error);
                             match s {
@@ -678,7 +690,7 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
         }
         UserSelection::GoTo(Menu::Exit) => {
             debug!("UserSelection::GoTo(Menu::Exit) was called before providing credentials");
-            let cr = file_handler::create_bcryptor(filename, "dummy".to_string(), 33, false, true).unwrap();
+            let cr = file_handler::create_bcryptor(filename, "dummy".to_string(), 33, false, true, props.legacy_handling()).unwrap();
             let exit_selection = UserSelection::GoTo(Menu::ForceExit);
             (exit_selection, cr)
         }

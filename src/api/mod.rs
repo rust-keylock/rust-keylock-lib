@@ -244,25 +244,35 @@ impl Entry {
 pub struct Props {
     /// Inactivity timeout seconds
     idle_timeout_seconds: i64,
+    /// Fallback to pre v0.8.0 handling
+    legacy_handling: bool,
 }
 
 impl Default for Props {
     fn default() -> Self {
-        Props { idle_timeout_seconds: 1800 }
+        Props {
+            idle_timeout_seconds: 1800,
+            legacy_handling: false,
+        }
     }
 }
 
 impl Props {
-    pub(crate) fn new(idle_timeout_seconds: i64) -> Props {
-        Props { idle_timeout_seconds: idle_timeout_seconds }
+    pub(crate) fn new(idle_timeout_seconds: i64, legacy_handling: bool) -> Props {
+        Props {
+            idle_timeout_seconds,
+            legacy_handling,
+        }
     }
 
     pub fn from_table(table: &Table) -> Result<Props, errors::RustKeylockError> {
         let idle_timeout_seconds = table.get("idle_timeout_seconds").and_then(|value| value.as_integer().and_then(|i_ref| Some(i_ref)));
+        let legacy_handling = table.get("legacy_handling").and_then(|value| value.as_bool().and_then(|b_ref| Some(b_ref)));
 
-        match idle_timeout_seconds {
-            Some(s) => Ok(Self::new(s)),
-            _ => Err(errors::RustKeylockError::ParseError(toml::ser::to_string(&table).unwrap_or("Cannot serialize toml".to_string()))),
+        match (idle_timeout_seconds, legacy_handling) {
+            (Some(s), Some(l)) => Ok(Self::new(s, l)),
+            (Some(s), None) => Ok(Self::new(s, true)),
+            (_, _) => Err(errors::RustKeylockError::ParseError(toml::ser::to_string(&table).unwrap_or("Cannot serialize toml".to_string()))),
         }
     }
 
@@ -270,12 +280,21 @@ impl Props {
     pub fn to_table(&self) -> Table {
         let mut table = Table::new();
         table.insert("idle_timeout_seconds".to_string(), toml::Value::Integer(self.idle_timeout_seconds));
+        table.insert("legacy_handling".to_string(), toml::Value::Boolean(self.legacy_handling));
 
         table
     }
 
     pub fn idle_timeout_seconds(&self) -> i64 {
         self.idle_timeout_seconds
+    }
+
+    pub fn legacy_handling(&self) -> bool {
+        self.legacy_handling
+    }
+
+    pub fn set_legacy_handling(&mut self, lh: bool) {
+        self.legacy_handling = lh
     }
 }
 
@@ -740,14 +759,33 @@ mod api_unit_tests {
 
     #[test]
     fn props_from_table_success() {
-        let toml = r#"idle_timeout_seconds = 33"#;
+        let toml = r#"
+        idle_timeout_seconds = 33
+        legacy_handling = false
+        "#;
 
         let value = toml.parse::<toml::value::Value>().unwrap();
         let table = value.as_table().unwrap();
         let props_opt = super::Props::from_table(&table);
         assert!(props_opt.is_ok());
         let props = props_opt.unwrap();
-        assert!(props.idle_timeout_seconds == 33);
+        assert!(props.idle_timeout_seconds() == 33);
+        assert!(!props.legacy_handling());
+    }
+
+    #[test]
+    fn props_from_table_success_no_legacy_handling_exists() {
+        let toml = r#"
+        idle_timeout_seconds = 33
+        "#;
+
+        let value = toml.parse::<toml::value::Value>().unwrap();
+        let table = value.as_table().unwrap();
+        let props_opt = super::Props::from_table(&table);
+        assert!(props_opt.is_ok());
+        let props = props_opt.unwrap();
+        assert!(props.idle_timeout_seconds() == 33);
+        assert!(props.legacy_handling());
     }
 
     #[test]
@@ -772,7 +810,9 @@ mod api_unit_tests {
 
     #[test]
     fn props_to_table() {
-        let toml = r#"idle_timeout_seconds = 33"#;
+        let toml = r#"
+        idle_timeout_seconds = 33
+        legacy_handling = false"#;
 
         let value = toml.parse::<toml::value::Value>().unwrap();
         let table = value.as_table().unwrap();

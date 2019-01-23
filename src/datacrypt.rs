@@ -68,15 +68,44 @@ pub struct BcryptAes {
 }
 
 impl BcryptAes {
-    /// Creates a new key using the bcrypt algorithm.
-    fn create_new_bcrypt_key(password: &str, salt: &[u8], cost: u32, expand: bool) -> Vec<u8> {
-        let mut key: Vec<u8> = repeat(0u8).take(24).collect();
-        bcrypt(cost, &salt, password.as_bytes(), &mut key);
-        if expand {
-            let append_to_key: Vec<u8> = repeat(0u8).take(8).collect();
-            key.extend(append_to_key.iter());
+    /// Creates a key using the bcrypt algorithm.
+    fn create_bcrypt_key(input: &[u8], salt: &[u8], cost: u32, legacy_handling: bool, output_bytes_size: i32) -> Vec<u8> {
+        let mut key: Vec<u8> = Vec::new();
+
+        // TODO: Delete this legacy handling in the next release.
+        if legacy_handling {
+            let mut legacy_key: Vec<u8> = repeat(0u8).take(24).collect();
+            bcrypt(cost, &salt, input, &mut legacy_key);
+            let mut append_to_key: Vec<u8> = repeat(0u8).take(8).collect();
+            legacy_key.append(&mut append_to_key);
+
+            key.append(&mut legacy_key)
         }
-        key
+
+        // Each bcrypt round output is 24 bytes. In order to have correct iterations we need to divide by 3.
+        let mut iterations = output_bytes_size / 24;
+        if output_bytes_size % 24 > 0 {
+            iterations += 1;
+        }
+
+        for i in 0..iterations {
+            let mut iteration_key: Vec<u8> = repeat(0u8).take(24).collect();
+
+            let iteration_input = if i == 0 {
+                input.to_vec()
+            } else {
+                key.clone()
+            };
+            bcrypt(cost, &salt, &iteration_input, &mut iteration_key);
+
+            key.append(&mut iteration_key);
+        }
+
+        if legacy_handling {
+            key.into_iter().take(32 + output_bytes_size as usize).collect()
+        } else {
+            key.into_iter().take(output_bytes_size as usize).collect()
+        }
     }
 
     /// Creates a new BcryptAes struct, using:
@@ -91,16 +120,17 @@ impl BcryptAes {
                cost: u32,
                iv: Vec<u8>,
                salt_position: usize,
-               hash_bytes: Vec<u8>)
+               hash_bytes: Vec<u8>,
+               legacy_handling: bool)
                -> BcryptAes {
         // Create bcrypt password for the current encrypted data
-        let key = BcryptAes::create_new_bcrypt_key(&password, &salt, cost, true);
+        let key = BcryptAes::create_bcrypt_key(password.as_bytes(), &salt, cost, legacy_handling, 32);
 
         // Create 10 new salt-key pairs to use them for encryption
         let mut salt_key_pairs = Vec::new();
         for _ in 0..NUMBER_OF_SALT_KEY_PAIRS {
             let s = create_random(16);
-            let k = BcryptAes::create_new_bcrypt_key(&password, &s, cost, true);
+            let k = BcryptAes::create_bcrypt_key(password.as_bytes(), &s, cost, false, 32);
             salt_key_pairs.push((s, RklSecret::new(k)));
         }
 
@@ -140,21 +170,22 @@ impl BcryptAes {
 
 impl Cryptor for BcryptAes {
     fn decrypt(&self, input: &[u8]) -> Result<Vec<u8>, RustKeylockError> {
-        let extracted_bytes = extract_bytes_to_decrypt(input, self.salt_position);
-        let integrity_check_ok = self.hasher.validate_hash(&extracted_bytes, &self.hash.borrow());
-
-        let bytes_to_decrypt = if integrity_check_ok {
-            debug!("Integrity check ok!");
-            extracted_bytes
-        } else {
-            warn!("Integrity check failed! Falling back to v0.2.1 handling...");
-            extract_bytes_to_decrypt_fallback_for_v_0_3_0_upgrade(input, self.salt_position)
-        };
+        let bytes_to_decrypt = extract_bytes_to_decrypt(input, self.salt_position);
+        let integrity_check_ok = self.hasher.validate_hash(&bytes_to_decrypt, &self.hash.borrow());
 
         // Code taken from the rust-crypto example
         let mut final_result = Vec::<u8>::new();
         {
-            let mut decryptor = Self::ctr(aes::KeySize::KeySize256, &self.key.borrow(), &self.iv);
+            let mut decryptor = if self.key.borrow().len() > 32 {
+                println!("---------------LEGACY HANDLING");
+                let key: Vec<u8> = self.key.borrow().iter()
+                    .take(32)
+                    .map(|b| b.clone())
+                    .collect();
+                Self::ctr(aes::KeySize::KeySize256, &key, &self.iv)
+            } else {
+                Self::ctr(aes::KeySize::KeySize256, &self.key.borrow(), &self.iv)
+            };
 
             let mut read_buffer = buffer::RefReadBuffer::new(&bytes_to_decrypt);
             let mut buffer = [0; 4096];
@@ -406,52 +437,6 @@ fn extract_bytes_to_decrypt(input_bytes: &[u8], salt_position: usize) -> Vec<u8>
                 tup.0 < salt_position || tup.0 >= salt_position + 80
             } else {
                 tup.0 < bytes.len() - 96
-            }
-        })
-        // The enumerate function created Tuples. Keep only the second tuple element, which is the actual byte.
-        .map(|tup| tup.1.clone())
-        .collect();
-
-    bytes_to_decrypt
-}
-
-// The hash position is right after the actual salt position
-// let hash_position = actual_salt_position + 16;
-//
-// let integrity_ok = if bytes.len() > 96 && bytes.len() >= hash_position {
-// let hash_bytes: Vec<u8> = bytes.clone()
-// .into_iter()
-// .skip(hash_position)
-// .take(64)
-// .collect();
-// super::datacrypt::validate_data_indegrity(&bytes, &hash_bytes);
-// true
-// } else {
-// true
-// };
-//
-// if !integrity_check_ok {
-// let _ = editor.show_message("Data Integrity check failed! This means that that data is corrupted or somehow tampered. If you just upgraded from v0.2.1 to v0.3.0 or higher, there is nothing to worry about. Otherwise, please consider the dangers of the situation...");
-// }
-//
-fn extract_bytes_to_decrypt_fallback_for_v_0_3_0_upgrade(bytes: &[u8], salt_position: usize) -> Vec<u8> {
-    // Check whether the salt exists between the data
-    // The salt can generally exist either between the data, or at the end of the data
-    // To calculate this, we need to substract 16 bytes which is the iv and 16 bytes which is the salt
-    let salt_between_data = salt_position < (bytes.len() - 32);
-
-    // We need to extract the bytes to be decrypted in order to create correct toml data.
-    let bytes_to_decrypt: Vec<u8> = bytes
-        .iter()
-        // The first 16 bytes are the iv. Skip them.
-        .skip(16)
-        .enumerate()
-        // Filter out the 16 bytes of salt that are located after the user-selected position
-        .filter(|tup| {
-            if salt_between_data {
-                tup.0 < salt_position || tup.0 >= salt_position + 16
-            } else {
-                tup.0 < bytes.len() - 32
             }
         })
         // The enumerate function created Tuples. Keep only the second tuple element, which is the actual byte.
@@ -936,7 +921,7 @@ mod test_crypt {
         bytes.append(&mut tmp);
 
         // Create the cryptor
-        let cryptor = super::BcryptAes::new("password".to_string(), iv, 1, salt, 33, hash);
+        let cryptor = super::BcryptAes::new("password".to_string(), iv, 1, salt, 33, hash, false);
         let result = cryptor.decrypt(&bytes);
         assert!(result.is_err());
         match result.err() {
@@ -947,9 +932,27 @@ mod test_crypt {
 
     #[test]
     fn bcrypt_key_size() {
-        let key = super::BcryptAes::create_new_bcrypt_key("123", "saltsaltsaltsalt".as_bytes(), 3, false);
-        assert!(key.len() == 24);
-        let expanded_key = super::BcryptAes::create_new_bcrypt_key("123", "saltsaltsaltsalt".as_bytes(), 3, true);
-        assert!(expanded_key.len() == 32);
+        let legacy_key = super::BcryptAes::create_bcrypt_key("123".as_bytes(), "saltsaltsaltsalt".as_bytes(), 3, true, 32);
+        // 32 bytes legacy + 32 bytes new as defined by the output_bytes_size argument.
+        assert!(legacy_key.len() == 64);
+        let legacy_key_1: Vec<u8> = legacy_key.clone()
+            .into_iter()
+            .take(32)
+            .collect();
+        let legacy_key_2: Vec<u8> = legacy_key.clone()
+            .into_iter()
+            .skip(32)
+            .take(32)
+            .collect();
+        let zeros: Vec<u8> = legacy_key_1.into_iter().skip(24).take(8).collect();
+        assert!(zeros == vec![0, 0, 0, 0, 0, 0, 0, 0]);
+        let last_8_bytes: Vec<u8> = legacy_key_2.into_iter().skip(24).take(8).collect();
+        assert!(last_8_bytes != vec![0, 0, 0, 0, 0, 0, 0, 0]);
+
+        let small_key = super::BcryptAes::create_bcrypt_key("123".as_bytes(), "saltsaltsaltsalt".as_bytes(), 3, false, 12);
+        assert!(small_key.len() == 12);
+
+        let key = super::BcryptAes::create_bcrypt_key("123".as_bytes(), "saltsaltsaltsalt".as_bytes(), 3, false, 32);
+        assert!(key.len() == 32);
     }
 }
