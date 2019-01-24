@@ -22,7 +22,7 @@ rust:
   - beta
   - nightly
 
-script: cargo test --all
+script: cargo test -- --nocapture
 
 after_success:
   - |

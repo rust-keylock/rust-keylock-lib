@@ -177,7 +177,6 @@ impl Cryptor for BcryptAes {
         let mut final_result = Vec::<u8>::new();
         {
             let mut decryptor = if self.key.borrow().len() > 32 {
-                println!("---------------LEGACY HANDLING");
                 let key: Vec<u8> = self.key.borrow().iter()
                     .take(32)
                     .map(|b| b.clone())
