@@ -20,7 +20,7 @@ name = "rust_keylock"
 crate-type = ["rlib", "dylib"]
 
 [dependencies]
-rust-crypto = "0.2"
+rust-crypto = { git = "https://github.com/niluxv/rust-crypto", branch = "stable_0.2" }
 sha3 = "0.8"
 toml = "0.4"
 base64 = "0.10"

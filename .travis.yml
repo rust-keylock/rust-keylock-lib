@@ -1,4 +1,3 @@
-# sudo required for coveralls
 sudo: required
 language: rust
 dist: trusty
