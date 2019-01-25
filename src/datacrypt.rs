@@ -26,12 +26,13 @@ use crypto::bcrypt::bcrypt;
 use crypto::blockmodes::CtrModeX8;
 use crypto::buffer::{BufferResult, ReadBuffer, WriteBuffer};
 use crypto::symmetriccipher::{Decryptor, Encryptor, SynchronousStreamCipher};
-use log::*;
+use hkdf::Hkdf;
 use rand::{Rng, RngCore};
 use rand::rngs::OsRng;
+use sha2::Sha256;
 use sha3::{Digest, Sha3_512};
 
-use super::errors::RustKeylockError;
+use super::errors::{self, RustKeylockError};
 use super::protected::RklSecret;
 
 const NUMBER_OF_SALT_KEY_PAIRS: usize = 10;
@@ -68,8 +69,8 @@ pub struct BcryptAes {
 }
 
 impl BcryptAes {
-    /// Creates a key using the bcrypt algorithm.
-    fn create_bcrypt_key(input: &[u8], salt: &[u8], cost: u32, legacy_handling: bool, output_bytes_size: i32) -> Vec<u8> {
+    /// Creates a key using the bcrypt algorithm with the help of hkdf.
+    fn create_key(input: &[u8], salt: &[u8], cost: u32, legacy_handling: bool, output_bytes_size: i32) -> Vec<u8> {
         let mut key: Vec<u8> = Vec::new();
 
         // TODO: Delete this legacy handling in the next release.
@@ -82,30 +83,18 @@ impl BcryptAes {
             key.append(&mut legacy_key)
         }
 
-        // Each bcrypt round output is 24 bytes. In order to have correct iterations we need to divide by 3.
-        let mut iterations = output_bytes_size / 24;
-        if output_bytes_size % 24 > 0 {
-            iterations += 1;
-        }
 
-        for i in 0..iterations {
-            let mut iteration_key: Vec<u8> = repeat(0u8).take(24).collect();
+        let mut ikm: Vec<u8> = repeat(0u8).take(24).collect();
+        bcrypt(cost, &salt, input, &mut ikm);
 
-            let iteration_input = if i == 0 {
-                input.to_vec()
-            } else {
-                key.clone()
-            };
-            bcrypt(cost, &salt, &iteration_input, &mut iteration_key);
+        let info = "rust-keylock".as_bytes();
 
-            key.append(&mut iteration_key);
-        }
+        let hk = Hkdf::<Sha256>::extract(Some(&salt), &ikm);
+        let mut okm: Vec<u8> = repeat(0u8).take(output_bytes_size as usize).collect();
+        hk.expand(&info, &mut okm).unwrap();
 
-        if legacy_handling {
-            key.into_iter().take(32 + output_bytes_size as usize).collect()
-        } else {
-            key.into_iter().take(output_bytes_size as usize).collect()
-        }
+        key.append(&mut okm);
+        key
     }
 
     /// Creates a new BcryptAes struct, using:
@@ -124,13 +113,14 @@ impl BcryptAes {
                legacy_handling: bool)
                -> BcryptAes {
         // Create bcrypt password for the current encrypted data
-        let key = BcryptAes::create_bcrypt_key(password.as_bytes(), &salt, cost, legacy_handling, 32);
+        // Ask for 64 bytes bcrypt key. Use 32 bytes for data encryption and 32 bytes for hash encryption.
+        let key = BcryptAes::create_key(password.as_bytes(), &salt, cost, legacy_handling, 64);
 
         // Create 10 new salt-key pairs to use them for encryption
         let mut salt_key_pairs = Vec::new();
         for _ in 0..NUMBER_OF_SALT_KEY_PAIRS {
             let s = create_random(16);
-            let k = BcryptAes::create_bcrypt_key(password.as_bytes(), &s, cost, false, 32);
+            let k = BcryptAes::create_key(password.as_bytes(), &s, cost, false, 64);
             salt_key_pairs.push((s, RklSecret::new(k)));
         }
 
@@ -166,45 +156,96 @@ impl BcryptAes {
             }
         }
     }
-}
 
-impl Cryptor for BcryptAes {
-    fn decrypt(&self, input: &[u8]) -> Result<Vec<u8>, RustKeylockError> {
-        let bytes_to_decrypt = extract_bytes_to_decrypt(input, self.salt_position);
-        let integrity_check_ok = self.hasher.validate_hash(&bytes_to_decrypt, &self.hash.borrow());
-
+    fn decrypt_bytes(&self, encrypted: &[u8], key: &[u8]) -> errors::Result<Vec<u8>> {
         // Code taken from the rust-crypto example
-        let mut final_result = Vec::<u8>::new();
+        let mut decrypted = Vec::<u8>::new();
         {
-            let mut decryptor = if self.key.borrow().len() > 32 {
-                let key: Vec<u8> = self.key.borrow().iter()
-                    .take(32)
-                    .map(|b| b.clone())
-                    .collect();
-                Self::ctr(aes::KeySize::KeySize256, &key, &self.iv)
-            } else {
-                Self::ctr(aes::KeySize::KeySize256, &self.key.borrow(), &self.iv)
-            };
+            let mut decryptor = Self::ctr(aes::KeySize::KeySize256, &key, &self.iv);
 
-            let mut read_buffer = buffer::RefReadBuffer::new(&bytes_to_decrypt);
+            let mut read_buffer = buffer::RefReadBuffer::new(&encrypted);
             let mut buffer = [0; 4096];
             let mut write_buffer = buffer::RefWriteBuffer::new(&mut buffer);
 
             loop {
                 let result = decryptor.decrypt(&mut read_buffer, &mut write_buffer, true)?;
-                final_result.extend(write_buffer.take_read_buffer().take_remaining().iter().cloned());
+                decrypted.extend(write_buffer.take_read_buffer().take_remaining().iter().cloned());
                 match result {
                     BufferResult::BufferUnderflow => break,
                     BufferResult::BufferOverflow => {}
                 }
             }
         }
+        Ok(decrypted)
+    }
 
-        // If an error was encountered and integrity checks failed, then return an IntegrityError.
-        // The integrity error contains the decrypted data as well and it is left to the caller to do actions because of the failure.
+    fn encrypt_bytes(&self, plain: &[u8], key: &[u8], iv: &[u8]) -> errors::Result<Vec<u8>> {
+        // Create an encryptor instance of the best performing
+        // type available for the platform.
+        // Code taken from the rust-crypto example
+        let mut encryptor = Self::ctr(aes::KeySize::KeySize256, key, iv);
+
+        let mut encrypted = Vec::<u8>::new();
+        let mut read_buffer = buffer::RefReadBuffer::new(plain);
+
+        let mut buffer = [0; 4096];
+        let mut write_buffer = buffer::RefWriteBuffer::new(&mut buffer);
+
+        loop {
+            let result = encryptor.encrypt(&mut read_buffer, &mut write_buffer, true)?;
+
+            encrypted.extend(write_buffer.take_read_buffer().take_remaining().iter().cloned());
+
+            match result {
+                BufferResult::BufferUnderflow => break,
+                BufferResult::BufferOverflow => {}
+            }
+        }
+
+        Ok(encrypted)
+    }
+}
+
+impl Cryptor for BcryptAes {
+    fn decrypt(&self, input: &[u8]) -> Result<Vec<u8>, RustKeylockError> {
+        let bytes_to_decrypt = extract_bytes_to_decrypt(input, self.salt_position);
+
+        // The key should be 64 bytes long (including 2 32-byte keys). If it is bigger than that, there is the legacy key in the start.
+        let legacy_handling = self.key.borrow().len() > 64;
+
+        let (final_result, integrity_check_ok) = if legacy_handling {
+            let key: Vec<u8> = self.key.borrow().iter()
+                .take(32)
+                .map(|b| b.clone())
+                .collect();
+            let integrity_check_ok = self.hasher.validate_hash(&bytes_to_decrypt, self.hash.borrow());
+            let final_result = self.decrypt_bytes(&bytes_to_decrypt, &key)?;
+
+            (final_result, integrity_check_ok)
+        } else {
+            // The first 32 bytes of the key is for hash decryption.
+            let hash_decryption_key: Vec<u8> = self.key.borrow().iter()
+                .take(32)
+                .map(|b| b.clone())
+                .collect();
+            // The second 32 bytes is the key for data decryption.
+            let data_decryption_key: Vec<u8> = self.key.borrow().iter()
+                .skip(32)
+                .take(32)
+                .map(|b| b.clone())
+                .collect();
+
+            let hash = self.decrypt_bytes(self.hash.borrow(), &hash_decryption_key)?;
+            let integrity_check_ok = self.hasher.validate_hash(&bytes_to_decrypt, &hash);
+            let final_result = self.decrypt_bytes(&bytes_to_decrypt, &data_decryption_key)?;
+
+            (final_result, integrity_check_ok)
+        };
+
+        // If an error was encountered and integrity checks failed, then return a DecryptionError.
+        // Make the decryption error and itgegrity check error indistinguishable.
         if !integrity_check_ok {
-            debug!("Returning an IntegrityError...");
-            Err(RustKeylockError::IntegrityError(final_result))
+            Err(RustKeylockError::DecryptionError("".to_string()))
         } else {
             Ok(final_result)
         }
@@ -220,33 +261,26 @@ impl Cryptor for BcryptAes {
         };
         let ref salt_key_pair = self.salt_key_pairs[idx];
 
-        let bytes_to_save = {
-            // Create an encryptor instance of the best performing
-            // type available for the platform.
-            // Code taken from the rust-crypto example
-            let mut encryptor = Self::ctr(aes::KeySize::KeySize256, &salt_key_pair.1.borrow(), &iv);
+        // The first 32 bytes is the key for hash encryption.
+        let hash_encryption_key: Vec<u8> = salt_key_pair.1.borrow().iter()
+            .take(32)
+            .map(|b| b.clone())
+            .collect();
+        // The second 32 bytes is the key for data encryption.
+        let data_encryption_key: Vec<u8> = salt_key_pair.1.borrow().iter()
+            .skip(32)
+            .take(32)
+            .map(|b| b.clone())
+            .collect();
 
-            let mut encryption_result = Vec::<u8>::new();
-            let mut read_buffer = buffer::RefReadBuffer::new(input);
+        // Encrypt data
+        let encrypted_data_bytes = self.encrypt_bytes(input, &data_encryption_key, &iv)?;
+        // Calculate hash and encrypt
+        let hash_bytes = self.hasher.calculate_hash(&encrypted_data_bytes);
+        let encrypted_hash_bytes = self.encrypt_bytes(&hash_bytes, &hash_encryption_key, &iv)?;
 
-            let mut buffer = [0; 4096];
-            let mut write_buffer = buffer::RefWriteBuffer::new(&mut buffer);
-
-            loop {
-                let result = encryptor.encrypt(&mut read_buffer, &mut write_buffer, true)?;
-
-                encryption_result.extend(write_buffer.take_read_buffer().take_remaining().iter().cloned());
-
-                match result {
-                    BufferResult::BufferUnderflow => break,
-                    BufferResult::BufferOverflow => {}
-                }
-            }
-            // Compose the encrypted bytes with the iv and salt
-            compose_bytes_to_save(&encryption_result, self.salt_position, &salt_key_pair.0, &iv, &self.hasher)
-        };
-
-        Ok(bytes_to_save)
+        // Compose the encrypted bytes with the iv and salt
+        Ok(compose_bytes_to_save(&encrypted_data_bytes, self.salt_position, &salt_key_pair.0, &iv, &encrypted_hash_bytes))
     }
 }
 
@@ -445,11 +479,8 @@ fn extract_bytes_to_decrypt(input_bytes: &[u8], salt_position: usize) -> Vec<u8>
     bytes_to_decrypt
 }
 
-fn compose_bytes_to_save(data: &[u8], salt_position: usize, salt: &[u8], iv: &[u8], hasher: &Sha3Keccak512) -> Vec<u8> {
+fn compose_bytes_to_save(data: &[u8], salt_position: usize, salt: &[u8], iv: &[u8], hash: &[u8]) -> Vec<u8> {
     let mut bytes_to_save: Vec<u8> = Vec::new();
-
-    // Calculate the hash of the data
-    let hash_bytes = hasher.calculate_hash(data);
 
     // Clone the iv in order to append it in the bytes_to_save
     let mut mut_iv = Vec::from(iv);
@@ -467,8 +498,8 @@ fn compose_bytes_to_save(data: &[u8], salt_position: usize, salt: &[u8], iv: &[u
     bytes_to_save.append(&mut mut_iv);
     // Push the data, the salt and the hash
     // The bytes to return contain the iv, the salt, the hash and the actual data.
-    // However, since the iv is already appended from above, the length in question is data.len() + salt.len() + hash_bytes.len()
-    let length = data.len() + salt.len() + hash_bytes.len();
+    // However, since the iv is already appended from above, the length in question is data.len() + salt.len() + hash.len()
+    let length = data.len() + salt.len() + hash.len();
 
     for index in 0..length {
         // Push data bytes before the salt position
@@ -479,7 +510,7 @@ fn compose_bytes_to_save(data: &[u8], salt_position: usize, salt: &[u8], iv: &[u
             bytes_to_save.push(salt[index - inferred_salt_position]);
         } else if index >= hash_position && index < hash_position + 64 {
             // Start pushing the hash bytes after the salt
-            bytes_to_save.push(hash_bytes[index - hash_position]);
+            bytes_to_save.push(hash[index - hash_position]);
         } else {
             // Push data bytes after the salt + hash position
             bytes_to_save.push(data[index - 80]);
@@ -514,8 +545,9 @@ mod test_crypt {
         let iv = vec![0x11u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8,
                       0x03u8, 0x10u8];
         let salt_position = 0;
+        let hash = super::Sha3Keccak512::new().calculate_hash(&data);
 
-        let vec = super::compose_bytes_to_save(&data, salt_position, &salt, &iv, &super::Sha3Keccak512::new());
+        let vec = super::compose_bytes_to_save(&data, salt_position, &salt, &iv, &hash);
 
         let i: Vec<u8> = vec.iter().cloned().take(16).collect();
         let s: Vec<u8> = vec.iter().cloned().skip(16).take(16).collect();
@@ -523,7 +555,7 @@ mod test_crypt {
         let d: Vec<u8> = vec.iter().cloned().skip(96).take(16).collect();
         assert!(i == iv);
         assert!(s == salt);
-        assert!(h == super::Sha3Keccak512::new().calculate_hash(&data));
+        assert!(h == hash);
         assert!(d == data);
     }
 
@@ -535,8 +567,9 @@ mod test_crypt {
         let iv = vec![0x11u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8,
                       0x03u8, 0x10u8];
         let salt_position = 0;
+        let hash = super::Sha3Keccak512::new().calculate_hash(&data);
 
-        let vec = super::compose_bytes_to_save(&data, salt_position, &salt, &iv, &super::Sha3Keccak512::new());
+        let vec = super::compose_bytes_to_save(&data, salt_position, &salt, &iv, &hash);
 
         let i: Vec<u8> = vec.iter().cloned().take(16).collect();
         let s: Vec<u8> = vec.iter().cloned().skip(16).take(16).collect();
@@ -544,7 +577,7 @@ mod test_crypt {
         let d: Vec<u8> = vec.iter().cloned().skip(96).take(16).collect();
         assert!(i == iv);
         assert!(s == salt);
-        assert!(h == super::Sha3Keccak512::new().calculate_hash(&data));
+        assert!(h == hash);
         assert!(d == data);
     }
 
@@ -557,8 +590,9 @@ mod test_crypt {
         let iv = vec![0x11u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8,
                       0x03u8, 0x10u8];
         let salt_position = 3;
+        let hash = super::Sha3Keccak512::new().calculate_hash(&data);
 
-        let vec = super::compose_bytes_to_save(&data, salt_position, &salt, &iv, &super::Sha3Keccak512::new());
+        let vec = super::compose_bytes_to_save(&data, salt_position, &salt, &iv, &hash);
 
         let i: Vec<u8> = vec.iter().cloned().take(16).collect();
         // The first part of the data should be from 16 to 19
@@ -572,7 +606,7 @@ mod test_crypt {
         let h: Vec<u8> = vec.iter().cloned().skip(35).take(64).collect();
         assert!(i == iv);
         assert!(s == salt);
-        assert!(h == super::Sha3Keccak512::new().calculate_hash(&data));
+        assert!(h == hash);
         assert!(d == data);
     }
 
@@ -584,8 +618,9 @@ mod test_crypt {
         let iv = vec![0x11u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8,
                       0x03u8, 0x10u8];
         let salt_position = 3;
+        let hash = super::Sha3Keccak512::new().calculate_hash(&data);
 
-        let vec = super::compose_bytes_to_save(&data, salt_position, &salt, &iv, &super::Sha3Keccak512::new());
+        let vec = super::compose_bytes_to_save(&data, salt_position, &salt, &iv, &hash);
 
         let i: Vec<u8> = vec.iter().cloned().take(16).collect();
         let s: Vec<u8> = vec.iter().cloned().skip(16).take(16).collect();
@@ -593,7 +628,7 @@ mod test_crypt {
 
         assert!(i == iv);
         assert!(s == salt);
-        assert!(h == super::Sha3Keccak512::new().calculate_hash(&data));
+        assert!(h == hash);
     }
 
     #[test]
@@ -605,8 +640,9 @@ mod test_crypt {
         let iv = vec![0x11u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8,
                       0x03u8, 0x10u8];
         let salt_position = 33;
+        let hash = super::Sha3Keccak512::new().calculate_hash(&data);
 
-        let vec = super::compose_bytes_to_save(&data, salt_position, &salt, &iv, &super::Sha3Keccak512::new());
+        let vec = super::compose_bytes_to_save(&data, salt_position, &salt, &iv, &hash);
 
         let i: Vec<u8> = vec.iter().cloned().take(16).collect();
         let d: Vec<u8> = vec.iter().cloned().skip(16).take(16).collect();
@@ -616,7 +652,7 @@ mod test_crypt {
         assert!(i == iv);
         assert!(s == salt);
         assert!(d == data);
-        assert!(h == super::Sha3Keccak512::new().calculate_hash(&data));
+        assert!(h == hash);
     }
 
     #[test]
@@ -627,8 +663,9 @@ mod test_crypt {
         let iv = vec![0x11u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8,
                       0x03u8, 0x10u8];
         let salt_position = 33;
+        let hash = super::Sha3Keccak512::new().calculate_hash(&data);
 
-        let vec = super::compose_bytes_to_save(&data, salt_position, &salt, &iv, &super::Sha3Keccak512::new());
+        let vec = super::compose_bytes_to_save(&data, salt_position, &salt, &iv, &hash);
 
         let i: Vec<u8> = vec.iter().cloned().take(16).collect();
         let d: Vec<u8> = Vec::new();
@@ -636,7 +673,7 @@ mod test_crypt {
         let h: Vec<u8> = vec.iter().cloned().skip(32).take(64).collect();
         assert!(i == iv);
         assert!(s == salt);
-        assert!(h == super::Sha3Keccak512::new().calculate_hash(&data));
+        assert!(h == hash);
         assert!(d == data);
     }
 
@@ -649,8 +686,9 @@ mod test_crypt {
         let iv = vec![0x11u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8,
                       0x03u8, 0x10u8];
         let salt_position = 16;
+        let hash = super::Sha3Keccak512::new().calculate_hash(&data);
 
-        let vec = super::compose_bytes_to_save(&data, salt_position, &salt, &iv, &super::Sha3Keccak512::new());
+        let vec = super::compose_bytes_to_save(&data, salt_position, &salt, &iv, &hash);
 
         let i: Vec<u8> = vec.iter().cloned().take(16).collect();
         let d: Vec<u8> = vec.iter().cloned().skip(16).take(16).collect();
@@ -659,7 +697,7 @@ mod test_crypt {
         assert!(i == iv);
         assert!(s == salt);
         assert!(d == data);
-        assert!(h == super::Sha3Keccak512::new().calculate_hash(&data));
+        assert!(h == hash);
     }
 
     #[test]
@@ -670,8 +708,9 @@ mod test_crypt {
         let iv = vec![0x11u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8, 0x03u8, 0x10u8, 0x43u8,
                       0x03u8, 0x10u8];
         let salt_position = 16;
+        let hash = super::Sha3Keccak512::new().calculate_hash(&data);
 
-        let vec = super::compose_bytes_to_save(&data, salt_position, &salt, &iv, &super::Sha3Keccak512::new());
+        let vec = super::compose_bytes_to_save(&data, salt_position, &salt, &iv, &hash);
 
         let i: Vec<u8> = vec.iter().cloned().take(16).collect();
         let d: Vec<u8> = Vec::new();
@@ -680,7 +719,7 @@ mod test_crypt {
         assert!(i == iv);
         assert!(s == salt);
         assert!(d == data);
-        assert!(h == super::Sha3Keccak512::new().calculate_hash(&data));
+        assert!(h == hash);
     }
 
     #[test]
@@ -924,14 +963,14 @@ mod test_crypt {
         let result = cryptor.decrypt(&bytes);
         assert!(result.is_err());
         match result.err() {
-            Some(super::super::errors::RustKeylockError::IntegrityError(_)) => assert!(true),
+            Some(super::super::errors::RustKeylockError::DecryptionError(_)) => assert!(true),
             _ => assert!(false),
         }
     }
 
     #[test]
-    fn bcrypt_key_size() {
-        let legacy_key = super::BcryptAes::create_bcrypt_key("123".as_bytes(), "saltsaltsaltsalt".as_bytes(), 3, true, 32);
+    fn bcrypt_key_creation() {
+        let legacy_key = super::BcryptAes::create_key("123".as_bytes(), "saltsaltsaltsalt".as_bytes(), 3, true, 32);
         // 32 bytes legacy + 32 bytes new as defined by the output_bytes_size argument.
         assert!(legacy_key.len() == 64);
         let legacy_key_1: Vec<u8> = legacy_key.clone()
@@ -948,10 +987,16 @@ mod test_crypt {
         let last_8_bytes: Vec<u8> = legacy_key_2.into_iter().skip(24).take(8).collect();
         assert!(last_8_bytes != vec![0, 0, 0, 0, 0, 0, 0, 0]);
 
-        let small_key = super::BcryptAes::create_bcrypt_key("123".as_bytes(), "saltsaltsaltsalt".as_bytes(), 3, false, 12);
+        let small_key = super::BcryptAes::create_key("123".as_bytes(), "saltsaltsaltsalt".as_bytes(), 3, false, 12);
         assert!(small_key.len() == 12);
 
-        let key = super::BcryptAes::create_bcrypt_key("123".as_bytes(), "saltsaltsaltsalt".as_bytes(), 3, false, 32);
+        let key = super::BcryptAes::create_key("123".as_bytes(), "saltsaltsaltsalt".as_bytes(), 3, false, 32);
         assert!(key.len() == 32);
+
+        // Verify consistent creation
+        let key: Vec<u8> = super::BcryptAes::create_key("123".as_bytes(), "saltsaltsaltsalt".as_bytes(), 3, false, 64);
+        for _ in 0..20 {
+            assert!(&super::BcryptAes::create_key("123".as_bytes(), "saltsaltsaltsalt".as_bytes(), 3, false, 64) == &key);
+        }
     }
 }

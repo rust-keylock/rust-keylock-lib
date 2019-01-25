@@ -41,7 +41,6 @@ pub enum RustKeylockError {
     ParseError(String),
     DecryptionError(String),
     EncryptionError(String),
-    IntegrityError(Vec<u8>),
     SyncError(String),
 }
 
@@ -52,7 +51,6 @@ impl fmt::Display for RustKeylockError {
             &RustKeylockError::ParseError(ref message) => write!(f, "Cannot parse: \n{}", message),
             &RustKeylockError::DecryptionError(ref message) => write!(f, "Could not decrypt: {}", message),
             &RustKeylockError::EncryptionError(ref message) => write!(f, "Could not encrypt: {}", message),
-            &RustKeylockError::IntegrityError(_) => write!(f, "Integrity check failed"),
             &RustKeylockError::SyncError(ref message) => write!(f, "Could not synchronize the rust-keylock data: {}", message),
         }
     }
@@ -65,7 +63,6 @@ impl Error for RustKeylockError {
             RustKeylockError::ParseError(_) => ("Error during parsing"),
             RustKeylockError::DecryptionError(_) => ("Error during decryption"),
             RustKeylockError::EncryptionError(_) => ("Error during encryption"),
-            RustKeylockError::IntegrityError(_) => ("Error during integrity checking"),
             RustKeylockError::SyncError(_) => ("Error while synchronizing"),
         }
     }

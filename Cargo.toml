@@ -21,7 +21,9 @@ crate-type = ["rlib", "dylib"]
 
 [dependencies]
 rust-crypto = { git = "https://github.com/niluxv/rust-crypto", branch = "stable_0.2" }
+sha2 = "0.8"
 sha3 = "0.8"
+hkdf = "0.7"
 toml = "0.4"
 base64 = "0.10"
 rand = "0.6"

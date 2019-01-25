@@ -456,14 +456,8 @@ fn load_existing_file<'a>(file_path: &PathBuf, cryptor_opt: Option<&Cryptor>) ->
                 debug!("Decrypting passwords file...");
                 match cryptor.decrypt(&bytes) {
                     Ok(dbytes) => Ok(String::from_utf8(dbytes)?),
-                    Err(errors::RustKeylockError::IntegrityError(dbytes)) => {
-                        match String::from_utf8(dbytes) {
-                            Ok(toml_string) => {
-                                warn!("Temporarily ignoring integrity error in order to be able to upgrade from v0.2.1 to v.0.3.0");
-                                Ok(toml_string)
-                            }
-                            Err(_) => Err(errors::RustKeylockError::IntegrityError(Vec::new())),
-                        }
+                    Err(errors::RustKeylockError::DecryptionError(_)) => {
+                        Err(errors::RustKeylockError::DecryptionError("".to_string()))
                     }
                     Err(other) => Err(other),
                 }
@@ -790,8 +784,12 @@ mod test_file_handler {
     }
 
     #[test]
+    #[ignore]
     fn create_encrypt_and_then_decrypt_no_data() {
         let filename = "create_encrypt_and_then_decrypt_no_real_data.toml";
+        // Create and delete the file in order the path to be created. Protect against the possibility that this test case runs first.
+        create_file_with_contents(filename, "");
+        delete_file(filename);
 
         let salt_position = 33;
         let password = "123".to_string();
@@ -800,10 +798,10 @@ mod test_file_handler {
         let nc_conf = NextcloudConfiguration::default();
         let sys_conf = SystemConfiguration::default();
 
-        let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, false).unwrap();
+        let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, true).unwrap();
         assert!(super::save(super::RklContent::new(entries.clone(), nc_conf, sys_conf), filename, &cryptor, true).is_ok());
 
-        cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, false).unwrap();
+        cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, true).unwrap();
 
         let m = super::load(filename, &cryptor, true);
         let rkl_content = m.unwrap();
@@ -879,7 +877,7 @@ mod test_file_handler {
 
         assert!(result.is_err());
         match result.err() {
-            Some(super::super::errors::RustKeylockError::IntegrityError(_)) => assert!(true),
+            Some(super::super::errors::RustKeylockError::DecryptionError(_)) => assert!(true),
             _ => assert!(false),
         }
 
@@ -1029,5 +1027,4 @@ mod test_file_handler {
         let path = path_buf.to_str().unwrap();
         assert!(fs::remove_file(path).is_ok());
     }
-
 }
