@@ -55,8 +55,8 @@ pub fn create_bcryptor(filename: &str,
                 file.read_to_end(&mut bytes)?;
 
                 // The iv is always in the start of the file
-                // If the bytes are not more than 32 (iv:16 + salt:16) it means that there is no data for entries
-                let iv = if bytes.len() > 32 && !reinitialize_randoms {
+                // If the bytes are not more than 96 (iv:16 + salt:16 + hash:64) it means that there is no data for entries
+                let iv = if bytes.len() >= 96 && !reinitialize_randoms {
                     bytes.iter()
                         .take(16)
                         .map(|b| b.clone())
@@ -65,9 +65,19 @@ pub fn create_bcryptor(filename: &str,
                     super::datacrypt::create_random(16)
                 };
                 // The actual salt position is the one selected by the user, plus 16 bytes because the first 16 bytes is the iv
-                let actual_salt_position = salt_position + 16;
-                // If the bytes are not more than 32 (iv:16 + salt:16) it means that there is no data for entries
-                let salt = if bytes.len() > 32 && !reinitialize_randoms && bytes.len() >= actual_salt_position {
+                let actual_salt_position = if bytes.len() == 96 {
+                    16
+                } else {
+                    salt_position + 16
+                };
+                // If the bytes are not more than 96 (iv:16 + salt:16 + hash:64) it means that there is no data for entries
+                let salt = if bytes.len() > 96 && !reinitialize_randoms && bytes.len() >= actual_salt_position {
+                    bytes.iter()
+                        .skip(actual_salt_position)
+                        .take(16)
+                        .map(|b| b.clone())
+                        .collect()
+                } else if bytes.len() == 96 {
                     bytes.iter()
                         .skip(actual_salt_position)
                         .take(16)
@@ -80,18 +90,9 @@ pub fn create_bcryptor(filename: &str,
                 // The hash position is right after the actual salt position
                 let hash_position = actual_salt_position + 16;
                 // If the bytes are more than 96, use the salt position in order to infer the hash position
-                let hash_bytes: Vec<u8> = if bytes.len() > 96 {
+                let hash_bytes: Vec<u8> = if bytes.len() >= 96 {
                     bytes.iter()
                         .skip(hash_position)
-                        .take(64)
-                        .map(|b| b.clone())
-                        .collect()
-                } else if bytes.len() == 96 {
-                    // If the bytes are 96, it means that there are no user data.
-                    // Thus, the hash is located right after the salt, which is in the position 16.
-                    // Skip 16 bytes (iv), 16 bytes (salt) and take 64 bytes (hash)
-                    bytes.iter()
-                        .skip(32)
                         .take(64)
                         .map(|b| b.clone())
                         .collect()
@@ -784,7 +785,6 @@ mod test_file_handler {
     }
 
     #[test]
-    #[ignore]
     fn create_encrypt_and_then_decrypt_no_data() {
         let filename = "create_encrypt_and_then_decrypt_no_real_data.toml";
         // Create and delete the file in order the path to be created. Protect against the possibility that this test case runs first.
@@ -798,10 +798,10 @@ mod test_file_handler {
         let nc_conf = NextcloudConfiguration::default();
         let sys_conf = SystemConfiguration::default();
 
-        let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, true).unwrap();
+        let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, false).unwrap();
         assert!(super::save(super::RklContent::new(entries.clone(), nc_conf, sys_conf), filename, &cryptor, true).is_ok());
 
-        cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, true).unwrap();
+        cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, false).unwrap();
 
         let m = super::load(filename, &cryptor, true);
         let rkl_content = m.unwrap();

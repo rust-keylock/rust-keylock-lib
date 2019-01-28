@@ -773,6 +773,7 @@ mod unit_tests {
     use super::api::{Entry, Menu, UserOption, UserSelection};
     use super::asynch::nextcloud::NextcloudConfiguration;
     use super::file_handler;
+    use clipboard::{ClipboardContext, ClipboardProvider};
 
     #[test]
     fn try_recv_from_vec() {
@@ -840,6 +841,8 @@ mod unit_tests {
         execute_export_entries();
         execute_import_entries();
         execute_update_configuration();
+        execute_synchronize();
+        execute_add_to_clipboard();
     }
 
     fn execute_try_pass() {
@@ -1069,6 +1072,51 @@ mod unit_tests {
             UserSelection::GoTo(Menu::ForceExit)]);
 
         super::execute(&editor);
+        assert!(editor.all_selections_executed());
+    }
+
+    fn execute_synchronize() {
+        println!("===========execute_synchronize");
+        let editor = TestEditor::new(vec![
+            // Login
+            UserSelection::ProvidedPassword("123".to_string(), 0),
+            // Synchronize
+            UserSelection::GoTo(Menu::Synchronize),
+            // Ack message
+            UserSelection::UserOption(UserOption::ok()),
+            // Exit
+            UserSelection::GoTo(Menu::ForceExit)]);
+
+        super::execute(&editor);
+        assert!(editor.all_selections_executed());
+    }
+
+    fn execute_add_to_clipboard() {
+        println!("===========execute_add_to_clipboard");
+        let a_string = "1string".to_string();
+        let editor = TestEditor::new(vec![
+            // Login
+            UserSelection::ProvidedPassword("123".to_string(), 0),
+            // Add to clipboard
+            UserSelection::AddToClipboard(a_string.clone()),
+            // Ack message
+            UserSelection::UserOption(UserOption::ok()),
+            // Exit
+            UserSelection::GoTo(Menu::ForceExit)]);
+
+        super::execute(&editor);
+
+        match ClipboardProvider::new() as Result<ClipboardContext, Box<std::error::Error>> {
+            Ok(mut ctx) => {
+                let clip_res = ctx.get_contents();
+                assert!(clip_res.is_ok());
+                assert!(clip_res.unwrap() == a_string);
+            }
+            Err(_) => {
+                assert!(false);
+            }
+        }
+
         assert!(editor.all_selections_executed());
     }
 
