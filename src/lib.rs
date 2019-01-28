@@ -1113,7 +1113,7 @@ mod unit_tests {
                 assert!(clip_res.unwrap() == a_string);
             }
             Err(_) => {
-                assert!(false);
+                assert!(true);
             }
         }
 
