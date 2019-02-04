@@ -392,14 +392,16 @@ fn do_execute(editor: &mut AsyncEditorFacade, _props: Props) {
                 debug!("UserSelection::ReplaceEntry(index, entry)");
                 contents_changed = true;
                 let _ = safe.replace_entry(index, entry).map_err(|err| {
-                    let _ = editor.show_message(&format!("{:?}", err), vec![UserOption::ok()], MessageSeverity::Error);
+                    error!("Could not replace entry: {:?}", err);
+                    let _ = editor.show_message("Could not replace the password entry. Please see the logs for more details.", vec![UserOption::ok()], MessageSeverity::Error);
                 });
                 UserSelection::GoTo(Menu::EntriesList(safe.get_filter()))
             }
             UserSelection::DeleteEntry(index) => {
                 debug!("UserSelection::DeleteEntry(index)");
                 let _ = safe.remove_entry(index).map_err(|err| {
-                    let _ = editor.show_message(&format!("{:?}", err), vec![UserOption::ok()], MessageSeverity::Error);
+                    error!("Could not delete entry {:?}", err);
+                    let _ = editor.show_message("Could not delete entry. Please see the logs for more details.", vec![UserOption::ok()], MessageSeverity::Error);
                 });
                 contents_changed = true;
                 UserSelection::GoTo(Menu::EntriesList("".to_string()))
@@ -464,8 +466,8 @@ Warning: Saving will discard all the entries that could not be recovered.
                             let _ = editor.show_message("Export completed successfully!", vec![UserOption::ok()], MessageSeverity::default());
                         }
                         Err(error) => {
-                            let _ = editor.show_message("Could not export...", vec![UserOption::ok()], MessageSeverity::Error);
                             error!("Could not export... {:?}", error);
+                            let _ = editor.show_message("Could not export...", vec![UserOption::ok()], MessageSeverity::Error);
                         }
                     };
                     UserSelection::GoTo(Menu::Main)
@@ -499,8 +501,8 @@ Warning: Saving will discard all the entries that could not be recovered.
                                 let _ = editor.show_message(&message, vec![UserOption::ok()], MessageSeverity::default());
                             }
                             Err(error) => {
-                                let _ = editor.show_message("Could not import...", vec![UserOption::ok()], MessageSeverity::Error);
                                 error!("Could not import... {:?}", error);
+                                let _ = editor.show_message("Could not import...", vec![UserOption::ok()], MessageSeverity::Error);
                             }
                         };
                     }
@@ -540,15 +542,15 @@ Warning: Saving will discard all the entries that could not be recovered.
                                 tmp_user_selection
                             }
                             Err(error) => {
-                                let error_message = format!("Could not synchronize... Error detail: {:?}", error);
-                                let _ = editor.show_message(&error_message, vec![UserOption::ok()], MessageSeverity::Error);
+                                error!("Could not synchronize: {:?}", error);
+                                let _ = editor.show_message("Could not synchronize. Please see the logs for more details.", vec![UserOption::ok()], MessageSeverity::Error);
                                 UserSelection::GoTo(Menu::ShowConfiguration)
                             }
                         }
                     }
                     Err(error) => {
-                        let error_message = format!("Could not synchronize... Error detail: {:?}", error);
-                        let _ = editor.show_message(&error_message, vec![UserOption::ok()], MessageSeverity::Error);
+                        format!("Could not synchronize (Channel reception error): {:?}", error);
+                        let _ = editor.show_message("Could not synchronize. Please see the logs for more details.", vec![UserOption::ok()], MessageSeverity::Error);
                         UserSelection::GoTo(Menu::ShowConfiguration)
                     }
                 };

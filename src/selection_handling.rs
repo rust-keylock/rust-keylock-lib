@@ -34,6 +34,7 @@ pub(crate) fn add_to_clipboard(content: String, editor: &Editor) -> UserSelectio
             let _ = editor.show_message("Copied!", vec![UserOption::ok()], MessageSeverity::default());
         }
         Err(error) => {
+            error!("Could not copy: {:?}", error);
             let error_message = format!("Could not copy... Reason: {}", error.description());
             let _ = editor.show_message(&error_message, vec![UserOption::ok()], MessageSeverity::Error);
         }
