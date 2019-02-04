@@ -14,9 +14,10 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::api::{Menu, MessageSeverity, UserOption, UserSelection};
-use crate::{errors, Editor};
 use clipboard::{ClipboardContext, ClipboardProvider};
+use crate::{Editor, errors};
+use crate::api::{Menu, MessageSeverity, UserOption, UserSelection};
+use log::*;
 use std;
 use std::error::Error;
 
@@ -46,10 +47,10 @@ pub(crate) fn add_to_clipboard(content: String, editor: &Editor) -> UserSelectio
 
 #[cfg(test)]
 mod selection_handling_unit_tests {
+    use clipboard::{ClipboardContext, ClipboardProvider};
     use crate::api::{Menu, MessageSeverity, RklConfiguration, UserOption, UserSelection};
     use crate::api::safe::Safe;
     use crate::Editor;
-    use clipboard::{ClipboardContext, ClipboardProvider};
     use std;
 
     #[test]
