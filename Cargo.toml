@@ -1,6 +1,6 @@
 [package]
 name = "rust_keylock"
-version = "0.8.0"
+version = "0.9.0"
 authors = ["aston <astonbitecode@gmail.com>"]
 description = "A password manager with goals to be Secure, Simple to use, Portable and Extensible"
 keywords = ["password", "manager", "safe", "encryption", "key"]
