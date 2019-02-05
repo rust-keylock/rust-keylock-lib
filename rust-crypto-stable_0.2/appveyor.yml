@@ -1,0 +1,77 @@
+# Based on the "rust-everywhere" template v0.1.42 and the "trust" template v0.1.1
+# https://github.com/japaric/rust-everywhere/blob/master/appveyor.yml
+# https://github.com/japaric/trust/blob/master/appveyor.yml
+# Test only, without deploy
+
+clone_depth: 50
+image: Visual Studio 2017
+
+environment:
+  matrix:
+    # Stable channel
+    - TARGET: i686-pc-windows-gnu
+      CHANNEL: stable
+    - TARGET: i686-pc-windows-msvc
+      CHANNEL: stable
+    - TARGET: x86_64-pc-windows-gnu
+      CHANNEL: stable
+    - TARGET: x86_64-pc-windows-msvc
+      CHANNEL: stable
+    # Beta channel
+    - TARGET: i686-pc-windows-gnu
+      CHANNEL: beta
+    - TARGET: i686-pc-windows-msvc
+      CHANNEL: beta
+    - TARGET: x86_64-pc-windows-gnu
+      CHANNEL: beta
+    - TARGET: x86_64-pc-windows-msvc
+      CHANNEL: beta
+    # Nightly channel
+    - TARGET: i686-pc-windows-gnu
+      CHANNEL: nightly
+    - TARGET: i686-pc-windows-msvc
+      CHANNEL: nightly
+    - TARGET: x86_64-pc-windows-gnu
+      CHANNEL: nightly
+    - TARGET: x86_64-pc-windows-msvc
+      CHANNEL: nightly
+
+# Install Rust and Cargo
+# (Based on from https://github.com/rust-lang/libc/blob/master/appveyor.yml)
+install:
+  # Add MinGw to PATH environment
+  - ps: >-
+      If ($Env:TARGET -eq 'x86_64-pc-windows-gnu') {
+        $Env:PATH += ';C:\msys64\mingw64\bin'
+      } ElseIf ($Env:TARGET -eq 'i686-pc-windows-gnu') {
+        $Env:PATH += ';C:\msys64\mingw32\bin'
+      }
+  # Download the rustup installer
+  - curl -sSf -o rustup-init.exe https://win.rustup.rs
+  # Run the rustup installer
+  - rustup-init.exe --default-host %TARGET% --default-toolchain %CHANNEL% -y
+  - set PATH=%PATH%;C:\Users\appveyor\.cargo\bin
+  - rustc -Vv
+  - cargo -V
+
+# 'cargo test' takes care of building for us, so disable Appveyor's build stage. This prevents
+# the "directory does not contain a project or solution file" error.
+# source: https://github.com/starkat99/appveyor-rust/blob/master/appveyor.yml#L113
+build: false
+
+# Equivalent to Travis' `script` phase
+test_script:
+  - cargo build --verbose
+  - cargo test
+
+for:
+- branches:
+    only:
+      - /stable_[:digit:]+[.][:digit:]+/
+      - /test_rc_.+/
+
+  test_script:
+    - cargo clean
+    - cargo package
+    - cargo test --release
+    - cargo doc
