@@ -16,8 +16,10 @@
 
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread;
-use std::time::{self, Duration, SystemTime};
-
+use std::time::{self, Duration, SystemTime, Instant};
+use tokio::prelude::*;
+use tokio::prelude::future::{ok, Loop, loop_fn};
+use tokio::timer::Delay;
 use log::*;
 
 use super::{Editor, Menu, MessageSeverity, Props, RklConfiguration, Safe, UserOption, UserSelection};
@@ -31,45 +33,55 @@ pub mod nextcloud;
 pub const ASYNC_EDITOR_PARK_TIMEOUT: Duration = time::Duration::from_millis(10);
 
 /// Executes a task in a new thread
-pub fn execute_task<T: 'static>(task: Box<AsyncTask<T=T>>, every: time::Duration) -> AsyncTaskHandle {
+pub fn execute_task(task: Box<AsyncTask>, every: time::Duration) -> AsyncTaskHandle {
     let (tx_loop_control, rx_loop_control): (Sender<bool>, Receiver<bool>) = mpsc::channel();
 
-    let mut mut_task = task;
-    mut_task.init();
-    thread::spawn(move || {
-        debug!("Spawned async task");
-        loop {
-            mut_task.execute();
-            thread::park_timeout(every);
-            // Check if the loop should be stopped
-            match rx_loop_control.try_recv() {
-                Ok(stop) => {
-                    if stop {
-                        debug!("Stopping async task...");
-                        break;
+    let mut task = task;
+    task.init();
+
+    let loop_future = loop_fn((task, every, rx_loop_control), |(task, every, rx_loop_control)| {
+        Delay::new(Instant::now() + every.clone())
+            .map_err(|_| ())
+            .and_then(move |_| {
+                task.execute()
+                    .map_err(|_| ())
+                    .and_then(|_| ok(task))
+            })
+            .map_err(|_| ())
+            .and_then(move |task| {
+                let mut stop = false;
+
+                match rx_loop_control.try_recv() {
+                    Ok(stop_received) => {
+                        if stop_received {
+                            debug!("Stopping async task...");
+                            stop = true;
+                        }
                     }
+                    Err(TryRecvError::Disconnected) => { /* ignore (maybe a debug to show that the handle got disconnected?) */ }
+                    Err(TryRecvError::Empty) => { /* ignore */ }
                 }
-                Err(TryRecvError::Disconnected) => {
-                    debug!("Stopping async task because the channel got disconnected");
-                    break;
+
+
+                if stop {
+                    Ok(Loop::Break((task, every, rx_loop_control)))
+                } else {
+                    Ok(Loop::Continue((task, every, rx_loop_control)))
                 }
-                Err(TryRecvError::Empty) => {
-                    // ignore
-                }
-            }
-        }
-    });
+            })
+    }).map(|_| ()).map_err(|_| ());
+
+    tokio::spawn(loop_future);
 
     AsyncTaskHandle::new(tx_loop_control)
 }
 
 /// Defines a task that runs asynchronously in the background.
 pub trait AsyncTask: Send {
-    type T;
     /// Initializes a task
     fn init(&mut self);
     /// Executes the task
-    fn execute(&self);
+    fn execute(&self) -> Box<dyn Future<Item=(), Error=()> + Send>;
 }
 
 /// A handle to a created AsyncTask
@@ -304,6 +316,9 @@ fn timeout_check(last_action_time: &SystemTime, timeout_seconds: i64) -> Option<
 mod async_tests {
     use std::sync::mpsc::{self, Receiver, Sender};
     use std::time::{self, SystemTime};
+    use tokio::prelude::*;
+    use tokio::prelude::future::{lazy, ok};
+    use std::thread;
 
     use super::super::errors;
     use super::super::{UserOption, MessageSeverity, UserSelection, Editor, UiCommand};
@@ -391,13 +406,20 @@ mod async_tests {
     #[test]
     fn async_execution() {
         let (tx, rx): (Sender<errors::Result<&'static str>>, Receiver<errors::Result<&'static str>>) = mpsc::channel();
-        let ten_millis = time::Duration::from_millis(10);
         let task = DummyTask { tx: tx };
-        let _dummy = super::execute_task(Box::new(task), ten_millis);
 
-        assert!(rx.recv_timeout(time::Duration::from_millis(1000)).is_ok());
-        assert!(rx.recv_timeout(time::Duration::from_millis(1000)).is_ok());
-        assert!(rx.recv_timeout(time::Duration::from_millis(1000)).is_ok());
+        thread::spawn(|| {
+            tokio::run(lazy(|| {
+                let ten_millis = time::Duration::from_millis(10);
+                let _dummy = super::execute_task(Box::new(task), ten_millis);
+                Ok(())
+            }));
+        });
+        std::thread::sleep(std::time::Duration::new(2, 0));
+
+        assert!(rx.recv_timeout(time::Duration::from_millis(10000)).is_ok());
+        assert!(rx.recv_timeout(time::Duration::from_millis(10000)).is_ok());
+        assert!(rx.recv_timeout(time::Duration::from_millis(10000)).is_ok());
     }
 
     pub struct DummyTask {
@@ -405,12 +427,11 @@ mod async_tests {
     }
 
     impl super::AsyncTask for DummyTask {
-        type T = &'static str;
-
         fn init(&mut self) {}
 
-        fn execute(&self) {
-            let _ = self.tx.send(Ok("Dummy"));
+        fn execute(&self) -> Box<dyn Future<Item=(), Error=()> + Send> {
+            let _ = self.tx.send(Ok("dummy"));
+            Box::new(lazy(|| ok(())))
         }
     }
 }
