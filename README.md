@@ -14,6 +14,10 @@ ___rust-keylock___ is a password manager and its goals are to be:
 
 The core logic is written in [Rust](https://www.rust-lang.org), but the presentation/User interaction parts are in different languages.
 
+## Warning
+
+The project has not yet received any formal / official security reviews. Use it at your own risk.
+
 ## Features
 
 ### Security
