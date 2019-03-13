@@ -15,7 +15,6 @@
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
 
 use base64::DecodeError;
-use crypto::symmetriccipher::SymmetricCipherError;
 use http;
 use hyper;
 use native_tls;
@@ -27,6 +26,7 @@ use std::num::ParseIntError;
 use std::string::FromUtf8Error;
 use std::sync::mpsc::{RecvError, RecvTimeoutError, SendError};
 use toml;
+use stream_cipher::LoopError;
 
 pub type Result<T> = result::Result<T, RustKeylockError>;
 
@@ -65,12 +65,6 @@ impl Error for RustKeylockError {
             RustKeylockError::EncryptionError(_) => ("Error during encryption"),
             RustKeylockError::SyncError(_) => ("Error while synchronizing"),
         }
-    }
-}
-
-impl From<SymmetricCipherError> for RustKeylockError {
-    fn from(err: SymmetricCipherError) -> RustKeylockError {
-        RustKeylockError::DecryptionError(format!("{:?}", err))
     }
 }
 
@@ -149,5 +143,11 @@ impl From<RecvError> for RustKeylockError {
 impl From<RecvTimeoutError> for RustKeylockError {
     fn from(err: RecvTimeoutError) -> RustKeylockError {
         RustKeylockError::GeneralError(format!("{:?}", err))
+    }
+}
+
+impl From<LoopError> for RustKeylockError {
+    fn from(err: LoopError) -> RustKeylockError {
+        RustKeylockError::EncryptionError(format!("{:?}", err))
     }
 }

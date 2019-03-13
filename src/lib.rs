@@ -22,7 +22,6 @@
 
 extern crate base64;
 extern crate clipboard;
-extern crate crypto;
 extern crate dirs;
 extern crate futures;
 extern crate http;

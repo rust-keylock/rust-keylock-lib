@@ -19,13 +19,11 @@ use std::cmp::PartialEq;
 use std::fmt::Debug;
 use std::iter::repeat;
 
-use base64;
-use crypto::{aes, aessafe, buffer};
-use crypto::aes::KeySize;
 use crypto::bcrypt::bcrypt;
-use crypto::blockmodes::CtrModeX8;
-use crypto::buffer::{BufferResult, ReadBuffer, WriteBuffer};
-use crypto::symmetriccipher::{Decryptor, Encryptor, SynchronousStreamCipher};
+use base64;
+use aes_ctr::Aes256Ctr;
+use aes_ctr::stream_cipher::generic_array::GenericArray;
+use ctr::stream_cipher::{NewStreamCipher, SyncStreamCipher};
 use hkdf::Hkdf;
 use rand::{Rng, RngCore};
 use rand::rngs::OsRng;
@@ -137,72 +135,24 @@ impl BcryptAes {
         }
     }
 
-    pub fn ctr(key_size: KeySize, key: &[u8], iv: &[u8]) -> Box<SynchronousStreamCipher + 'static> {
-        match key_size {
-            KeySize::KeySize128 => {
-                let aes_dec = aessafe::AesSafe128EncryptorX8::new(key);
-                let dec = Box::new(CtrModeX8::new(aes_dec, iv));
-                dec
-            }
-            KeySize::KeySize192 => {
-                let aes_dec = aessafe::AesSafe192EncryptorX8::new(key);
-                let dec = Box::new(CtrModeX8::new(aes_dec, iv));
-                dec
-            }
-            KeySize::KeySize256 => {
-                let aes_dec = aessafe::AesSafe256EncryptorX8::new(key);
-                let dec = Box::new(CtrModeX8::new(aes_dec, iv));
-                dec
-            }
-        }
-    }
-
     fn decrypt_bytes(&self, encrypted: &[u8], key: &[u8]) -> errors::Result<Vec<u8>> {
-        // Code taken from the rust-crypto example
-        let mut decrypted = Vec::<u8>::new();
-        {
-            let mut decryptor = Self::ctr(aes::KeySize::KeySize256, &key, &self.iv);
+        let mut data: Vec<u8> = encrypted.iter().map(|b| b.clone()).collect();
+        let k = GenericArray::from_slice(key);
+        let nonce = GenericArray::from_slice(&self.iv);
+        let mut cipher = Aes256Ctr::new(&k, &nonce);
+        cipher.try_apply_keystream(&mut data)?;
 
-            let mut read_buffer = buffer::RefReadBuffer::new(&encrypted);
-            let mut buffer = [0; 4096];
-            let mut write_buffer = buffer::RefWriteBuffer::new(&mut buffer);
-
-            loop {
-                let result = decryptor.decrypt(&mut read_buffer, &mut write_buffer, true)?;
-                decrypted.extend(write_buffer.take_read_buffer().take_remaining().iter().cloned());
-                match result {
-                    BufferResult::BufferUnderflow => break,
-                    BufferResult::BufferOverflow => {}
-                }
-            }
-        }
-        Ok(decrypted)
+        Ok(data)
     }
 
     fn encrypt_bytes(&self, plain: &[u8], key: &[u8], iv: &[u8]) -> errors::Result<Vec<u8>> {
-        // Create an encryptor instance of the best performing
-        // type available for the platform.
-        // Code taken from the rust-crypto example
-        let mut encryptor = Self::ctr(aes::KeySize::KeySize256, key, iv);
+        let mut data: Vec<u8> = plain.iter().map(|b| b.clone()).collect();
+        let k = GenericArray::from_slice(key);
+        let nonce = GenericArray::from_slice(iv);
+        let mut cipher = Aes256Ctr::new(&k, &nonce);
+        cipher.try_apply_keystream(&mut data)?;
 
-        let mut encrypted = Vec::<u8>::new();
-        let mut read_buffer = buffer::RefReadBuffer::new(plain);
-
-        let mut buffer = [0; 4096];
-        let mut write_buffer = buffer::RefWriteBuffer::new(&mut buffer);
-
-        loop {
-            let result = encryptor.encrypt(&mut read_buffer, &mut write_buffer, true)?;
-
-            encrypted.extend(write_buffer.take_read_buffer().take_remaining().iter().cloned());
-
-            match result {
-                BufferResult::BufferUnderflow => break,
-                BufferResult::BufferOverflow => {}
-            }
-        }
-
-        Ok(encrypted)
+        Ok(data)
     }
 }
 
@@ -330,51 +280,23 @@ impl EntryPasswordCryptor {
 
 impl Cryptor for EntryPasswordCryptor {
     fn decrypt(&self, input: &[u8]) -> Result<Vec<u8>, RustKeylockError> {
-        // Code taken from the rust-crypto example
-        let mut final_result = Vec::<u8>::new();
-        {
-            let mut decryptor = aes::ctr(aes::KeySize::KeySize256, &self.key.borrow(), &self.iv);
+        let mut data: Vec<u8> = input.iter().map(|b| b.clone()).collect();
+        let k = GenericArray::from_slice(&self.key.borrow());
+        let nonce = GenericArray::from_slice(&self.iv);
+        let mut cipher = Aes256Ctr::new(&k, &nonce);
+        cipher.try_apply_keystream(&mut data)?;
 
-            let mut read_buffer = buffer::RefReadBuffer::new(input);
-            let mut buffer = [0; 4096];
-            let mut write_buffer = buffer::RefWriteBuffer::new(&mut buffer);
-
-            loop {
-                let result = decryptor.decrypt(&mut read_buffer, &mut write_buffer, true)?;
-                final_result.extend(write_buffer.take_read_buffer().take_remaining().iter().cloned());
-                match result {
-                    BufferResult::BufferUnderflow => break,
-                    BufferResult::BufferOverflow => {}
-                }
-            }
-        }
-        Ok(final_result)
+        Ok(data)
     }
 
     fn encrypt(&self, input: &[u8]) -> Result<Vec<u8>, RustKeylockError> {
-        // Create an encryptor instance of the best performing
-        // type available for the platform.
-        // Code taken from the rust-crypto example
-        let mut encryptor = aes::ctr(aes::KeySize::KeySize256, &self.key.borrow(), &self.iv);
+        let mut data: Vec<u8> = input.iter().map(|b| b.clone()).collect();
+        let k = GenericArray::from_slice(&self.key.borrow());
+        let nonce = GenericArray::from_slice(&self.iv);
+        let mut cipher = Aes256Ctr::new(&k, &nonce);
+        cipher.try_apply_keystream(&mut data)?;
 
-        let mut encryption_result = Vec::<u8>::new();
-        let mut read_buffer = buffer::RefReadBuffer::new(input);
-
-        let mut buffer = [0; 4096];
-        let mut write_buffer = buffer::RefWriteBuffer::new(&mut buffer);
-
-        loop {
-            let result = encryptor.encrypt(&mut read_buffer, &mut write_buffer, true)?;
-
-            encryption_result.extend(write_buffer.take_read_buffer().take_remaining().iter().cloned());
-
-            match result {
-                BufferResult::BufferUnderflow => break,
-                BufferResult::BufferOverflow => {}
-            }
-        }
-
-        Ok(encryption_result)
+        Ok(data)
     }
 }
 
