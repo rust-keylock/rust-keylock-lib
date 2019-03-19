@@ -3,6 +3,7 @@
 [![codecov](https://codecov.io/gh/rust-keylock/rust-keylock-lib/branch/master/graph/badge.svg)](https://codecov.io/gh/rust-keylock/rust-keylock-lib)
 
 [![For Desktop: Get it from the Snap Store](https://snapcraft.io/static/images/badges/en/snap-store-white.svg)](https://snapcraft.io/rust-keylock-ui)
+[![For Android: Get it from GitHub](gh-images/getit.png)](https://github.com/rust-keylock/rust-keylock-android/releases/latest)
 ## General
 
 ___rust-keylock___ is a password manager and its goals are to be:
