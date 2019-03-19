@@ -23,7 +23,7 @@ use futures::future::{err, FutureResult, ok, result};
 use http::StatusCode;
 use hyper::{self, Body, Client, Request, Response};
 use hyper::header;
-use hyper::rt::{self, Future, Stream};
+use hyper::rt::{Future, Stream};
 use hyper_tls::HttpsConnector;
 use log::*;
 use toml;
@@ -499,11 +499,10 @@ impl Synchronizer {
 }
 
 impl super::AsyncTask for Synchronizer {
-    type T = SyncStatus;
 
     fn init(&mut self) {}
 
-    fn execute(&self) {
+    fn execute(&self) -> Box<dyn Future<Item=(), Error=()> + Send> {
         let capsule = ArgsCapsule::new(
             self.conf.server_url.clone(),
             self.conf.username.clone(),
@@ -518,11 +517,12 @@ impl super::AsyncTask for Synchronizer {
 
         let cloned_tx_ok = self.tx.clone();
         let cloned_tx_err = self.tx.clone();
+
         let f = Self::do_execute(capsule)
             .map(move |sync_status| Self::send_to_channel(Ok(sync_status), cloned_tx_ok))
             .map_err(move |error| Self::send_to_channel(Err(error), cloned_tx_err));
 
-        rt::run(f);
+        Box::new(f)
     }
 }
 
@@ -727,6 +727,8 @@ mod nextcloud_tests {
     use std::sync::Mutex;
     use std::thread;
     use std::time;
+    use tokio;
+    use tokio::prelude::future::{lazy, ok};
 
     use hyper::{self, Body, Request, Response, Server, StatusCode};
     use hyper::rt::Future;
@@ -842,11 +844,14 @@ mod nextcloud_tests {
         let (tx, rx): (Sender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::channel();
         let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8080".to_string(), "username".to_string(), password.clone(), false)
             .unwrap();
-        let sys_config = SystemConfiguration::new(Some(123), Some(1), None);
 
-        let nc = super::Synchronizer::new(&ncc, &sys_config, tx, filename).unwrap();
         thread::spawn(move || {
-            nc.execute();
+            tokio::run(lazy(move || {
+                let sys_config = SystemConfiguration::new(Some(123), Some(1), None);
+                let nc = super::Synchronizer::new(&ncc, &sys_config, tx, filename).unwrap();
+                tokio::spawn(nc.execute());
+                ok(())
+            }));
         });
 
         let timeout = time::Duration::from_millis(10000000);
@@ -884,9 +889,13 @@ mod nextcloud_tests {
         let (tx, rx): (Sender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::channel();
         let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8081".to_string(), "username".to_string(), password.clone(), false)
             .unwrap();
-        let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename).unwrap();
+
         thread::spawn(move || {
-            nc.execute();
+            tokio::run(lazy(move || {
+                let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename).unwrap();
+                tokio::spawn(nc.execute());
+                ok(())
+            }));
         });
 
         let timeout = time::Duration::from_millis(10000);
@@ -922,9 +931,12 @@ mod nextcloud_tests {
         let (tx, rx): (Sender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::channel();
         let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8082".to_string(), "username".to_string(), password.clone(), false)
             .unwrap();
-        let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename).unwrap();
         thread::spawn(move || {
-            nc.execute();
+            tokio::run(lazy(move || {
+                let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename).unwrap();
+                tokio::spawn(nc.execute());
+                ok(())
+            }));
         });
 
         let timeout = time::Duration::from_millis(10000);
@@ -958,9 +970,12 @@ mod nextcloud_tests {
             .unwrap();
         let sys_config = SystemConfiguration::new(Some(123), Some(1), None);
 
-        let nc = super::Synchronizer::new(&ncc, &sys_config, tx, filename).unwrap();
         thread::spawn(move || {
-            nc.execute();
+            tokio::run(lazy(move || {
+                let nc = super::Synchronizer::new(&ncc, &sys_config, tx, filename).unwrap();
+                tokio::spawn(nc.execute());
+                ok(())
+            }));
         });
 
         let timeout = time::Duration::from_millis(10000);
@@ -996,9 +1011,12 @@ mod nextcloud_tests {
             .unwrap();
         let sys_config = SystemConfiguration::new(Some(123), Some(1), None);
 
-        let nc = super::Synchronizer::new(&ncc, &sys_config, tx, filename).unwrap();
         thread::spawn(move || {
-            nc.execute();
+            tokio::run(lazy(move || {
+                let nc = super::Synchronizer::new(&ncc, &sys_config, tx, filename).unwrap();
+                tokio::spawn(nc.execute());
+                ok(())
+            }));
         });
 
         let timeout = time::Duration::from_millis(10000);
@@ -1034,9 +1052,12 @@ mod nextcloud_tests {
         let (tx, rx): (Sender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::channel();
         let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8085".to_string(), "username".to_string(), password.clone(), false)
             .unwrap();
-        let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename).unwrap();
         thread::spawn(move || {
-            nc.execute();
+            tokio::run(lazy(move || {
+                let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename).unwrap();
+                tokio::spawn(nc.execute());
+                ok(())
+            }));
         });
 
         let timeout = time::Duration::from_millis(10000);
@@ -1064,9 +1085,12 @@ mod nextcloud_tests {
         let (tx, rx): (Sender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::channel();
         let ncc = super::NextcloudConfiguration::new("http://127.0.0.1".to_string(), "username".to_string(), password.clone(), false)
             .unwrap();
-        let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename).unwrap();
         thread::spawn(move || {
-            nc.execute();
+            tokio::run(lazy(move || {
+                let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename).unwrap();
+                tokio::spawn(nc.execute());
+                ok(())
+            }));
         });
 
         let timeout = time::Duration::from_millis(1000000);
@@ -1324,11 +1348,12 @@ mod nextcloud_tests {
                 let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
                 let server = Server::bind(&addr)
                     .serve(s)
-                    .map_err(|e| eprintln!("server error: {}", e));
+                    .map_err(|e| println!("server error: {}", e));
 
                 hyper::rt::run(server);
             }
             "run_http_error_response_on_propfind" => {
+
                 let s = || {
                     service_fn_ok(|req: Request<Body>| {
                         let tx_assert = get_tx_for("run_http_error_response_on_propfind");
@@ -1344,7 +1369,7 @@ mod nextcloud_tests {
                 let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
                 let server = Server::bind(&addr)
                     .serve(s)
-                    .map_err(|e| eprintln!("server error: {}", e));
+                    .map_err(|e| println!("server error: {}", e));
 
                 hyper::rt::run(server);
             }
@@ -1372,7 +1397,7 @@ mod nextcloud_tests {
                 let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
                 let server = Server::bind(&addr)
                     .serve(s)
-                    .map_err(|e| eprintln!("server error: {}", e));
+                    .map_err(|e| println!("server error: {}", e));
 
                 hyper::rt::run(server);
             }
@@ -1404,7 +1429,7 @@ mod nextcloud_tests {
                 let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
                 let server = Server::bind(&addr)
                     .serve(s)
-                    .map_err(|e| eprintln!("server error: {}", e));
+                    .map_err(|e| println!("server error: {}", e));
 
                 hyper::rt::run(server);
             }
@@ -1447,7 +1472,7 @@ mod nextcloud_tests {
                 let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
                 let server = Server::bind(&addr)
                     .serve(s)
-                    .map_err(|e| eprintln!("server error: {}", e));
+                    .map_err(|e| println!("server error: {}", e));
 
                 hyper::rt::run(server);
             }
