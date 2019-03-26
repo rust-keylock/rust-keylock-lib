@@ -27,8 +27,6 @@ extern crate futures;
 extern crate http;
 extern crate hyper;
 extern crate hyper_tls;
-#[cfg(test)]
-extern crate lazy_static;
 extern crate log;
 extern crate native_tls;
 extern crate openssl_probe;
@@ -60,11 +58,14 @@ pub use self::api::{
     RklConfiguration,
     UserOption,
     UserSelection,
+    AllConfigurations,
 };
 pub use self::api::safe::Safe;
 use self::api::UiCommand;
 use self::asynch::{AsyncEditorFacade, AsyncTask};
 pub use self::asynch::nextcloud;
+pub use self::asynch::dropbox;
+use std::collections::HashMap;
 
 mod file_handler;
 mod errors;
@@ -84,35 +85,37 @@ pub fn execute_async(editor: Box<dyn AsyncEditor>) {
     let (ui_tx, ui_rx) = mpsc::channel();
     let mut ui_rx_vec = Vec::new();
 
-    tokio::run(lazy (|| {
-        openssl_probe::init_ssl_cert_env_vars();
-        info!("Starting rust-keylock...");
-        let props = match file_handler::load_properties(PROPS_FILENAME) {
-            Ok(m) => m,
-            Err(error) => {
-                error!("Could not load properties. Using defaults. The error was: {}", error.description());
-                Props::default()
-            }
-        };
+    thread::spawn(move || {
+        tokio::run(lazy(|| {
+            openssl_probe::init_ssl_cert_env_vars();
+            info!("Starting rust-keylock...");
+            let props = match file_handler::load_properties(PROPS_FILENAME) {
+                Ok(m) => m,
+                Err(error) => {
+                    error!("Could not load properties. Using defaults. The error was: {}", error.description());
+                    Props::default()
+                }
+            };
 
-        let editor_facade = asynch::AsyncEditorFacade::new(ui_rx, command_tx, props.clone());
+            let editor_facade = asynch::AsyncEditorFacade::new(ui_rx, command_tx, props.clone());
 
-        let main_loop = loop_fn(CoreLogicHandler::new(editor_facade, props), |executor| {
-            executor.handle()
-                .map_err(|_| ())
-                .and_then(|(executor, stop)| {
-                    if stop {
-                        ok(Loop::Break(()))
-                    } else {
-                        ok(Loop::Continue(executor))
-                    }
-                })
-        });
+            let main_loop = loop_fn(CoreLogicHandler::new(editor_facade, props), |executor| {
+                executor.handle()
+                    .map_err(|_| ())
+                    .and_then(|(executor, stop)| {
+                        if stop {
+                            ok(Loop::Break(()))
+                        } else {
+                            ok(Loop::Continue(executor))
+                        }
+                    })
+            });
 
-        tokio::spawn(main_loop);
+            tokio::spawn(main_loop);
 
-        Ok(())
-    }));
+            Ok(())
+        }));
+    });
 
     // The select macro is a nightly feature and is going to be deprecated. Use polling until a better solution is found.
     // https://github.com/rust-lang/rust/issues/27800
@@ -194,7 +197,7 @@ pub fn execute(editor: Box<dyn Editor>) {
     let (ui_tx, ui_rx) = mpsc::channel();
 
     thread::spawn(move || {
-        tokio::run(lazy (|| {
+        tokio::run(lazy(|| {
             let props = match file_handler::load_properties(PROPS_FILENAME) {
                 Ok(m) => m,
                 Err(error) => {
@@ -286,7 +289,7 @@ struct CoreLogicHandler {
     configuration: RklConfiguration,
     // Signals changes that are not saved
     contents_changed: bool,
-    async_task_handle: Option<asynch::AsyncTaskHandle>,
+    async_task_handles: HashMap<&'static str, asynch::AsyncTaskHandle>,
     cryptor: datacrypt::BcryptAes,
 }
 
@@ -299,10 +302,13 @@ impl CoreLogicHandler {
         // Keeps the sensitive data
         let mut safe = Safe::new();
         // Keeps the configuration data
-        let mut configuration = RklConfiguration::from((asynch::nextcloud::NextcloudConfiguration::default(), SystemConfiguration::default()));
+        let mut configuration = RklConfiguration::from((
+            nextcloud::NextcloudConfiguration::default(),
+            dropbox::DropboxConfiguration::default(),
+            SystemConfiguration::default()));
         // Signals changes that are not saved
         let contents_changed = false;
-        let mut async_task_handle: Option<asynch::AsyncTaskHandle> = None;
+        let mut async_task_handles = HashMap::new();
         // Create a Cryptor
         let cryptor = {
             // First time run?
@@ -316,9 +322,15 @@ impl CoreLogicHandler {
             let (us, cr) = handle_provided_password_for_init(provided_password, FILENAME, &mut safe, &mut configuration, &editor, &props);
             // If a valid nextcloud configuration is in place, spawn the background async execution
             if configuration.nextcloud.is_filled() {
-                let (handle, nextcloud_sync_status_rx) = spawn_nextcloud_async_task(FILENAME, &configuration, &async_task_handle);
-                async_task_handle = Some(handle);
+                let (handle, nextcloud_sync_status_rx) = spawn_nextcloud_async_task(FILENAME, &configuration, &async_task_handles);
+                async_task_handles.insert("nextcloud", handle);
                 editor.update_nextcloud_rx(Some(nextcloud_sync_status_rx));
+            }
+            // If a valid dropbox configuration is in place, spawn the background async execution
+            if configuration.dropbox.is_filled() {
+                let (handle, dropbox_sync_status_rx) = spawn_dropbox_async_task(FILENAME, &configuration, &async_task_handles);
+                async_task_handles.insert("dropbox", handle);
+                editor.update_dropbox_rx(Some(dropbox_sync_status_rx));
             }
             // Set the UserSelection
             user_selection = us;
@@ -332,7 +344,7 @@ impl CoreLogicHandler {
             safe,
             configuration,
             contents_changed,
-            async_task_handle,
+            async_task_handles,
             cryptor,
         }
     }
@@ -346,15 +358,29 @@ impl CoreLogicHandler {
         s.user_selection = match s.user_selection {
             UserSelection::GoTo(Menu::TryPass) => {
                 // Cancel any pending background tasks
-                let _ = s.async_task_handle.as_ref().map(|handle| handle.stop());
-                let (user_selection, cr) =
-                    handle_provided_password_for_init(s.editor.show_password_enter(), FILENAME, &mut s.safe, &mut s.configuration, &s.editor, &s.props);
+                for handle in s.async_task_handles.values() {
+                    let _ = handle.stop();
+                }
+                let (user_selection, cr) = handle_provided_password_for_init(
+                    s.editor.show_password_enter(),
+                    FILENAME,
+                    &mut s.safe,
+                    &mut s.configuration,
+                    &s.editor,
+                    &s.props);
                 // If a valid nextcloud configuration is in place, spawn the background async execution
                 if s.configuration.nextcloud.is_filled() {
                     debug!("A valid configuration for Nextcloud synchronization was found. Spawning async tasks");
-                    let (handle, nextcloud_sync_status_rx) = spawn_nextcloud_async_task(FILENAME, &s.configuration, &s.async_task_handle);
-                    s.async_task_handle = Some(handle);
+                    let (handle, nextcloud_sync_status_rx) = spawn_nextcloud_async_task(FILENAME, &s.configuration, &s.async_task_handles);
+                    s.async_task_handles.insert("nextcloud", handle);
                     s.editor.update_nextcloud_rx(Some(nextcloud_sync_status_rx));
+                }
+                // If a valid dropbox configuration is in place, spawn the background async execution
+                if s.configuration.dropbox.is_filled() {
+                    debug!("A valid configuration for dropbox synchronization was found. Spawning async tasks");
+                    let (handle, dropbox_sync_status_rx) = spawn_dropbox_async_task(FILENAME, &s.configuration, &s.async_task_handles);
+                    s.async_task_handles.insert("dropbox", handle);
+                    s.editor.update_nextcloud_rx(Some(dropbox_sync_status_rx));
                 }
                 s.cryptor = cr;
                 user_selection
@@ -401,19 +427,27 @@ impl CoreLogicHandler {
                 let _ = s.configuration.update_system_for_save().map_err(|error| error!("Cannot update system for save: {:?}", error));
                 // Reset the filter
                 s.safe.set_filter("".to_string());
-                let rkl_content = RklContent::from((&s.safe, &s.configuration.nextcloud, &s.configuration.system));
+                let rkl_content = RklContent::from((&s.safe, &s.configuration.nextcloud, &s.configuration.dropbox, &s.configuration.system));
                 let res = rkl_content.and_then(|c| file_handler::save(c, FILENAME, &s.cryptor, true));
                 match res {
                     Ok(_) => {
                         // Cancel any pending background tasks
-                        let _ = s.async_task_handle.as_ref().map(|handle| handle.stop());
+                        for handle in s.async_task_handles.values() {
+                            let _ = handle.stop();
+                        }
                         // Clean the flag for unsaved data
                         s.contents_changed = false;
                         if s.configuration.nextcloud.is_filled() {
                             // Start a new background async task
-                            let (handle, nextcloud_sync_status_rx) = spawn_nextcloud_async_task(FILENAME, &s.configuration, &s.async_task_handle);
-                            s.async_task_handle = Some(handle);
+                            let (handle, nextcloud_sync_status_rx) = spawn_nextcloud_async_task(FILENAME, &s.configuration, &s.async_task_handles);
+                            s.async_task_handles.insert("nextcloud", handle);
                             s.editor.update_nextcloud_rx(Some(nextcloud_sync_status_rx));
+                        }
+                        if s.configuration.dropbox.is_filled() {
+                            // Start a new background async task
+                            let (handle, dropbox_sync_status_rx) = spawn_dropbox_async_task(FILENAME, &s.configuration, &s.async_task_handles);
+                            s.async_task_handles.insert("dropbox", handle);
+                            s.editor.update_dropbox_rx(Some(dropbox_sync_status_rx));
                         }
                         let _ = s.editor.show_message("Encrypted and saved successfully!", vec![UserOption::ok()], MessageSeverity::default());
                     }
@@ -524,7 +558,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                 };
 
                 if do_export {
-                    match RklContent::from((&s.safe, &s.configuration.nextcloud, &s.configuration.system)) {
+                    match RklContent::from((&s.safe, &s.configuration.nextcloud, &s.configuration.dropbox, &s.configuration.system)) {
                         Ok(c) => {
                             match file_handler::save(c, &path, &s.cryptor, false) {
                                 Ok(_) => { let _ = s.editor.show_message("Export completed successfully!", vec![UserOption::ok()], MessageSeverity::default()); }
@@ -586,13 +620,21 @@ Warning: Saving will discard all the entries that could not be recovered.
             }
             UserSelection::UpdateConfiguration(new_conf) => {
                 debug!("UserSelection::UpdateConfiguration");
-                s.configuration.nextcloud = new_conf;
+                s.configuration.nextcloud = new_conf.nextcloud;
                 if s.configuration.nextcloud.is_filled() {
                     debug!("A valid configuration for Nextcloud synchronization was found after being updated by the User. Spawning \
-                            async tasks");
-                    let (handle, nextcloud_sync_status_rx) = spawn_nextcloud_async_task(FILENAME, &s.configuration, &s.async_task_handle);
-                    s.async_task_handle = Some(handle);
+                            nextcloud sync task");
+                    let (handle, nextcloud_sync_status_rx) = spawn_nextcloud_async_task(FILENAME, &s.configuration, &s.async_task_handles);
+                    s.async_task_handles.insert("nextcloud", handle);
                     s.editor.update_nextcloud_rx(Some(nextcloud_sync_status_rx));
+                    s.contents_changed = true;
+                }
+                if s.configuration.dropbox.is_filled() {
+                    debug!("A valid configuration for dropbox synchronization was found after being updated by the User. Spawning \
+                            dropbox sync task");
+                    let (handle, dropbox_sync_status_rx) = spawn_dropbox_async_task(FILENAME, &s.configuration, &s.async_task_handles);
+                    s.async_task_handles.insert("dropbox", handle);
+                    s.editor.update_dropbox_rx(Some(dropbox_sync_status_rx));
                     s.contents_changed = true;
                 }
                 UserSelection::GoTo(Menu::Main)
@@ -600,7 +642,7 @@ Warning: Saving will discard all the entries that could not be recovered.
             UserSelection::GoTo(Menu::Synchronize) => {
                 debug!("UserSelection::GoTo(Menu::Synchronize)");
                 let (tx, rx) = mpsc::channel();
-                let synchronizer = asynch::nextcloud::Synchronizer::new(&s.configuration.nextcloud, &s.configuration.system, tx, FILENAME).unwrap();
+                let synchronizer = nextcloud::Synchronizer::new(&s.configuration.nextcloud, &s.configuration.system, tx, FILENAME).unwrap();
 
                 tokio::spawn(synchronizer.execute());
 
@@ -620,7 +662,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                         }
                     }
                     Err(error) => {
-                        format!("Could not synchronize (Channel reception error): {:?}", error);
+                        error!("Could not synchronize (Channel reception error): {:?}", error);
                         let _ = s.editor.show_message("Could not synchronize. Please see the logs for more details.", vec![UserOption::ok()], MessageSeverity::Error);
                         UserSelection::GoTo(Menu::ShowConfiguration)
                     }
@@ -631,6 +673,20 @@ Warning: Saving will discard all the entries that could not be recovered.
             UserSelection::AddToClipboard(content) => {
                 debug!("UserSelection::AddToClipboard");
                 selection_handling::add_to_clipboard(content, &s.editor)
+            }
+            UserSelection::GoTo(Menu::WaitForDbxTokenCallback(url)) => {
+                debug!("UserSelection::GoTo(Menu::WaitForDbxTokenCallback)");
+                match dropbox::retrieve_token(url) {
+                    Ok(token) => {
+                        println!("-------------------{}", token);
+                        UserSelection::GoTo(Menu::ShowConfiguration)
+                    }
+                    Err(error) => {
+                        error!("Could not obtain the Dropbox token: {:?}", error);
+                        let _ = s.editor.show_message("Could not obtain the Dropbox token. Please see the logs for more details.", vec![UserOption::ok()], MessageSeverity::Error);
+                        UserSelection::GoTo(Menu::ShowConfiguration)
+                    }
+                }
             }
             UserSelection::GoTo(Menu::Current) => {
                 debug!("UserSelection::GoTo(Menu::Current)");
@@ -649,17 +705,17 @@ Warning: Saving will discard all the entries that could not be recovered.
     }
 }
 
-fn handle_sync_status_success(sync_status: asynch::nextcloud::SyncStatus,
+fn handle_sync_status_success(sync_status: asynch::SyncStatus,
                               editor: &Editor,
                               filename: &str,
                               user_selection: &mut UserSelection) {
     match sync_status {
-        asynch::nextcloud::SyncStatus::UploadSuccess => {
+        asynch::SyncStatus::UploadSuccess(who) => {
             let _ =
-                editor.show_message("The nextcloud server was updated with the local data", vec![UserOption::ok()], MessageSeverity::Info);
+                editor.show_message(&format!("The {} server was updated with the local data", who), vec![UserOption::ok()], MessageSeverity::Info);
         }
-        asynch::nextcloud::SyncStatus::NewAvailable(downloaded_filename) => {
-            let selection = editor.show_message("Downloaded new data from the nextcloud server. Do you want to apply them locally now?",
+        asynch::SyncStatus::NewAvailable(who, downloaded_filename) => {
+            let selection = editor.show_message(&format!("Downloaded new data from the {} server. Do you want to apply them locally now?", who),
                                                 vec![UserOption::yes(), UserOption::no()],
                                                 MessageSeverity::Info);
 
@@ -670,11 +726,11 @@ fn handle_sync_status_success(sync_status: asynch::nextcloud::SyncStatus,
                 *user_selection = UserSelection::GoTo(Menu::TryPass);
             }
         }
-        asynch::nextcloud::SyncStatus::NewToMerge(downloaded_filename) => {
+        asynch::SyncStatus::NewToMerge(who, downloaded_filename) => {
             let selection =
-                editor.show_message("Downloaded data from the nextcloud server, but conflicts were identified. The contents will be merged \
+                editor.show_message(&format!("Downloaded data from the {} server, but conflicts were identified. The contents will be merged \
                                    but nothing will be saved. You will need to explicitly save after reviewing the merged data. Do you \
-                                   want to do the merge now?",
+                                   want to do the merge now?", who),
                                     vec![UserOption::yes(), UserOption::no()],
                                     MessageSeverity::Info);
 
@@ -701,7 +757,7 @@ fn handle_sync_status_success(sync_status: asynch::nextcloud::SyncStatus,
                 }
             }
         }
-        asynch::nextcloud::SyncStatus::None => {
+        asynch::SyncStatus::None => {
             let _ = editor.show_message("No need to sync. The contents are identical", vec![UserOption::ok()], MessageSeverity::Info);
             *user_selection = UserSelection::GoTo(Menu::Current);
         }
@@ -726,7 +782,7 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
                 Ok(rkl_content) => {
                     user_selection = UserSelection::GoTo(Menu::EntriesList("".to_string()));
                     // Set the retrieved configuration
-                    let new_rkl_conf = RklConfiguration::from((rkl_content.nextcloud_conf, rkl_content.system_conf));
+                    let new_rkl_conf = RklConfiguration::from((rkl_content.nextcloud_conf, rkl_content.dropbox_conf, rkl_content.system_conf));
                     *configuration = new_rkl_conf;
                     rkl_content.entries
                 }
@@ -778,9 +834,9 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
 
 fn spawn_nextcloud_async_task(filename: &str,
                               configuration: &RklConfiguration,
-                              async_task_handle_opt: &Option<asynch::AsyncTaskHandle>)
-                              -> (asynch::AsyncTaskHandle, Receiver<errors::Result<asynch::nextcloud::SyncStatus>>) {
-    if let Some(ref async_task) = async_task_handle_opt.as_ref() {
+                              async_task_handles: &HashMap<&'static str, asynch::AsyncTaskHandle>)
+                              -> (asynch::AsyncTaskHandle, Receiver<errors::Result<asynch::SyncStatus>>) {
+    if let Some(async_task) = async_task_handles.get("nextcloud") {
         debug!("Stopping a previously spawned nextcloud async task");
         let _ = async_task.stop();
     }
@@ -789,8 +845,25 @@ fn spawn_nextcloud_async_task(filename: &str,
     // Create a new channel
     let (tx, rx) = mpsc::channel();
     let every = time::Duration::from_millis(10000);
-    let nc = asynch::nextcloud::Synchronizer::new(&configuration.nextcloud, &configuration.system, tx, filename).unwrap();
+    let nc = nextcloud::Synchronizer::new(&configuration.nextcloud, &configuration.system, tx, filename).unwrap();
     (asynch::execute_task(Box::new(nc), every), rx)
+}
+
+fn spawn_dropbox_async_task(filename: &str,
+                            configuration: &RklConfiguration,
+                            async_task_handles: &HashMap<&'static str, asynch::AsyncTaskHandle>)
+                            -> (asynch::AsyncTaskHandle, Receiver<errors::Result<asynch::SyncStatus>>) {
+    if let Some(async_task) = async_task_handles.get("dropbox") {
+        debug!("Stopping a previously spawned dropbox async task");
+        let _ = async_task.stop();
+    }
+
+    debug!("Spawning dropbox async task");
+    // Create a new channel
+    let (tx, rx) = mpsc::channel();
+    let every = time::Duration::from_millis(10000);
+    let dbx = dropbox::Synchronizer::new(&configuration.dropbox, &configuration.system, tx, filename).unwrap();
+    (asynch::execute_task(Box::new(dbx), every), rx)
 }
 
 /// Trait to be implemented by various different `Editor`s (Shell, Web, Android, other...).
@@ -847,8 +920,9 @@ mod unit_tests {
 
     use clipboard::{ClipboardContext, ClipboardProvider};
 
-    use super::api::{Entry, Menu, UserOption, UserSelection};
+    use super::api::{Entry, Menu, UserOption, UserSelection, AllConfigurations};
     use super::asynch::nextcloud::NextcloudConfiguration;
+    use super::asynch::dropbox::DropboxConfiguration;
     use super::file_handler;
 
     #[test]
@@ -1143,17 +1217,23 @@ mod unit_tests {
         println!("===========execute_update_configuration");
         let (tx, rx) = mpsc::channel();
 
-        let new_conf = NextcloudConfiguration::new(
+        let nc_conf = NextcloudConfiguration::new(
             "u".to_string(),
             "un".to_string(),
             "pw".to_string(),
             false).unwrap();
 
-        let new_empty_conf = NextcloudConfiguration::new(
+        let dbx_conf = DropboxConfiguration::new("token".to_string()).unwrap();
+
+        let new_conf = AllConfigurations::new(nc_conf, dbx_conf);
+
+        let new_empty_nc_conf = NextcloudConfiguration::new(
             "".to_string(),
             "".to_string(),
             "".to_string(),
             false).unwrap();
+
+        let new_empty_conf = AllConfigurations::new(new_empty_nc_conf, DropboxConfiguration::default());
 
         let editor = Box::new(TestEditor::new(vec![
             // Login
@@ -1239,7 +1319,6 @@ mod unit_tests {
                 None => panic!("Don't have more user selections to execute"),
             };
             if available_selections_mut.is_empty() {
-                dbg!(&available_selections_mut);
                 self.completed_tx.send(true).expect("Cannot send to signal completion.");
             }
             to_ret

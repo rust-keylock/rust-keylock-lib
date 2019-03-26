@@ -30,10 +30,11 @@ use toml;
 use toml::value::Table;
 use xml::reader::{EventReader, XmlEvent};
 
-use super::super::{errors, file_handler};
-use super::super::datacrypt::EntryPasswordCryptor;
-use super::super::errors::{debug_error_string, RustKeylockError};
-use super::super::SystemConfiguration;
+use crate::{errors, file_handler};
+use crate::datacrypt::EntryPasswordCryptor;
+use crate::errors::{debug_error_string, RustKeylockError};
+use crate::SystemConfiguration;
+use crate::asynch::SyncStatus;
 
 /// A (Next/Own)cloud synchronizer
 pub struct Synchronizer {
@@ -154,7 +155,7 @@ impl Synchronizer {
                                                      capsule.version_local(),
                                                      capsule.is_not_https(),
                                                      capsule.use_self_signed()))
-                        .and_then(|_| ok(SyncStatus::UploadSuccess));
+                        .and_then(|_| ok(SyncStatus::UploadSuccess("nextcloud")));
 
                     Box::new(f)
                 } else {
@@ -191,7 +192,7 @@ impl Synchronizer {
                                    &capsule.file_name,
                                    capsule.is_not_https,
                                    capsule.use_self_signed)
-                    .and_then(|tmp_file_name| ok(SyncStatus::NewAvailable(tmp_file_name))))
+                    .and_then(|tmp_file_name| ok(SyncStatus::NewAvailable("nextcloud", tmp_file_name))))
             }
             ParseWebDavResponse::Ignore => {
                 debug!("No sync is needed");
@@ -207,7 +208,7 @@ impl Synchronizer {
                                    capsule.version_local(),
                                    capsule.is_not_https(),
                                    capsule.use_self_signed())
-                    .and_then(|_| ok(SyncStatus::UploadSuccess)))
+                    .and_then(|_| ok(SyncStatus::UploadSuccess("nextcloud"))))
             }
             ParseWebDavResponse::DownloadMergeAndUpload => {
                 Box::new(Self::get(&capsule.username,
@@ -216,7 +217,7 @@ impl Synchronizer {
                                    &capsule.file_name,
                                    capsule.is_not_https,
                                    capsule.use_self_signed)
-                    .and_then(|tmp_file_name| ok(SyncStatus::NewToMerge(tmp_file_name))))
+                    .and_then(|tmp_file_name| ok(SyncStatus::NewToMerge("nextcloud", tmp_file_name))))
             }
         }
     }
@@ -499,7 +500,6 @@ impl Synchronizer {
 }
 
 impl super::AsyncTask for Synchronizer {
-
     fn init(&mut self) {}
 
     fn execute(&self) -> Box<dyn Future<Item=(), Error=()> + Send> {
@@ -524,21 +524,6 @@ impl super::AsyncTask for Synchronizer {
 
         Box::new(f)
     }
-}
-
-/// The status of the sync actions
-#[derive(PartialEq, Debug)]
-pub enum SyncStatus {
-    /// An update is available from the nextcloud server.
-    /// The String is the name of the file that is ready to be used if the user selects so.
-    NewAvailable(String),
-    /// The local file was uploaded to the nextcloud server.
-    UploadSuccess,
-    /// An update is available from the nextcloud server but instead of replacing the contents, merging needs to be done.
-    /// The String is the name of the file that is ready to be used if the user selects so.
-    NewToMerge(String),
-    /// None
-    None,
 }
 
 #[derive(PartialEq, Debug)]
@@ -865,7 +850,7 @@ mod nextcloud_tests {
         assert!(rx_assert.recv_timeout(timeout).unwrap());
 
         // Assert that the file is ready to be downloaded
-        assert!(rx.recv_timeout(timeout).unwrap().unwrap() == super::SyncStatus::UploadSuccess);
+        assert!(rx.recv_timeout(timeout).unwrap().unwrap() == super::SyncStatus::UploadSuccess("nextcloud"));
 
         // Delete the dummy file
         delete_file(filename);
@@ -906,7 +891,7 @@ mod nextcloud_tests {
 
         // Assert that the file is ready to be downloaded
         assert!(rx.recv_timeout(timeout).unwrap().unwrap() ==
-            super::SyncStatus::NewAvailable("tmp_download_a_file_from_the_server".to_string()));
+            super::SyncStatus::NewAvailable("nextcloud", "tmp_download_a_file_from_the_server".to_string()));
 
         // Delete the dummy file
         delete_file(filename);
@@ -1353,7 +1338,6 @@ mod nextcloud_tests {
                 hyper::rt::run(server);
             }
             "run_http_error_response_on_propfind" => {
-
                 let s = || {
                     service_fn_ok(|req: Request<Body>| {
                         let tx_assert = get_tx_for("run_http_error_response_on_propfind");

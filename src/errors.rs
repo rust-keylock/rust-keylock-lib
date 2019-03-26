@@ -27,6 +27,7 @@ use std::string::FromUtf8Error;
 use std::sync::mpsc::{RecvError, RecvTimeoutError, SendError};
 use toml;
 use stream_cipher::LoopError;
+use url;
 
 pub type Result<T> = result::Result<T, RustKeylockError>;
 
@@ -149,5 +150,11 @@ impl From<RecvTimeoutError> for RustKeylockError {
 impl From<LoopError> for RustKeylockError {
     fn from(err: LoopError) -> RustKeylockError {
         RustKeylockError::EncryptionError(format!("{:?}", err))
+    }
+}
+
+impl From<url::ParseError> for RustKeylockError {
+    fn from(err: url::ParseError) -> RustKeylockError {
+        RustKeylockError::ParseError(format!("{:?}", err))
     }
 }

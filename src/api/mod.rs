@@ -21,40 +21,46 @@ use log::*;
 use toml;
 use toml::value::Table;
 
-use super::{asynch, datacrypt, errors, nextcloud};
+use super::{datacrypt, errors, nextcloud, dropbox};
 
 use self::safe::Safe;
+use crate::asynch::nextcloud::NextcloudConfiguration;
+use crate::asynch::dropbox::DropboxConfiguration;
 
 pub mod safe;
 
 /// Struct to use for retrieving and saving data from/to the file
 pub struct RklContent {
     pub entries: Vec<Entry>,
-    pub nextcloud_conf: asynch::nextcloud::NextcloudConfiguration,
+    pub nextcloud_conf: nextcloud::NextcloudConfiguration,
+    pub dropbox_conf: dropbox::DropboxConfiguration,
     pub system_conf: SystemConfiguration,
 }
 
 impl RklContent {
     pub fn new(entries: Vec<Entry>,
-               nextcloud_conf: asynch::nextcloud::NextcloudConfiguration,
+               nextcloud_conf: nextcloud::NextcloudConfiguration,
+               dropbox_conf: dropbox::DropboxConfiguration,
                system_conf: SystemConfiguration)
                -> RklContent {
         RklContent {
-            entries: entries,
-            nextcloud_conf: nextcloud_conf,
-            system_conf: system_conf,
+            entries,
+            nextcloud_conf,
+            dropbox_conf,
+            system_conf,
         }
     }
 
-    pub fn from(tup: (&Safe, &asynch::nextcloud::NextcloudConfiguration, &SystemConfiguration)) -> errors::Result<RklContent> {
+    pub fn from(tup: (&Safe, &nextcloud::NextcloudConfiguration, &dropbox::DropboxConfiguration, &SystemConfiguration)) -> errors::Result<RklContent> {
         let entries = tup.0.get_entries_decrypted();
-        let nextcloud_conf = asynch::nextcloud::NextcloudConfiguration::new(tup.1.server_url.clone(),
-                                                                            tup.1.username.clone(),
-                                                                            tup.1.decrypted_password()?,
-                                                                            tup.1.use_self_signed_certificate);
-        let system_conf = SystemConfiguration::new(tup.2.saved_at, tup.2.version, tup.2.last_sync_version);
+        let nextcloud_conf = nextcloud::NextcloudConfiguration::new(tup.1.server_url.clone(),
+                                                                    tup.1.username.clone(),
+                                                                    tup.1.decrypted_password()?,
+                                                                    tup.1.use_self_signed_certificate);
+        let dropbox_conf = dropbox::DropboxConfiguration::new(tup.2.token.clone());
+        let system_conf = SystemConfiguration::new(tup.3.saved_at, tup.3.version, tup.3.last_sync_version);
 
-        Ok(RklContent::new(entries, nextcloud_conf?, system_conf))
+        Ok(RklContent::new(entries, nextcloud_conf?, dropbox_conf?, system_conf))
     }
 }
 
@@ -62,7 +68,8 @@ impl RklContent {
 #[derive(Debug, PartialEq, Clone)]
 pub struct RklConfiguration {
     pub system: SystemConfiguration,
-    pub nextcloud: asynch::nextcloud::NextcloudConfiguration,
+    pub nextcloud: nextcloud::NextcloudConfiguration,
+    pub dropbox: dropbox::DropboxConfiguration,
 }
 
 impl RklConfiguration {
@@ -76,11 +83,12 @@ impl RklConfiguration {
     }
 }
 
-impl From<(asynch::nextcloud::NextcloudConfiguration, SystemConfiguration)> for RklConfiguration {
-    fn from(confs: (asynch::nextcloud::NextcloudConfiguration, SystemConfiguration)) -> Self {
+impl From<(nextcloud::NextcloudConfiguration, dropbox::DropboxConfiguration, SystemConfiguration)> for RklConfiguration {
+    fn from(confs: (nextcloud::NextcloudConfiguration, dropbox::DropboxConfiguration, SystemConfiguration)) -> Self {
         RklConfiguration {
-            system: confs.1,
+            system: confs.2,
             nextcloud: confs.0,
+            dropbox: confs.1,
         }
     }
 }
@@ -339,6 +347,8 @@ pub enum Menu {
     ShowConfiguration,
     /// Perform Synchronization
     Synchronize,
+    /// Temporarily creates a web server and waits for the callback HTTP request that obtains the Dropbox token
+    WaitForDbxTokenCallback(String),
     /// Stay in the current menu
     Current,
 }
@@ -363,6 +373,7 @@ impl Menu {
             &Menu::ExportEntries => format!("{:?}", Menu::ExportEntries),
             &Menu::ShowConfiguration => format!("{:?}", Menu::ShowConfiguration),
             &Menu::Synchronize => format!("{:?}", Menu::Synchronize),
+            &Menu::WaitForDbxTokenCallback(_) => "WaitForDbxTokenCallback".to_string(),
             &Menu::Current => format!("{:?}", Menu::Current),
         }
     }
@@ -389,6 +400,7 @@ impl Menu {
             (ref n, None, None) if &Menu::ExportEntries.get_name() == n => Menu::ExportEntries,
             (ref n, None, None) if &Menu::ShowConfiguration.get_name() == n => Menu::ShowConfiguration,
             (ref n, None, None) if &Menu::Synchronize.get_name() == n => Menu::Synchronize,
+            (ref n, None, Some(ref arg)) if &Menu::WaitForDbxTokenCallback(arg.clone()).get_name() == n => Menu::WaitForDbxTokenCallback(arg.clone()),
             (ref n, None, None) if &Menu::Current.get_name() == n => Menu::Current,
             (ref other, _, _) => {
                 let message = format!("Cannot create Menu from String '{}' and arguments usize: '{:?}', String: '{:?}'. Please, consider \
@@ -427,7 +439,7 @@ pub enum UserSelection {
     /// The User may be offered to select one of the Options.
     UserOption(UserOption),
     /// The User updates the configuration.
-    UpdateConfiguration(nextcloud::NextcloudConfiguration),
+    UpdateConfiguration(AllConfigurations),
     /// The user copies content to the clipboard.
     AddToClipboard(String),
 }
@@ -452,6 +464,27 @@ impl UserSelection {
             UserSelection::UpdateConfiguration(_) => 11,
             UserSelection::AddToClipboard(_) => 12,
         }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct AllConfigurations {
+    pub nextcloud: nextcloud::NextcloudConfiguration,
+    pub dropbox: dropbox::DropboxConfiguration,
+}
+
+impl AllConfigurations {
+    pub fn new(nextcloud: nextcloud::NextcloudConfiguration, dropbox: dropbox::DropboxConfiguration) -> AllConfigurations {
+        AllConfigurations {
+            nextcloud,
+            dropbox,
+        }
+    }
+}
+
+impl Default for AllConfigurations {
+    fn default() -> Self {
+        AllConfigurations::new(NextcloudConfiguration::default(), DropboxConfiguration::default())
     }
 }
 
@@ -641,6 +674,7 @@ mod api_unit_tests {
     use crate::datacrypt::EntryPasswordCryptor;
 
     use super::{Entry, Menu, UserOption, UserSelection};
+    use crate::api::AllConfigurations;
 
     #[test]
     fn entry_from_table_before_v0_6_0_success() {
@@ -972,7 +1006,7 @@ mod api_unit_tests {
         assert!(UserSelection::ImportFrom("".to_owned(), "".to_owned(), 1).ordinal() == 8);
         assert!(UserSelection::ImportFromDefaultLocation("".to_owned(), "".to_owned(), 1).ordinal() == 9);
         assert!(UserSelection::UserOption(UserOption::empty()).ordinal() == 10);
-        assert!(UserSelection::UpdateConfiguration(super::nextcloud::NextcloudConfiguration::default()).ordinal() == 11);
+        assert!(UserSelection::UpdateConfiguration(AllConfigurations::default()).ordinal() == 11);
         assert!(UserSelection::AddToClipboard("".to_owned()).ordinal() == 12);
     }
 

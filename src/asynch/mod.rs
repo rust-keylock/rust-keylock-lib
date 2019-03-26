@@ -26,9 +26,8 @@ use super::{Editor, Menu, MessageSeverity, Props, RklConfiguration, Safe, UserOp
 use super::api::UiCommand;
 use super::errors;
 
-use self::nextcloud::SyncStatus;
-
 pub mod nextcloud;
+pub mod dropbox;
 
 pub const ASYNC_EDITOR_PARK_TIMEOUT: Duration = time::Duration::from_millis(10);
 
@@ -114,17 +113,22 @@ impl AsyncTaskHandle {
 pub(crate) struct AsyncEditorFacade {
     user_selection_rx: Receiver<UserSelection>,
     nextcloud_rx: Option<Receiver<errors::Result<SyncStatus>>>,
+    dropbox_rx: Option<Receiver<errors::Result<SyncStatus>>>,
     command_tx: Sender<UiCommand>,
     props: Props,
 }
 
 impl AsyncEditorFacade {
     pub fn new(user_selection_rx: Receiver<UserSelection>, command_tx: Sender<UiCommand>, props: Props) -> AsyncEditorFacade {
-        AsyncEditorFacade { user_selection_rx, nextcloud_rx: None, command_tx, props }
+        AsyncEditorFacade { user_selection_rx, nextcloud_rx: None, dropbox_rx: None, command_tx, props }
     }
 
     pub fn update_nextcloud_rx(&mut self, new_nextcloud_rx: Option<Receiver<errors::Result<SyncStatus>>>) {
         self.nextcloud_rx = new_nextcloud_rx;
+    }
+
+    pub fn update_dropbox_rx(&mut self, new_dropbox_rx: Option<Receiver<errors::Result<SyncStatus>>>) {
+        self.dropbox_rx = new_dropbox_rx;
     }
 
     pub fn send(&self, command: UiCommand) {
@@ -172,6 +176,11 @@ impl AsyncEditorFacade {
                 user_selection = sel;
                 break;
             }
+
+            if let Some(sel) = self.check_dropbox_message() {
+                user_selection = sel;
+                break;
+            }
         }
 
         user_selection
@@ -192,16 +201,31 @@ impl AsyncEditorFacade {
         })
     }
 
+    // Get a possible dropbox async task message
+    fn check_dropbox_message(&self) -> Option<UserSelection> {
+        self.dropbox_rx.as_ref().and_then(|rx| {
+            match rx.try_recv() {
+                Ok(sync_status_res) => {
+                    match sync_status_res {
+                        Ok(sync_status) => self.handle_sync_status_success(sync_status, super::PROPS_FILENAME),
+                        Err(_) => None,
+                    }
+                }
+                _ => None,
+            }
+        })
+    }
+
     fn handle_sync_status_success(&self, sync_status: SyncStatus, filename: &str) -> Option<UserSelection> {
         match sync_status {
-            SyncStatus::UploadSuccess => {
-                debug!("The nextcloud server was updated with the local data");
-                let _ = self.show_message("The nextcloud server was updated with the local data", vec![UserOption::ok()], MessageSeverity::Info);
+            SyncStatus::UploadSuccess(who) => {
+                debug!("The {} server was updated with the local data", who);
+                let _ = self.show_message(&format!("The {} server was updated with the local data", who), vec![UserOption::ok()], MessageSeverity::Info);
                 Some(UserSelection::GoTo(Menu::Current))
             }
-            SyncStatus::NewAvailable(downloaded_filename) => {
-                debug!("Downloaded new data from the nextcloud server.");
-                let selection = self.show_message("Downloaded new data from the nextcloud server. Do you want to apply them locally now?",
+            SyncStatus::NewAvailable(who, downloaded_filename) => {
+                debug!("Downloaded new data from the {} server.", who);
+                let selection = self.show_message(&format!("Downloaded new data from the {} server. Do you want to apply them locally now?", who),
                                                   vec![UserOption::yes(), UserOption::no()],
                                                   MessageSeverity::Info);
 
@@ -214,12 +238,12 @@ impl AsyncEditorFacade {
                     Some(UserSelection::GoTo(Menu::Current))
                 }
             }
-            SyncStatus::NewToMerge(downloaded_filename) => {
-                debug!("Downloaded data from the nextcloud server, but conflicts were identified. The contents will be merged.");
+            SyncStatus::NewToMerge(who, downloaded_filename) => {
+                debug!("Downloaded data from the {} server, but conflicts were identified. The contents will be merged.", who);
                 let selection =
-                    self.show_message("Downloaded data from the nextcloud server, but conflicts were identified. The contents will be merged \
+                    self.show_message(&format!("Downloaded data from the {} server, but conflicts were identified. The contents will be merged \
                                    but nothing will be saved. You will need to explicitly save after reviewing the merged data. Do you \
-                                   want to do the merge now?",
+                                   want to do the merge now?", who),
                                       vec![UserOption::yes(), UserOption::no()],
                                       MessageSeverity::Info);
 
@@ -310,6 +334,22 @@ fn timeout_check(last_action_time: &SystemTime, timeout_seconds: i64) -> Option<
             Some(())
         }
     }
+}
+
+/// The status of the synchronize actions
+#[derive(PartialEq, Debug)]
+pub enum SyncStatus {
+    /// An update is available from the server.
+    /// The &'static str is the sync that sends the message, String is the name of the file that is ready to be used if the user selects so.
+    NewAvailable(&'static str, String),
+    /// The local file was uploaded to the nextcloud server. The &'static str is the sync that sends the message.
+    UploadSuccess(&'static str),
+    /// An update is available from the nextcloud server but instead of replacing the contents, merging needs to be done.
+    /// The &'static str is the sync that sends the message.
+    /// The String is the name of the file that is ready to be used if the user selects so.
+    NewToMerge(&'static str, String),
+    /// None
+    None,
 }
 
 #[cfg(test)]
