@@ -909,7 +909,6 @@ mod unit_tests {
     }
 
     #[test]
-    #[ignore]
     fn execution_cases() {
         execute_try_pass();
         execute_show_entry();
