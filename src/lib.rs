@@ -84,35 +84,37 @@ pub fn execute_async(editor: Box<dyn AsyncEditor>) {
     let (ui_tx, ui_rx) = mpsc::channel();
     let mut ui_rx_vec = Vec::new();
 
-    tokio::run(lazy (|| {
-        openssl_probe::init_ssl_cert_env_vars();
-        info!("Starting rust-keylock...");
-        let props = match file_handler::load_properties(PROPS_FILENAME) {
-            Ok(m) => m,
-            Err(error) => {
-                error!("Could not load properties. Using defaults. The error was: {}", error.description());
-                Props::default()
-            }
-        };
+    thread::spawn(move || {
+        tokio::run(lazy(|| {
+            openssl_probe::init_ssl_cert_env_vars();
+            info!("Starting rust-keylock...");
+            let props = match file_handler::load_properties(PROPS_FILENAME) {
+                Ok(m) => m,
+                Err(error) => {
+                    error!("Could not load properties. Using defaults. The error was: {}", error.description());
+                    Props::default()
+                }
+            };
 
-        let editor_facade = asynch::AsyncEditorFacade::new(ui_rx, command_tx, props.clone());
+            let editor_facade = asynch::AsyncEditorFacade::new(ui_rx, command_tx, props.clone());
 
-        let main_loop = loop_fn(CoreLogicHandler::new(editor_facade, props), |executor| {
-            executor.handle()
-                .map_err(|_| ())
-                .and_then(|(executor, stop)| {
-                    if stop {
-                        ok(Loop::Break(()))
-                    } else {
-                        ok(Loop::Continue(executor))
-                    }
-                })
-        });
+            let main_loop = loop_fn(CoreLogicHandler::new(editor_facade, props), |executor| {
+                executor.handle()
+                    .map_err(|_| ())
+                    .and_then(|(executor, stop)| {
+                        if stop {
+                            ok(Loop::Break(()))
+                        } else {
+                            ok(Loop::Continue(executor))
+                        }
+                    })
+            });
 
-        tokio::spawn(main_loop);
+            tokio::spawn(main_loop);
 
-        Ok(())
-    }));
+            Ok(())
+        }));
+    });
 
     // The select macro is a nightly feature and is going to be deprecated. Use polling until a better solution is found.
     // https://github.com/rust-lang/rust/issues/27800

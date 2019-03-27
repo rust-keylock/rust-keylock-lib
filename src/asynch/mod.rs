@@ -183,7 +183,7 @@ impl AsyncEditorFacade {
             match rx.try_recv() {
                 Ok(sync_status_res) => {
                     match sync_status_res {
-                        Ok(sync_status) => self.handle_sync_status_success(sync_status, super::PROPS_FILENAME),
+                        Ok(sync_status) => self.handle_sync_status_success(sync_status, super::FILENAME),
                         Err(_) => None,
                     }
                 }
