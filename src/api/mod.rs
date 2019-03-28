@@ -68,11 +68,13 @@ pub struct RklConfiguration {
 impl RklConfiguration {
     pub fn update_system_for_save(&mut self) -> errors::Result<()> {
         self.system.version = Some((self.system.version.unwrap_or(0)) + 1);
-        // When uploaded, the last_sync_version should be the same with the version
-        self.system.last_sync_version = self.system.version;
         let local_time_seconds = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
         self.system.saved_at = Some(local_time_seconds as i64);
         Ok(())
+    }
+
+    pub fn update_system_last_sync(&mut self) {
+        self.system.last_sync_version = Some((self.system.last_sync_version.unwrap_or(0)) + 1);
     }
 }
 
@@ -428,6 +430,8 @@ pub enum UserSelection {
     UserOption(UserOption),
     /// The User updates the configuration.
     UpdateConfiguration(nextcloud::NextcloudConfiguration),
+    /// A sync task (like nextcloud or dropbox) synced with the server. Update the last_sync_version in the configuration.
+    UpdateLastSyncVersion(&'static str),
     /// The user copies content to the clipboard.
     AddToClipboard(String),
 }
@@ -450,7 +454,8 @@ impl UserSelection {
             UserSelection::ImportFromDefaultLocation(_, _, _) => 9,
             UserSelection::UserOption(_) => 10,
             UserSelection::UpdateConfiguration(_) => 11,
-            UserSelection::AddToClipboard(_) => 12,
+            UserSelection::UpdateLastSyncVersion(_) => 12,
+            UserSelection::AddToClipboard(_) => 13,
         }
     }
 }
@@ -973,7 +978,8 @@ mod api_unit_tests {
         assert!(UserSelection::ImportFromDefaultLocation("".to_owned(), "".to_owned(), 1).ordinal() == 9);
         assert!(UserSelection::UserOption(UserOption::empty()).ordinal() == 10);
         assert!(UserSelection::UpdateConfiguration(super::nextcloud::NextcloudConfiguration::default()).ordinal() == 11);
-        assert!(UserSelection::AddToClipboard("".to_owned()).ordinal() == 12);
+        assert!(UserSelection::UpdateLastSyncVersion("").ordinal() == 12);
+        assert!(UserSelection::AddToClipboard("".to_owned()).ordinal() == 13);
     }
 
     #[test]

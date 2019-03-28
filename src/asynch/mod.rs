@@ -197,7 +197,7 @@ impl AsyncEditorFacade {
             SyncStatus::UploadSuccess => {
                 debug!("The nextcloud server was updated with the local data");
                 let _ = self.show_message("The nextcloud server was updated with the local data", vec![UserOption::ok()], MessageSeverity::Info);
-                Some(UserSelection::GoTo(Menu::Current))
+                Some(UserSelection::UpdateLastSyncVersion("nextcloud"))
             }
             SyncStatus::NewAvailable(downloaded_filename) => {
                 debug!("Downloaded new data from the nextcloud server.");
@@ -223,8 +223,8 @@ impl AsyncEditorFacade {
                                       vec![UserOption::yes(), UserOption::no()],
                                       MessageSeverity::Info);
 
-                debug!("The user selected {:?} as an answer for applying the downloaded data locally", &selection);
                 if selection == UserSelection::UserOption(UserOption::yes()) {
+                    debug!("The user selected {:?} as an answer for applying the downloaded data locally", &selection);
                     debug!("Merging the local data with the downloaded from the server");
 
                     match self.show_password_enter() {

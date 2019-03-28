@@ -638,6 +638,11 @@ Warning: Saving will discard all the entries that could not be recovered.
                 debug!("UserSelection::GoTo(Menu::Current)");
                 s.editor.show_menu(&Menu::Current, &s.safe, &s.configuration)
             }
+            UserSelection::UpdateLastSyncVersion(_) => {
+                debug!("UserSelection::UpdateLastSyncVersion");
+                s.configuration.update_system_last_sync();
+                UserSelection::GoTo(Menu::Current)
+            }
             other => {
                 let message = format!("Bug: User Selection '{:?}' should not be handled in the main loop. Please, consider opening a bug \
                                        to the developers.",
