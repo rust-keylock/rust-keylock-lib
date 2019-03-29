@@ -66,15 +66,19 @@ pub struct RklConfiguration {
 }
 
 impl RklConfiguration {
-    pub fn update_system_for_save(&mut self) -> errors::Result<()> {
-        self.system.version = Some((self.system.version.unwrap_or(0)) + 1);
+    pub fn update_system_for_save(&mut self, update_last_sync_version: bool) -> errors::Result<()> {
+        if update_last_sync_version {
+            self.update_system_last_sync();
+        } else {
+            self.system.version = Some((self.system.version.unwrap_or(0)) + 1);
+        }
         let local_time_seconds = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
         self.system.saved_at = Some(local_time_seconds as i64);
         Ok(())
     }
 
     pub fn update_system_last_sync(&mut self) {
-        self.system.last_sync_version = Some((self.system.last_sync_version.unwrap_or(0)) + 1);
+        self.system.last_sync_version = self.system.version;
     }
 }
 
@@ -326,7 +330,9 @@ pub enum Menu {
     /// The index of the `Entry` inside the `Entries` list is provided.
     DeleteEntry(usize),
     /// The User encrypts and saves all the existing `Entries` list.
-    Save,
+    /// If bool is true, the last_sync_version will be updated to be the same with the local_version.
+    /// If false, only the local_version will be updated.
+    Save(bool),
     /// The User selects to Exit _rust-keylock_
     Exit,
     /// The User selects to Exit _rust-keylock_, even if there is unsaved data.
@@ -357,7 +363,7 @@ impl Menu {
             &Menu::ShowEntry(_) => "ShowEntry".to_string(),
             &Menu::EditEntry(_) => "EditEntry".to_string(),
             &Menu::DeleteEntry(_) => "DeleteEntry".to_string(),
-            &Menu::Save => format!("{:?}", Menu::Save),
+            &Menu::Save(_) => "Save".to_string(),
             &Menu::Exit => format!("{:?}", Menu::Exit),
             &Menu::ForceExit => format!("{:?}", Menu::ForceExit),
             &Menu::TryFileRecovery => format!("{:?}", Menu::TryFileRecovery),
@@ -383,7 +389,8 @@ impl Menu {
             (ref n, Some(arg), None) if &Menu::ShowEntry(arg).get_name() == n => Menu::ShowEntry(arg),
             (ref n, Some(arg), None) if &Menu::EditEntry(arg).get_name() == n => Menu::EditEntry(arg),
             (ref n, Some(arg), None) if &Menu::DeleteEntry(arg).get_name() == n => Menu::DeleteEntry(arg),
-            (ref n, None, None) if &Menu::Save.get_name() == n => Menu::Save,
+            (ref n, None, None) if &Menu::Save(false).get_name() == n => Menu::Save(false),
+            (ref n, None, None) if &Menu::Save(true).get_name() == n => Menu::Save(true),
             (ref n, None, None) if &Menu::Exit.get_name() == n => Menu::Exit,
             (ref n, None, None) if &Menu::ForceExit.get_name() == n => Menu::ForceExit,
             (ref n, None, None) if &Menu::TryFileRecovery.get_name() == n => Menu::TryFileRecovery,
@@ -430,8 +437,6 @@ pub enum UserSelection {
     UserOption(UserOption),
     /// The User updates the configuration.
     UpdateConfiguration(nextcloud::NextcloudConfiguration),
-    /// A sync task (like nextcloud or dropbox) synced with the server. Update the last_sync_version in the configuration.
-    UpdateLastSyncVersion(&'static str),
     /// The user copies content to the clipboard.
     AddToClipboard(String),
 }
@@ -454,8 +459,7 @@ impl UserSelection {
             UserSelection::ImportFromDefaultLocation(_, _, _) => 9,
             UserSelection::UserOption(_) => 10,
             UserSelection::UpdateConfiguration(_) => 11,
-            UserSelection::UpdateLastSyncVersion(_) => 12,
-            UserSelection::AddToClipboard(_) => 13,
+            UserSelection::AddToClipboard(_) => 12,
         }
     }
 }
@@ -844,7 +848,7 @@ mod api_unit_tests {
         assert!(m6 == "ForceExit");
         let m7 = Menu::ChangePass.get_name();
         assert!(m7 == "ChangePass");
-        let m8 = Menu::Save.get_name();
+        let m8 = Menu::Save(false).get_name();
         assert!(m8 == "Save");
         let m9 = Menu::Exit.get_name();
         assert!(m9 == "Exit");
@@ -978,8 +982,7 @@ mod api_unit_tests {
         assert!(UserSelection::ImportFromDefaultLocation("".to_owned(), "".to_owned(), 1).ordinal() == 9);
         assert!(UserSelection::UserOption(UserOption::empty()).ordinal() == 10);
         assert!(UserSelection::UpdateConfiguration(super::nextcloud::NextcloudConfiguration::default()).ordinal() == 11);
-        assert!(UserSelection::UpdateLastSyncVersion("").ordinal() == 12);
-        assert!(UserSelection::AddToClipboard("".to_owned()).ordinal() == 13);
+        assert!(UserSelection::AddToClipboard("".to_owned()).ordinal() == 12);
     }
 
     #[test]

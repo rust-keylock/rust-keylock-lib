@@ -398,9 +398,9 @@ impl CoreLogicHandler {
                 debug!("UserSelection::GoTo(Menu::DeleteEntry(index))");
                 s.editor.show_menu(&Menu::DeleteEntry(index), &s.safe, &s.configuration)
             }
-            UserSelection::GoTo(Menu::Save) => {
-                debug!("UserSelection::GoTo(Menu::Save)");
-                let _ = s.configuration.update_system_for_save().map_err(|error| error!("Cannot update system for save: {:?}", error));
+            UserSelection::GoTo(Menu::Save(update_last_sync_version)) => {
+                debug!("UserSelection::GoTo(Menu::Save({}))", update_last_sync_version);
+                let _ = s.configuration.update_system_for_save(update_last_sync_version).map_err(|error| error!("Cannot update system for save: {:?}", error));
                 // Reset the filter
                 s.safe.set_filter("".to_string());
                 let rkl_content = RklContent::from((&s.safe, &s.configuration.nextcloud, &s.configuration.system));
@@ -417,7 +417,9 @@ impl CoreLogicHandler {
                             s.async_task_handle = Some(handle);
                             s.editor.update_nextcloud_rx(Some(nextcloud_sync_status_rx));
                         }
-                        let _ = s.editor.show_message("Encrypted and saved successfully!", vec![UserOption::ok()], MessageSeverity::default());
+                        if !update_last_sync_version {
+                            let _ = s.editor.show_message("Encrypted and saved successfully!", vec![UserOption::ok()], MessageSeverity::default());
+                        }
                     }
                     Err(error) => {
                         let _ = s.editor.show_message("Could not save...", vec![UserOption::ok()], MessageSeverity::Error);
@@ -435,7 +437,7 @@ impl CoreLogicHandler {
                         }
                     };
                 }
-                UserSelection::GoTo(Menu::Main)
+                UserSelection::GoTo(Menu::Current)
             }
             UserSelection::GoTo(Menu::Exit) => {
                 debug!("UserSelection::GoTo(Menu::Exit)");
@@ -564,16 +566,23 @@ Warning: Saving will discard all the entries that could not be recovered.
                         debug!("UserSelection::ImportFrom(path, pwd, salt_pos)");
 
                         match file_handler::load(&path, &cr, import_from_default_location) {
-                            Ok(rkl_content) => {
-                                let message = format!("Imported {} entries!", &rkl_content.entries.len());
-                                debug!("{}", message);
-                                s.contents_changed = true;
-                                s.safe.merge(rkl_content.entries);
-                                let _ = s.editor.show_message(&message, vec![UserOption::ok()], MessageSeverity::default());
-                            }
                             Err(error) => {
                                 error!("Could not import... {:?}", error);
                                 let _ = s.editor.show_message("Could not import...", vec![UserOption::ok()], MessageSeverity::Error);
+                            }
+                            Ok(rkl_content) => {
+                                let message = format!("Imported {} entries!", &rkl_content.entries.len());
+                                debug!("{}", message);
+                                // Mark contents changed
+                                s.contents_changed = true;
+                                // Do the merge
+                                s.safe.merge(rkl_content.entries);
+                                // Replace the configuration
+                                s.configuration.system = rkl_content.system_conf;
+                                // Make the last_sync_version equal to the local one.
+                                s.configuration.update_system_last_sync();
+
+                                let _ = s.editor.show_message(&message, vec![UserOption::ok()], MessageSeverity::default());
                             }
                         };
                     }
@@ -604,7 +613,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                 let (tx, rx) = mpsc::channel();
                 let synchronizer = asynch::nextcloud::Synchronizer::new(&s.configuration.nextcloud, &s.configuration.system, tx, FILENAME).unwrap();
 
-                tokio::spawn(synchronizer.execute());
+                tokio::spawn(synchronizer.execute().map(|_| ()));
 
                 let to_ret = match rx.recv() {
                     Ok(res) => {
@@ -637,11 +646,6 @@ Warning: Saving will discard all the entries that could not be recovered.
             UserSelection::GoTo(Menu::Current) => {
                 debug!("UserSelection::GoTo(Menu::Current)");
                 s.editor.show_menu(&Menu::Current, &s.safe, &s.configuration)
-            }
-            UserSelection::UpdateLastSyncVersion(_) => {
-                debug!("UserSelection::UpdateLastSyncVersion");
-                s.configuration.update_system_last_sync();
-                UserSelection::GoTo(Menu::Current)
             }
             other => {
                 let message = format!("Bug: User Selection '{:?}' should not be handled in the main loop. Please, consider opening a bug \
@@ -936,7 +940,7 @@ mod unit_tests {
             // Login
             UserSelection::ProvidedPassword("123".to_string(), 0),
             // Save
-            UserSelection::GoTo(Menu::Save),
+            UserSelection::GoTo(Menu::Save(false)),
             // Ack saved message
             UserSelection::UserOption(UserOption::ok()),
             // Exit
@@ -993,7 +997,7 @@ mod unit_tests {
             UserSelection::GoTo(Menu::NewEntry),
             UserSelection::NewEntry(Entry::new("n".to_owned(), "url".to_owned(), "u".to_owned(), "p".to_owned(), "s".to_owned())),
             // Save
-            UserSelection::GoTo(Menu::Save),
+            UserSelection::GoTo(Menu::Save(false)),
             // Ack saved message
             UserSelection::UserOption(UserOption::ok()),
             // Exit
@@ -1016,7 +1020,7 @@ mod unit_tests {
             UserSelection::GoTo(Menu::DeleteEntry(0)),
             UserSelection::DeleteEntry(0),
             // Save
-            UserSelection::GoTo(Menu::Save),
+            UserSelection::GoTo(Menu::Save(false)),
             // Ack saved message
             UserSelection::UserOption(UserOption::ok()),
             // Exit
@@ -1038,7 +1042,7 @@ mod unit_tests {
             // Return the new password
             UserSelection::ProvidedPassword("321".to_string(), 1),
             // Save
-            UserSelection::GoTo(Menu::Save),
+            UserSelection::GoTo(Menu::Save(false)),
             // Ack saved message
             UserSelection::UserOption(UserOption::ok()),
             // Exit
@@ -1068,7 +1072,7 @@ mod unit_tests {
             // Return the new password
             UserSelection::ProvidedPassword("123".to_string(), 0),
             // Save
-            UserSelection::GoTo(Menu::Save),
+            UserSelection::GoTo(Menu::Save(false)),
             // Ack saved message
             UserSelection::UserOption(UserOption::ok()),
             // Exit

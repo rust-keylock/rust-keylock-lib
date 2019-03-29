@@ -225,13 +225,19 @@ impl Synchronizer {
     ///
     /// ## Algorithm:
     ///
-    /// |           version_local        |       version_server     |     last_sync_version    |          Action
-    /// | :---------------------------:  | :----------------------: | :----------------------: | :------------------------:
-    /// | bigger than server             | smaller than local       | *                        | Upload
-    /// | smaller than server            | bigger than local        | smaller than server      | Download
-    /// | smaller than server            | bigger than local        | smaller than local       | Download and Megre
-    /// | same everywhere                | same everywhere          | same everywhere          | Ignore
-    /// | smaller than last_sync_version | *                        | bigger than local        | Ignore (Error)
+    /// |           version_local        |     last_sync_version    |          Action
+    /// | :---------------------------:  | :----------------------: | :------------------------:
+    /// | bigger than server             | equal to server          | Upload
+    /// | bigger than server             | not equal to server      | Merge
+    ///
+    /// | smaller than server            | not equal to local       | Merge
+    /// | smaller than server            | equal to local           | Download
+    ///
+    /// | equal to server                | equal to server          | Ignore
+    ///
+    /// | equal to server                | not equal to server      | Merge
+    ///
+    /// | other                          | other                    | Ignore (Error)
 
     fn parse_web_dav_response(web_dav_response: &WebDavResponse,
                               filename: &str,
@@ -252,29 +258,44 @@ impl Synchronizer {
                last_sync_version);
 
         match (version_local, version_server, last_sync_version) {
-            (&Some(vl), vs, _) if vl > vs => {
-                debug!("The local version is bigger than the server. Need to upload");
+            (&Some(vl), vs, &Some(lsv)) if vl > vs && lsv == vs => {
+                debug!("The local version is bigger than the server. The last sync version is equal to the server. \
+                        Need to Upload");
                 Ok(ParseWebDavResponse::Upload)
             }
-            (&Some(vl), vs, &Some(lsv)) if vl < vs && vl == lsv => {
-                debug!("The local version is smaller than the server and the last sync version is smaller than the server. Need to \
-                            download");
-                Ok(ParseWebDavResponse::Download)
-            }
-            (&Some(vl), vs, &Some(lsv)) if vl < vs && lsv < vl => {
-                debug!("The local version is smaller than the server and the last sync version is smaller than the local. Need to \
-                            download and merge");
+            (&Some(vl), vs, &Some(lsv)) if vl > vs && lsv != vs => {
+                debug!("The local version is bigger than the server. The last sync version not equal to the server. \
+                        Need to Merge");
                 Ok(ParseWebDavResponse::DownloadMergeAndUpload)
             }
-            (&Some(vl), vs, &Some(lsv)) if vl == vs && vs == lsv => {
-                debug!("The versions locally and on the server are equal. Ignoring...");
+            (&Some(vl), vs, &Some(lsv)) if vl < vs && vl != lsv => {
+                debug!("The local version is smaller than the server The last sync version is not equal to the local version. \
+                        Need to Merge");
+                Ok(ParseWebDavResponse::DownloadMergeAndUpload)
+            }
+            (&Some(vl), vs, &Some(lsv)) if vl < vs && vl == lsv => {
+                debug!("The local version is smaller than the server The last sync version equal to the local version. \
+                        Need to Download");
+                Ok(ParseWebDavResponse::Download)
+            }
+            (&Some(vl), vs, &Some(lsv)) if vl == vs && lsv == vs => {
+                debug!("The local version is equal to the server. The last sync version is equal to the server. \
+                        Ignoring");
                 Ok(ParseWebDavResponse::Ignore)
             }
-            (&None, _, _) => {
+            (&Some(vl), vs, &Some(lsv)) if vl == vs && lsv != vs => {
+                debug!("The local version is equal to the server. The last sync version is not equal to the server. \
+                        Need to merge");
+                Ok(ParseWebDavResponse::DownloadMergeAndUpload)
+            }
+            (&None, _, _) | (_, _, &None) => {
                 debug!("First time contacting the server... Need to download");
                 Ok(ParseWebDavResponse::Download)
             }
-            (_, _, _) => Ok(ParseWebDavResponse::Ignore),
+            (_, _, _) => {
+                error!("The local version, server version and last sync version seem corrupted.");
+                Ok(ParseWebDavResponse::Ignore)
+            }
         }
     }
 
@@ -499,10 +520,9 @@ impl Synchronizer {
 }
 
 impl super::AsyncTask for Synchronizer {
-
     fn init(&mut self) {}
 
-    fn execute(&self) -> Box<dyn Future<Item=(), Error=()> + Send> {
+    fn execute(&self) -> Box<dyn Future<Item=bool, Error=()> + Send> {
         let capsule = ArgsCapsule::new(
             self.conf.server_url.clone(),
             self.conf.username.clone(),
@@ -519,7 +539,14 @@ impl super::AsyncTask for Synchronizer {
         let cloned_tx_err = self.tx.clone();
 
         let f = Self::do_execute(capsule)
-            .map(move |sync_status| Self::send_to_channel(Ok(sync_status), cloned_tx_ok))
+            .map(move |sync_status| {
+                // Return true to continue the task only if the SyncStatus was None.
+                // In all the other cases we need to stop the task in order to allow the user to take an action.
+                let to_ret = sync_status == SyncStatus::None;
+                Self::send_to_channel(Ok(sync_status), cloned_tx_ok);
+
+                to_ret
+            })
             .map_err(move |error| Self::send_to_channel(Err(error), cloned_tx_err));
 
         Box::new(f)
@@ -717,7 +744,6 @@ impl ArgsCapsule {
 
 #[cfg(test)]
 mod nextcloud_tests {
-    use lazy_static::lazy_static;
     use std::collections::HashMap;
     use std::fs;
     use std::fs::File;
@@ -727,12 +753,13 @@ mod nextcloud_tests {
     use std::sync::Mutex;
     use std::thread;
     use std::time;
-    use tokio;
-    use tokio::prelude::future::{lazy, ok};
 
     use hyper::{self, Body, Request, Response, Server, StatusCode};
     use hyper::rt::Future;
     use hyper::service::service_fn_ok;
+    use lazy_static::lazy_static;
+    use tokio;
+    use tokio::prelude::future::{lazy, ok};
     use toml;
 
     use super::super::AsyncTask;
@@ -849,7 +876,7 @@ mod nextcloud_tests {
             tokio::run(lazy(move || {
                 let sys_config = SystemConfiguration::new(Some(123), Some(1), None);
                 let nc = super::Synchronizer::new(&ncc, &sys_config, tx, filename).unwrap();
-                tokio::spawn(nc.execute());
+                tokio::spawn(nc.execute().map(|_| ()));
                 ok(())
             }));
         });
@@ -893,7 +920,7 @@ mod nextcloud_tests {
         thread::spawn(move || {
             tokio::run(lazy(move || {
                 let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename).unwrap();
-                tokio::spawn(nc.execute());
+                tokio::spawn(nc.execute().map(|_| ()));
                 ok(())
             }));
         });
@@ -934,7 +961,7 @@ mod nextcloud_tests {
         thread::spawn(move || {
             tokio::run(lazy(move || {
                 let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename).unwrap();
-                tokio::spawn(nc.execute());
+                tokio::spawn(nc.execute().map(|_| ()));
                 ok(())
             }));
         });
@@ -973,7 +1000,7 @@ mod nextcloud_tests {
         thread::spawn(move || {
             tokio::run(lazy(move || {
                 let nc = super::Synchronizer::new(&ncc, &sys_config, tx, filename).unwrap();
-                tokio::spawn(nc.execute());
+                tokio::spawn(nc.execute().map(|_| ()));
                 ok(())
             }));
         });
@@ -1014,7 +1041,7 @@ mod nextcloud_tests {
         thread::spawn(move || {
             tokio::run(lazy(move || {
                 let nc = super::Synchronizer::new(&ncc, &sys_config, tx, filename).unwrap();
-                tokio::spawn(nc.execute());
+                tokio::spawn(nc.execute().map(|_| ()));
                 ok(())
             }));
         });
@@ -1055,7 +1082,7 @@ mod nextcloud_tests {
         thread::spawn(move || {
             tokio::run(lazy(move || {
                 let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename).unwrap();
-                tokio::spawn(nc.execute());
+                tokio::spawn(nc.execute().map(|_| ()));
                 ok(())
             }));
         });
@@ -1088,7 +1115,7 @@ mod nextcloud_tests {
         thread::spawn(move || {
             tokio::run(lazy(move || {
                 let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename).unwrap();
-                tokio::spawn(nc.execute());
+                tokio::spawn(nc.execute().map(|_| ()));
                 ok(())
             }));
         });
@@ -1213,60 +1240,101 @@ mod nextcloud_tests {
         let filename = "parse_web_dav_response";
         create_file_with_contents(filename, "This is a test file");
 
-        // Upload because version_local is bigger than version_server
+        // Upload because version_local is bigger than version_server and last_sync_version is equal to version_server
         let wdr1 = super::WebDavResponse {
             href: "not needed".to_string(),
             last_modified: "133".to_string(),
             version: "1".to_string(),
             status: "not needed".to_string(),
         };
-        let res1 = super::Synchronizer::parse_web_dav_response(&wdr1, filename, &Some(133), &Some(2), &Some(2));
+        let res1 = super::Synchronizer::parse_web_dav_response(
+            &wdr1,
+            filename,
+            &Some(133),
+            &Some(2),
+            &Some(1));
         assert!(res1.is_ok());
         assert!(res1.as_ref().unwrap() == &super::ParseWebDavResponse::Upload);
 
-        // Download because version_server is bigger than version_local
+        // Merge because version_local is bigger than version_server and last_sync_version is not equal to version_server
         let wdr2 = super::WebDavResponse {
             href: "not needed".to_string(),
             last_modified: "133".to_string(),
             version: "2".to_string(),
             status: "not needed".to_string(),
         };
-        let res2 = super::Synchronizer::parse_web_dav_response(&wdr2, filename, &Some(133), &Some(1), &Some(1));
+        let res2 = super::Synchronizer::parse_web_dav_response(
+            &wdr2,
+            filename,
+            &Some(133),
+            &Some(3),
+            &Some(1));
         assert!(res2.is_ok());
-        assert!(res2.as_ref().unwrap() == &super::ParseWebDavResponse::Download);
+        assert!(res2.as_ref().unwrap() == &super::ParseWebDavResponse::DownloadMergeAndUpload);
 
-        // Download and Merge because of version_server is bigger than version_local and last_sync_version is smaller than the version_local
-        let wdr2_2 = super::WebDavResponse {
-            href: "not needed".to_string(),
-            last_modified: "133".to_string(),
-            version: "3".to_string(),
-            status: "not needed".to_string(),
-        };
-        let res2_2 = super::Synchronizer::parse_web_dav_response(&wdr2_2, filename, &Some(133), &Some(2), &Some(1));
-        assert!(res2_2.is_ok());
-        assert!(res2_2.as_ref().unwrap() == &super::ParseWebDavResponse::DownloadMergeAndUpload);
-
-        // Ignore when all versions are equal
+        // Merge because version_local is smaller than version_server and last_sync_version is not equal to version_local
         let wdr3 = super::WebDavResponse {
             href: "not needed".to_string(),
             last_modified: "133".to_string(),
             version: "3".to_string(),
             status: "not needed".to_string(),
         };
-        let res3 = super::Synchronizer::parse_web_dav_response(&wdr3, filename, &Some(133), &Some(3), &Some(3));
+        let res3 = super::Synchronizer::parse_web_dav_response(
+            &wdr3,
+            filename,
+            &Some(133),
+            &Some(2),
+            &Some(1));
         assert!(res3.is_ok());
-        assert!(res3.as_ref().unwrap() == &super::ParseWebDavResponse::Ignore);
+        assert!(res3.as_ref().unwrap() == &super::ParseWebDavResponse::DownloadMergeAndUpload);
 
-        // Ignore when error (the last_sync_version is bigger than the version_local)
-        let wdr3 = super::WebDavResponse {
+        // Download because version_local is smaller than version_server and last_sync_version equal to version_local
+        let wdr4 = super::WebDavResponse {
             href: "not needed".to_string(),
             last_modified: "133".to_string(),
             version: "3".to_string(),
             status: "not needed".to_string(),
         };
-        let res3 = super::Synchronizer::parse_web_dav_response(&wdr3, filename, &Some(133), &Some(1), &Some(3));
-        assert!(res3.is_ok());
-        assert!(res3.as_ref().unwrap() == &super::ParseWebDavResponse::Ignore);
+        let res4 = super::Synchronizer::parse_web_dav_response(
+            &wdr4,
+            filename,
+            &Some(133),
+            &Some(2),
+            &Some(2));
+        assert!(res4.is_ok());
+        assert!(res4.as_ref().unwrap() == &super::ParseWebDavResponse::Download);
+
+        // Ignore because version_local is equal to version_server and last_sync_version equal to version_server
+        let wdr5 = super::WebDavResponse {
+            href: "not needed".to_string(),
+            last_modified: "133".to_string(),
+            version: "3".to_string(),
+            status: "not needed".to_string(),
+        };
+        let res5 = super::Synchronizer::parse_web_dav_response(
+            &wdr5,
+            filename,
+            &Some(133),
+            &Some(3),
+            &Some(3));
+        assert!(res5.is_ok());
+        assert!(res5.as_ref().unwrap() == &super::ParseWebDavResponse::Ignore);
+
+        // Merge because version_local is equal to version_server and last_sync_version is not equal to version_server
+        let wdr6 = super::WebDavResponse {
+            href: "not needed".to_string(),
+            last_modified: "133".to_string(),
+            version: "3".to_string(),
+            status: "not needed".to_string(),
+        };
+        let res6 = super::Synchronizer::parse_web_dav_response(
+            &wdr6,
+            filename,
+            &Some(133),
+            &Some(3),
+            &Some(2));
+        assert!(res6.is_ok());
+        assert!(res6.as_ref().unwrap() == &super::ParseWebDavResponse::DownloadMergeAndUpload);
 
         delete_file(filename);
     }
@@ -1353,7 +1421,6 @@ mod nextcloud_tests {
                 hyper::rt::run(server);
             }
             "run_http_error_response_on_propfind" => {
-
                 let s = || {
                     service_fn_ok(|req: Request<Body>| {
                         let tx_assert = get_tx_for("run_http_error_response_on_propfind");
