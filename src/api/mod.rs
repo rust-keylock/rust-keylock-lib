@@ -308,7 +308,9 @@ impl Props {
 #[derive(Debug, PartialEq, Clone)]
 pub enum Menu {
     /// The User should provide a password and a number.
-    TryPass,
+    /// If bool is true, the last_sync_version will be updated to be the same with the local_version.
+    /// If false, nothing will be updated.
+    TryPass(bool),
     /// The User should provide a new password and a new number.
     ChangePass,
     /// The User should be presented with the main menu.
@@ -355,7 +357,7 @@ impl Menu {
     /// Returns the name of a `Menu`.
     pub fn get_name(&self) -> String {
         match self {
-            &Menu::TryPass => format!("{:?}", Menu::TryPass),
+            &Menu::TryPass(b) => format!("{:?}", Menu::TryPass(b)),
             &Menu::ChangePass => format!("{:?}", Menu::ChangePass),
             &Menu::Main => format!("{:?}", Menu::Main),
             &Menu::EntriesList(_) => "EntriesList".to_string(),
@@ -363,7 +365,7 @@ impl Menu {
             &Menu::ShowEntry(_) => "ShowEntry".to_string(),
             &Menu::EditEntry(_) => "EditEntry".to_string(),
             &Menu::DeleteEntry(_) => "DeleteEntry".to_string(),
-            &Menu::Save(_) => "Save".to_string(),
+            &Menu::Save(b) => format!("{:?}", Menu::Save(b)),
             &Menu::Exit => format!("{:?}", Menu::Exit),
             &Menu::ForceExit => format!("{:?}", Menu::ForceExit),
             &Menu::TryFileRecovery => format!("{:?}", Menu::TryFileRecovery),
@@ -381,7 +383,9 @@ impl Menu {
     pub fn from(name: String, opt_num: Option<usize>, opt_string: Option<String>) -> Menu {
         debug!("Creating Menu from name {} and additional arguments usize: {:?}, String: {:?}", &name, &opt_num, &opt_string);
         match (name, opt_num, opt_string.clone()) {
-            (ref n, None, None) if &Menu::TryPass.get_name() == n => Menu::TryPass,
+            (ref n, None, None) if &Menu::TryPass(false).get_name() == n => Menu::TryPass(false),
+            (ref n, None, None) if &Menu::TryPass(true).get_name() == n => Menu::TryPass(true),
+            (ref n, None, None) if "TryPass" == n => Menu::TryPass(false),
             (ref n, None, None) if &Menu::ChangePass.get_name() == n => Menu::ChangePass,
             (ref n, None, None) if &Menu::Main.get_name() == n => Menu::Main,
             (ref n, None, Some(ref arg)) if &Menu::EntriesList(arg.clone()).get_name() == n => Menu::EntriesList(arg.clone()),
@@ -391,6 +395,7 @@ impl Menu {
             (ref n, Some(arg), None) if &Menu::DeleteEntry(arg).get_name() == n => Menu::DeleteEntry(arg),
             (ref n, None, None) if &Menu::Save(false).get_name() == n => Menu::Save(false),
             (ref n, None, None) if &Menu::Save(true).get_name() == n => Menu::Save(true),
+            (ref n, None, None) if "Save" == n => Menu::Save(false),
             (ref n, None, None) if &Menu::Exit.get_name() == n => Menu::Exit,
             (ref n, None, None) if &Menu::ForceExit.get_name() == n => Menu::ForceExit,
             (ref n, None, None) if &Menu::TryFileRecovery.get_name() == n => Menu::TryFileRecovery,
@@ -834,8 +839,8 @@ mod api_unit_tests {
 
     #[test]
     fn menu_get_name() {
-        let m1 = Menu::TryPass.get_name();
-        assert!(m1 == "TryPass");
+        let m1 = Menu::TryPass(false).get_name();
+        assert!(m1 == "TryPass(false)");
         let m2 = Menu::EntriesList("".to_string()).get_name();
         assert!(m2 == "EntriesList");
         let m3 = Menu::EditEntry(33).get_name();
@@ -849,7 +854,7 @@ mod api_unit_tests {
         let m7 = Menu::ChangePass.get_name();
         assert!(m7 == "ChangePass");
         let m8 = Menu::Save(false).get_name();
-        assert!(m8 == "Save");
+        assert!(m8 == "Save(false)");
         let m9 = Menu::Exit.get_name();
         assert!(m9 == "Exit");
         let m10 = Menu::Main.get_name();
@@ -872,14 +877,12 @@ mod api_unit_tests {
         assert!(m18 == "Synchronize");
         let m19 = Menu::TryFileRecovery.get_name();
         assert!(m19 == "TryFileRecovery");
-        let m20 = Menu::TryPass.get_name();
-        assert!(m20 == "TryPass");
     }
 
     #[test]
     fn menu_from_name() {
-        let m1 = Menu::from("TryPass".to_string(), None, None);
-        assert!(m1 == Menu::TryPass);
+        let m1 = Menu::from("TryPass(false)".to_string(), None, None);
+        assert!(m1 == Menu::TryPass(false));
         let m2 = Menu::from("EntriesList".to_string(), None, Some("".to_string()));
         assert!(m2 == Menu::EntriesList("".to_string()));
         let m3 = Menu::from("ShowEntry".to_string(), Some(1), None);
@@ -974,7 +977,7 @@ mod api_unit_tests {
         assert!(UserSelection::NewEntry(Entry::empty()).ordinal() == 1);
         assert!(UserSelection::ReplaceEntry(1, Entry::empty()).ordinal() == 2);
         assert!(UserSelection::DeleteEntry(1).ordinal() == 3);
-        assert!(UserSelection::GoTo(Menu::TryPass).ordinal() == 4);
+        assert!(UserSelection::GoTo(Menu::TryPass(false)).ordinal() == 4);
         assert!(UserSelection::ProvidedPassword("".to_owned(), 33).ordinal() == 5);
         assert!(UserSelection::Ack.ordinal() == 6);
         assert!(UserSelection::ExportTo("".to_owned()).ordinal() == 7);

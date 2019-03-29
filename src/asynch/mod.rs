@@ -207,7 +207,7 @@ impl AsyncEditorFacade {
                 if selection == UserSelection::UserOption(UserOption::yes()) {
                     debug!("Replacing the local file with the one downloaded from the server");
                     let _ = super::file_handler::replace(&downloaded_filename, filename);
-                    Some(UserSelection::GoTo(Menu::TryPass))
+                    Some(UserSelection::GoTo(Menu::TryPass(true)))
                 } else {
                     Some(UserSelection::GoTo(Menu::Current))
                 }
@@ -239,7 +239,7 @@ impl AsyncEditorFacade {
                                                  consider opening a bug to the developers.",
                                                   vec![UserOption::ok()],
                                                   MessageSeverity::Error);
-                            Some(UserSelection::GoTo(Menu::TryPass))
+                            Some(UserSelection::GoTo(Menu::TryPass(false)))
                         }
                     }
                 } else {

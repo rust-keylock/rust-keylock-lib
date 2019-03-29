@@ -346,11 +346,17 @@ impl CoreLogicHandler {
         s.editor.sort_entries(&mut s.safe.entries);
         // Handle
         s.user_selection = match s.user_selection {
-            UserSelection::GoTo(Menu::TryPass) => {
+            UserSelection::GoTo(Menu::TryPass(update_last_sync_version)) => {
                 // Cancel any pending background tasks
                 let _ = s.async_task_handle.as_ref().map(|handle| handle.stop());
                 let (user_selection, cr) =
                     handle_provided_password_for_init(s.editor.show_password_enter(), FILENAME, &mut s.safe, &mut s.configuration, &s.editor, &s.props);
+
+                if update_last_sync_version {
+                    s.configuration.update_system_last_sync();
+                    let rkl_content = RklContent::from((&s.safe, &s.configuration.nextcloud, &s.configuration.system));
+                    let _ = rkl_content.and_then(|c| file_handler::save(c, FILENAME, &s.cryptor, true));
+                }
                 // If a valid nextcloud configuration is in place, spawn the background async execution
                 if s.configuration.nextcloud.is_filled() {
                     debug!("A valid configuration for Nextcloud synchronization was found. Spawning async tasks");
@@ -678,7 +684,7 @@ fn handle_sync_status_success(sync_status: asynch::nextcloud::SyncStatus,
             if selection == UserSelection::UserOption(UserOption::yes()) {
                 debug!("Replacing the local file with the one downloaded from the server");
                 let _ = file_handler::replace(&downloaded_filename, filename);
-                *user_selection = UserSelection::GoTo(Menu::TryPass);
+                *user_selection = UserSelection::GoTo(Menu::TryPass(true));
             }
         }
         asynch::nextcloud::SyncStatus::NewToMerge(downloaded_filename) => {
@@ -707,7 +713,7 @@ fn handle_sync_status_success(sync_status: asynch::nextcloud::SyncStatus,
                                                  consider opening a but to the developers.",
                                                 vec![UserOption::ok()],
                                                 MessageSeverity::Error);
-                        *user_selection = UserSelection::GoTo(Menu::TryPass);
+                        *user_selection = UserSelection::GoTo(Menu::TryPass(false));
                     }
                 }
             }
@@ -760,7 +766,7 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
                                                     MessageSeverity::Error);
                             match s {
                                 _ => {
-                                    user_selection = UserSelection::GoTo(Menu::TryPass);
+                                    user_selection = UserSelection::GoTo(Menu::TryPass(false));
                                     Vec::new()
                                 }
                             }
