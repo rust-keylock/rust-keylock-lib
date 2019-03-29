@@ -443,7 +443,11 @@ impl CoreLogicHandler {
                         }
                     };
                 }
-                UserSelection::GoTo(Menu::Current)
+                if update_last_sync_version {
+                    UserSelection::GoTo(Menu::Current)
+                } else {
+                    UserSelection::GoTo(Menu::Main)
+                }
             }
             UserSelection::GoTo(Menu::Exit) => {
                 debug!("UserSelection::GoTo(Menu::Exit)");
