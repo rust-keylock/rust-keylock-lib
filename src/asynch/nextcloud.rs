@@ -228,7 +228,8 @@ impl Synchronizer {
     /// |           version_local        |     last_sync_version    |          Action
     /// | :---------------------------:  | :----------------------: | :------------------------:
     /// | bigger than server             | equal to server          | Upload
-    /// | bigger than server             | not equal to server      | Merge
+    /// | bigger than server             | smaller than server      | Merge
+    /// | bigger than server             | bigger than server       | Upload
     ///
     /// | smaller than server            | not equal to local       | Merge
     /// | smaller than server            | equal to local           | Download
@@ -263,10 +264,15 @@ impl Synchronizer {
                         Need to Upload");
                 Ok(ParseWebDavResponse::Upload)
             }
-            (&Some(vl), vs, &Some(lsv)) if vl > vs && lsv != vs => {
-                debug!("The local version is bigger than the server. The last sync version not equal to the server. \
+            (&Some(vl), vs, &Some(lsv)) if vl > vs && lsv < vs => {
+                debug!("The local version is bigger than the server. The last sync version is smaller than the server. \
                         Need to Merge");
                 Ok(ParseWebDavResponse::DownloadMergeAndUpload)
+            }
+            (&Some(vl), vs, &Some(lsv)) if vl > vs && lsv > vs => {
+                debug!("The local version is bigger than the server. The last sync version is bigger than the server. \
+                        Need to Upload");
+                Ok(ParseWebDavResponse::Upload)
             }
             (&Some(vl), vs, &Some(lsv)) if vl < vs && vl != lsv => {
                 debug!("The local version is smaller than the server The last sync version is not equal to the local version. \
