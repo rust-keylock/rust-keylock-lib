@@ -63,7 +63,7 @@ pub use self::api::{
 };
 pub use self::api::safe::Safe;
 use self::api::UiCommand;
-use self::asynch::{AsyncEditorFacade, AsyncTask};
+use self::asynch::AsyncEditorFacade;
 pub use self::asynch::nextcloud;
 
 mod file_handler;
@@ -618,37 +618,6 @@ Warning: Saving will discard all the entries that could not be recovered.
                 }
                 UserSelection::GoTo(Menu::Main)
             }
-            UserSelection::GoTo(Menu::Synchronize) => {
-                debug!("UserSelection::GoTo(Menu::Synchronize)");
-                let (tx, rx) = mpsc::channel();
-                let synchronizer = asynch::nextcloud::Synchronizer::new(&s.configuration.nextcloud, &s.configuration.system, tx, FILENAME).unwrap();
-
-                tokio::spawn(synchronizer.execute().map(|_| ()));
-
-                let to_ret = match rx.recv() {
-                    Ok(res) => {
-                        match res {
-                            Ok(sync_status) => {
-                                let mut tmp_user_selection = UserSelection::GoTo(Menu::Main);
-                                handle_sync_status_success(sync_status, &s.editor, FILENAME, &mut tmp_user_selection);
-                                tmp_user_selection
-                            }
-                            Err(error) => {
-                                error!("Could not synchronize: {:?}", error);
-                                let _ = s.editor.show_message("Could not synchronize. Please see the logs for more details.", vec![UserOption::ok()], MessageSeverity::Error);
-                                UserSelection::GoTo(Menu::ShowConfiguration)
-                            }
-                        }
-                    }
-                    Err(error) => {
-                        format!("Could not synchronize (Channel reception error): {:?}", error);
-                        let _ = s.editor.show_message("Could not synchronize. Please see the logs for more details.", vec![UserOption::ok()], MessageSeverity::Error);
-                        UserSelection::GoTo(Menu::ShowConfiguration)
-                    }
-                };
-
-                to_ret
-            }
             UserSelection::AddToClipboard(content) => {
                 debug!("UserSelection::AddToClipboard");
                 selection_handling::add_to_clipboard(content, &s.editor)
@@ -667,65 +636,6 @@ Warning: Saving will discard all the entries that could not be recovered.
         };
 
         ok((s, stop))
-    }
-}
-
-fn handle_sync_status_success(sync_status: asynch::nextcloud::SyncStatus,
-                              editor: &Editor,
-                              filename: &str,
-                              user_selection: &mut UserSelection) {
-    match sync_status {
-        asynch::nextcloud::SyncStatus::UploadSuccess => {
-            let _ =
-                editor.show_message("The nextcloud server was updated with the local data", vec![UserOption::ok()], MessageSeverity::Info);
-        }
-        asynch::nextcloud::SyncStatus::NewAvailable(downloaded_filename) => {
-            let selection = editor.show_message("Downloaded new data from the nextcloud server. Do you want to apply them locally now?",
-                                                vec![UserOption::yes(), UserOption::no()],
-                                                MessageSeverity::Info);
-
-            debug!("The user selected {:?} as an answer for applying the downloaded data locally", &selection);
-            if selection == UserSelection::UserOption(UserOption::yes()) {
-                debug!("Replacing the local file with the one downloaded from the server");
-                let _ = file_handler::replace(&downloaded_filename, filename);
-                *user_selection = UserSelection::GoTo(Menu::TryPass(true));
-            }
-        }
-        asynch::nextcloud::SyncStatus::NewToMerge(downloaded_filename) => {
-            let selection =
-                editor.show_message("Downloaded data from the nextcloud server, but conflicts were identified. The contents will be merged \
-                                   but nothing will be saved. You will need to explicitly save after reviewing the merged data. Do you \
-                                   want to do the merge now?",
-                                    vec![UserOption::yes(), UserOption::no()],
-                                    MessageSeverity::Info);
-
-            debug!("The user selected {:?} as an answer for applying the downloaded data locally", &selection);
-            if selection == UserSelection::UserOption(UserOption::yes()) {
-                debug!("Merging the local data with the downloaded from the server");
-
-                match editor.show_password_enter() {
-                    UserSelection::ProvidedPassword(pwd, salt_pos) => {
-                        *user_selection = UserSelection::ImportFromDefaultLocation(downloaded_filename, pwd, salt_pos);
-                    }
-                    other => {
-                        let message = format!("Expected a ProvidedPassword but received '{:?}'. Please, consider opening a bug to the \
-                                               developers.",
-                                              &other);
-                        error!("{}", message);
-                        let _ =
-                            editor.show_message("Unexpected result when waiting for password. See the logs for more details. Please \
-                                                 consider opening a but to the developers.",
-                                                vec![UserOption::ok()],
-                                                MessageSeverity::Error);
-                        *user_selection = UserSelection::GoTo(Menu::TryPass(false));
-                    }
-                }
-            }
-        }
-        asynch::nextcloud::SyncStatus::None => {
-            let _ = editor.show_message("No need to sync. The contents are identical", vec![UserOption::ok()], MessageSeverity::Info);
-            *user_selection = UserSelection::GoTo(Menu::Current);
-        }
     }
 }
 
@@ -939,7 +849,6 @@ mod unit_tests {
         execute_export_entries();
         execute_import_entries();
         execute_update_configuration();
-        execute_synchronize();
         execute_add_to_clipboard();
     }
 
@@ -1185,24 +1094,6 @@ mod unit_tests {
             UserSelection::UpdateConfiguration(new_conf),
             // Update the configuration with a non-filled one
             UserSelection::UpdateConfiguration(new_empty_conf),
-            // Exit
-            UserSelection::GoTo(Menu::ForceExit)], tx));
-
-        super::execute(editor);
-        let res = rx.recv();
-        assert!(res.is_ok() && res.unwrap());
-    }
-
-    fn execute_synchronize() {
-        println!("===========execute_synchronize");
-        let (tx, rx) = mpsc::channel();
-        let editor = Box::new(TestEditor::new(vec![
-            // Login
-            UserSelection::ProvidedPassword("123".to_string(), 0),
-            // Synchronize
-            UserSelection::GoTo(Menu::Synchronize),
-            // Ack message
-            UserSelection::UserOption(UserOption::ok()),
             // Exit
             UserSelection::GoTo(Menu::ForceExit)], tx));
 

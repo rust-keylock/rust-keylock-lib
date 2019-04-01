@@ -347,8 +347,6 @@ pub enum Menu {
     ExportEntries,
     /// The user should be presented with the configuration menu
     ShowConfiguration,
-    /// Perform Synchronization
-    Synchronize,
     /// Stay in the current menu
     Current,
 }
@@ -372,7 +370,6 @@ impl Menu {
             &Menu::ImportEntries => format!("{:?}", Menu::ImportEntries),
             &Menu::ExportEntries => format!("{:?}", Menu::ExportEntries),
             &Menu::ShowConfiguration => format!("{:?}", Menu::ShowConfiguration),
-            &Menu::Synchronize => format!("{:?}", Menu::Synchronize),
             &Menu::Current => format!("{:?}", Menu::Current),
         }
     }
@@ -402,7 +399,6 @@ impl Menu {
             (ref n, None, None) if &Menu::ImportEntries.get_name() == n => Menu::ImportEntries,
             (ref n, None, None) if &Menu::ExportEntries.get_name() == n => Menu::ExportEntries,
             (ref n, None, None) if &Menu::ShowConfiguration.get_name() == n => Menu::ShowConfiguration,
-            (ref n, None, None) if &Menu::Synchronize.get_name() == n => Menu::Synchronize,
             (ref n, None, None) if &Menu::Current.get_name() == n => Menu::Current,
             (ref other, _, _) => {
                 let message = format!("Cannot create Menu from String '{}' and arguments usize: '{:?}', String: '{:?}'. Please, consider \
@@ -873,10 +869,8 @@ mod api_unit_tests {
         assert!(m16 == "ShowConfiguration");
         let m17 = Menu::ShowEntry(1).get_name();
         assert!(m17 == "ShowEntry");
-        let m18 = Menu::Synchronize.get_name();
-        assert!(m18 == "Synchronize");
-        let m19 = Menu::TryFileRecovery.get_name();
-        assert!(m19 == "TryFileRecovery");
+        let m18 = Menu::TryFileRecovery.get_name();
+        assert!(m18 == "TryFileRecovery");
     }
 
     #[test]
