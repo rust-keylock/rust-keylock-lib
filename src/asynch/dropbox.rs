@@ -1,26 +1,25 @@
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::mpsc;
 use std::sync::mpsc::Sender;
+use std::thread;
+use std::time;
 
-use tokio::prelude::*;
+use base64;
+use futures::future::ok;
+use http::StatusCode;
+use hyper::{self, Body, Request, Response, Server};
+use hyper::rt::Future;
+use hyper::service::service_fn_ok;
+use log::*;
+use percent_encoding::{USERINFO_ENCODE_SET, utf8_percent_encode};
 use toml;
 use toml::value::Table;
-use futures::future::{err, FutureResult, ok, result};
-use http::StatusCode;
-use hyper::{self, Body, Client, Request, Response};
-use hyper::header;
-use hyper::rt::{Future, Stream};
-use hyper_tls::HttpsConnector;
-use http::StatusCode;
-use base64;
-use percent_encoding::{utf8_percent_encode, USERINFO_ENCODE_SET};
-use std::borrow::Cow;
 use url::Url;
-use std::sync::mpsc;
-use std::thread;
 
-use crate::datacrypt::{EntryPasswordCryptor, create_random};
-use crate::{errors, file_handler};
-use crate::SystemConfiguration;
 use crate::asynch::SyncStatus;
+use crate::datacrypt::{create_random, EntryPasswordCryptor};
+use crate::errors;
+use crate::SystemConfiguration;
 
 /// A Dropbox synchronizer
 pub struct Synchronizer {
@@ -65,8 +64,8 @@ impl Synchronizer {
 impl super::AsyncTask for Synchronizer {
     fn init(&mut self) {}
 
-    fn execute(&self) -> Box<dyn Future<Item=(), Error=()> + Send> {
-        Box::new(ok(()))
+    fn execute(&self) -> Box<dyn Future<Item=bool, Error=()> + Send> {
+        Box::new(ok(true))
     }
 }
 
@@ -130,22 +129,20 @@ impl Default for DropboxConfiguration {
 }
 
 pub(crate) fn retrieve_token(url_string: String) -> errors::Result<String> {
-    let (tx, rx) = mpsc::channel();
 
     thread::spawn(move || {
-        let (port, state) = parse_url(url_string)?;
+        let (port, state) = parse_url(url_string).unwrap();
 
         let s = || {
             service_fn_ok(|req: Request<Body>| {
                 let mut resp_builder = Response::builder();
 
                 if req.method() == &hyper::Method::GET {
-                    let _ = tx_assert.send(true);
                     resp_builder.status(StatusCode::OK);
-                    resp_builder.body(Body::empty()).unwrap();
-                    let _ = tx.send(Ok("".to_string()));
+                    resp_builder.body(Body::empty()).unwrap()
                 } else {
-                    let _ = tx.send(Err("".to_string()));
+                    resp_builder.status(StatusCode::BAD_REQUEST);
+                    resp_builder.body(Body::empty()).unwrap()
                 }
             })
         };
@@ -153,7 +150,6 @@ pub(crate) fn retrieve_token(url_string: String) -> errors::Result<String> {
         let server = Server::bind(&addr)
             .serve(s)
             .map_err(|e| {
-                let _ = tx.send(Err(format!("server error: {}", e)));
                 error!("Cannot start an HTTP server to retrieve the Dropbox token: {}", e)
             });
 
@@ -161,7 +157,6 @@ pub(crate) fn retrieve_token(url_string: String) -> errors::Result<String> {
     });
 
     let timeout = time::Duration::from_millis(10);
-    let rec = rx.recv_timeout(timeout);
     Ok("".to_string())
 }
 

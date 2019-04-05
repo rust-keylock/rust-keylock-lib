@@ -31,10 +31,10 @@ use toml::value::Table;
 use xml::reader::{EventReader, XmlEvent};
 
 use crate::{errors, file_handler};
+use crate::asynch::SyncStatus;
 use crate::datacrypt::EntryPasswordCryptor;
 use crate::errors::{debug_error_string, RustKeylockError};
 use crate::SystemConfiguration;
-use crate::asynch::SyncStatus;
 
 /// A (Next/Own)cloud synchronizer
 pub struct Synchronizer {

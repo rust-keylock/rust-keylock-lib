@@ -372,7 +372,7 @@ impl CoreLogicHandler {
                     &s.props);
                 if update_last_sync_version {
                     s.configuration.update_system_last_sync();
-                    let rkl_content = RklContent::from((&s.safe, &s.configuration.nextcloud, &s.configuration.system));
+                    let rkl_content = RklContent::from((&s.safe, &s.configuration.nextcloud, &s.configuration.dropbox, &s.configuration.system));
                     let _ = rkl_content.and_then(|c| file_handler::save(c, FILENAME, &s.cryptor, true));
                 }
                 // If a valid nextcloud configuration is in place, spawn the background async execution
@@ -911,7 +911,6 @@ mod unit_tests {
     }
 
     #[test]
-    #[ignore]
     fn execution_cases() {
         execute_try_pass();
         execute_show_entry();
