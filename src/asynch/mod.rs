@@ -42,12 +42,10 @@ pub fn execute_task(task: Box<AsyncTask>, every: time::Duration) -> AsyncTaskHan
         Delay::new(Instant::now() + every.clone())
             .map_err(|_| ())
             .and_then(move |_| {
-                task.execute()
-                    .map_err(|_| ())
-                    .and_then(|_| ok(task))
+                task.execute().and_then(|cont| ok((cont, task)))
             })
-            .map_err(|_| ())
-            .and_then(move |task| {
+            .and_then(move |tup| {
+                let (cont, task) = tup;
                 let mut stop = false;
 
                 match rx_loop_control.try_recv() {
@@ -61,8 +59,7 @@ pub fn execute_task(task: Box<AsyncTask>, every: time::Duration) -> AsyncTaskHan
                     Err(TryRecvError::Empty) => { /* ignore */ }
                 }
 
-
-                if stop {
+                if stop || !cont {
                     Ok(Loop::Break((task, every, rx_loop_control)))
                 } else {
                     Ok(Loop::Continue((task, every, rx_loop_control)))
@@ -80,7 +77,8 @@ pub trait AsyncTask: Send {
     /// Initializes a task
     fn init(&mut self);
     /// Executes the task
-    fn execute(&self) -> Box<dyn Future<Item=(), Error=()> + Send>;
+    /// When the returned boolean is true, the task will run again. When false, the task will be stopped.
+    fn execute(&self) -> Box<dyn Future<Item=bool, Error=()> + Send>;
 }
 
 /// A handle to a created AsyncTask
@@ -192,7 +190,7 @@ impl AsyncEditorFacade {
             match rx.try_recv() {
                 Ok(sync_status_res) => {
                     match sync_status_res {
-                        Ok(sync_status) => self.handle_sync_status_success(sync_status, super::PROPS_FILENAME),
+                        Ok(sync_status) => self.handle_sync_status_success(sync_status, super::FILENAME),
                         Err(_) => None,
                     }
                 }
@@ -221,7 +219,7 @@ impl AsyncEditorFacade {
             SyncStatus::UploadSuccess(who) => {
                 debug!("The {} server was updated with the local data", who);
                 let _ = self.show_message(&format!("The {} server was updated with the local data", who), vec![UserOption::ok()], MessageSeverity::Info);
-                Some(UserSelection::GoTo(Menu::Current))
+                Some(UserSelection::GoTo(Menu::Save(true)))
             }
             SyncStatus::NewAvailable(who, downloaded_filename) => {
                 debug!("Downloaded new data from the {} server.", who);
@@ -233,7 +231,7 @@ impl AsyncEditorFacade {
                 if selection == UserSelection::UserOption(UserOption::yes()) {
                     debug!("Replacing the local file with the one downloaded from the server");
                     let _ = super::file_handler::replace(&downloaded_filename, filename);
-                    Some(UserSelection::GoTo(Menu::TryPass))
+                    Some(UserSelection::GoTo(Menu::TryPass(true)))
                 } else {
                     Some(UserSelection::GoTo(Menu::Current))
                 }
@@ -247,8 +245,8 @@ impl AsyncEditorFacade {
                                       vec![UserOption::yes(), UserOption::no()],
                                       MessageSeverity::Info);
 
-                debug!("The user selected {:?} as an answer for applying the downloaded data locally", &selection);
                 if selection == UserSelection::UserOption(UserOption::yes()) {
+                    debug!("The user selected {:?} as an answer for applying the downloaded data locally", &selection);
                     debug!("Merging the local data with the downloaded from the server");
 
                     match self.show_password_enter() {
@@ -262,10 +260,10 @@ impl AsyncEditorFacade {
                             error!("{}", message);
                             let _ =
                                 self.show_message("Unexpected result when waiting for password. See the logs for more details. Please \
-                                                 consider opening a but to the developers.",
+                                                 consider opening a bug to the developers.",
                                                   vec![UserOption::ok()],
                                                   MessageSeverity::Error);
-                            Some(UserSelection::GoTo(Menu::TryPass))
+                            Some(UserSelection::GoTo(Menu::TryPass(false)))
                         }
                     }
                 } else {
@@ -469,9 +467,9 @@ mod async_tests {
     impl super::AsyncTask for DummyTask {
         fn init(&mut self) {}
 
-        fn execute(&self) -> Box<dyn Future<Item=(), Error=()> + Send> {
+        fn execute(&self) -> Box<dyn Future<Item=bool, Error=()> + Send> {
             let _ = self.tx.send(Ok("dummy"));
-            Box::new(lazy(|| ok(())))
+            Box::new(lazy(|| ok(true)))
         }
     }
 }

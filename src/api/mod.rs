@@ -73,13 +73,19 @@ pub struct RklConfiguration {
 }
 
 impl RklConfiguration {
-    pub fn update_system_for_save(&mut self) -> errors::Result<()> {
-        self.system.version = Some((self.system.version.unwrap_or(0)) + 1);
-        // When uploaded, the last_sync_version should be the same with the version
-        self.system.last_sync_version = self.system.version;
+    pub fn update_system_for_save(&mut self, update_last_sync_version: bool) -> errors::Result<()> {
+        if update_last_sync_version {
+            self.update_system_last_sync();
+        } else {
+            self.system.version = Some((self.system.version.unwrap_or(0)) + 1);
+        }
         let local_time_seconds = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
         self.system.saved_at = Some(local_time_seconds as i64);
         Ok(())
+    }
+
+    pub fn update_system_last_sync(&mut self) {
+        self.system.last_sync_version = self.system.version;
     }
 }
 
@@ -310,7 +316,9 @@ impl Props {
 #[derive(Debug, PartialEq, Clone)]
 pub enum Menu {
     /// The User should provide a password and a number.
-    TryPass,
+    /// If bool is true, the last_sync_version will be updated to be the same with the local_version.
+    /// If false, nothing will be updated.
+    TryPass(bool),
     /// The User should provide a new password and a new number.
     ChangePass,
     /// The User should be presented with the main menu.
@@ -332,7 +340,9 @@ pub enum Menu {
     /// The index of the `Entry` inside the `Entries` list is provided.
     DeleteEntry(usize),
     /// The User encrypts and saves all the existing `Entries` list.
-    Save,
+    /// If bool is true, the last_sync_version will be updated to be the same with the local_version.
+    /// If false, only the local_version will be updated.
+    Save(bool),
     /// The User selects to Exit _rust-keylock_
     Exit,
     /// The User selects to Exit _rust-keylock_, even if there is unsaved data.
@@ -345,8 +355,6 @@ pub enum Menu {
     ExportEntries,
     /// The user should be presented with the configuration menu
     ShowConfiguration,
-    /// Perform Synchronization
-    Synchronize,
     /// Temporarily creates a web server and waits for the callback HTTP request that obtains the Dropbox token
     WaitForDbxTokenCallback(String),
     /// Stay in the current menu
@@ -357,7 +365,7 @@ impl Menu {
     /// Returns the name of a `Menu`.
     pub fn get_name(&self) -> String {
         match self {
-            &Menu::TryPass => format!("{:?}", Menu::TryPass),
+            &Menu::TryPass(b) => format!("{:?}", Menu::TryPass(b)),
             &Menu::ChangePass => format!("{:?}", Menu::ChangePass),
             &Menu::Main => format!("{:?}", Menu::Main),
             &Menu::EntriesList(_) => "EntriesList".to_string(),
@@ -365,14 +373,13 @@ impl Menu {
             &Menu::ShowEntry(_) => "ShowEntry".to_string(),
             &Menu::EditEntry(_) => "EditEntry".to_string(),
             &Menu::DeleteEntry(_) => "DeleteEntry".to_string(),
-            &Menu::Save => format!("{:?}", Menu::Save),
+            &Menu::Save(b) => format!("{:?}", Menu::Save(b)),
             &Menu::Exit => format!("{:?}", Menu::Exit),
             &Menu::ForceExit => format!("{:?}", Menu::ForceExit),
             &Menu::TryFileRecovery => format!("{:?}", Menu::TryFileRecovery),
             &Menu::ImportEntries => format!("{:?}", Menu::ImportEntries),
             &Menu::ExportEntries => format!("{:?}", Menu::ExportEntries),
             &Menu::ShowConfiguration => format!("{:?}", Menu::ShowConfiguration),
-            &Menu::Synchronize => format!("{:?}", Menu::Synchronize),
             &Menu::WaitForDbxTokenCallback(_) => "WaitForDbxTokenCallback".to_string(),
             &Menu::Current => format!("{:?}", Menu::Current),
         }
@@ -384,7 +391,9 @@ impl Menu {
     pub fn from(name: String, opt_num: Option<usize>, opt_string: Option<String>) -> Menu {
         debug!("Creating Menu from name {} and additional arguments usize: {:?}, String: {:?}", &name, &opt_num, &opt_string);
         match (name, opt_num, opt_string.clone()) {
-            (ref n, None, None) if &Menu::TryPass.get_name() == n => Menu::TryPass,
+            (ref n, None, None) if &Menu::TryPass(false).get_name() == n => Menu::TryPass(false),
+            (ref n, None, None) if &Menu::TryPass(true).get_name() == n => Menu::TryPass(true),
+            (ref n, None, None) if "TryPass" == n => Menu::TryPass(false),
             (ref n, None, None) if &Menu::ChangePass.get_name() == n => Menu::ChangePass,
             (ref n, None, None) if &Menu::Main.get_name() == n => Menu::Main,
             (ref n, None, Some(ref arg)) if &Menu::EntriesList(arg.clone()).get_name() == n => Menu::EntriesList(arg.clone()),
@@ -392,14 +401,15 @@ impl Menu {
             (ref n, Some(arg), None) if &Menu::ShowEntry(arg).get_name() == n => Menu::ShowEntry(arg),
             (ref n, Some(arg), None) if &Menu::EditEntry(arg).get_name() == n => Menu::EditEntry(arg),
             (ref n, Some(arg), None) if &Menu::DeleteEntry(arg).get_name() == n => Menu::DeleteEntry(arg),
-            (ref n, None, None) if &Menu::Save.get_name() == n => Menu::Save,
+            (ref n, None, None) if &Menu::Save(false).get_name() == n => Menu::Save(false),
+            (ref n, None, None) if &Menu::Save(true).get_name() == n => Menu::Save(true),
+            (ref n, None, None) if "Save" == n => Menu::Save(false),
             (ref n, None, None) if &Menu::Exit.get_name() == n => Menu::Exit,
             (ref n, None, None) if &Menu::ForceExit.get_name() == n => Menu::ForceExit,
             (ref n, None, None) if &Menu::TryFileRecovery.get_name() == n => Menu::TryFileRecovery,
             (ref n, None, None) if &Menu::ImportEntries.get_name() == n => Menu::ImportEntries,
             (ref n, None, None) if &Menu::ExportEntries.get_name() == n => Menu::ExportEntries,
             (ref n, None, None) if &Menu::ShowConfiguration.get_name() == n => Menu::ShowConfiguration,
-            (ref n, None, None) if &Menu::Synchronize.get_name() == n => Menu::Synchronize,
             (ref n, None, Some(ref arg)) if &Menu::WaitForDbxTokenCallback(arg.clone()).get_name() == n => Menu::WaitForDbxTokenCallback(arg.clone()),
             (ref n, None, None) if &Menu::Current.get_name() == n => Menu::Current,
             (ref other, _, _) => {
@@ -859,8 +869,8 @@ mod api_unit_tests {
 
     #[test]
     fn menu_get_name() {
-        let m1 = Menu::TryPass.get_name();
-        assert!(m1 == "TryPass");
+        let m1 = Menu::TryPass(false).get_name();
+        assert!(m1 == "TryPass(false)");
         let m2 = Menu::EntriesList("".to_string()).get_name();
         assert!(m2 == "EntriesList");
         let m3 = Menu::EditEntry(33).get_name();
@@ -873,8 +883,8 @@ mod api_unit_tests {
         assert!(m6 == "ForceExit");
         let m7 = Menu::ChangePass.get_name();
         assert!(m7 == "ChangePass");
-        let m8 = Menu::Save.get_name();
-        assert!(m8 == "Save");
+        let m8 = Menu::Save(false).get_name();
+        assert!(m8 == "Save(false)");
         let m9 = Menu::Exit.get_name();
         assert!(m9 == "Exit");
         let m10 = Menu::Main.get_name();
@@ -893,18 +903,14 @@ mod api_unit_tests {
         assert!(m16 == "ShowConfiguration");
         let m17 = Menu::ShowEntry(1).get_name();
         assert!(m17 == "ShowEntry");
-        let m18 = Menu::Synchronize.get_name();
-        assert!(m18 == "Synchronize");
-        let m19 = Menu::TryFileRecovery.get_name();
-        assert!(m19 == "TryFileRecovery");
-        let m20 = Menu::TryPass.get_name();
-        assert!(m20 == "TryPass");
+        let m18 = Menu::TryFileRecovery.get_name();
+        assert!(m18 == "TryFileRecovery");
     }
 
     #[test]
     fn menu_from_name() {
-        let m1 = Menu::from("TryPass".to_string(), None, None);
-        assert!(m1 == Menu::TryPass);
+        let m1 = Menu::from("TryPass(false)".to_string(), None, None);
+        assert!(m1 == Menu::TryPass(false));
         let m2 = Menu::from("EntriesList".to_string(), None, Some("".to_string()));
         assert!(m2 == Menu::EntriesList("".to_string()));
         let m3 = Menu::from("ShowEntry".to_string(), Some(1), None);
@@ -999,7 +1005,7 @@ mod api_unit_tests {
         assert!(UserSelection::NewEntry(Entry::empty()).ordinal() == 1);
         assert!(UserSelection::ReplaceEntry(1, Entry::empty()).ordinal() == 2);
         assert!(UserSelection::DeleteEntry(1).ordinal() == 3);
-        assert!(UserSelection::GoTo(Menu::TryPass).ordinal() == 4);
+        assert!(UserSelection::GoTo(Menu::TryPass(false)).ordinal() == 4);
         assert!(UserSelection::ProvidedPassword("".to_owned(), 33).ordinal() == 5);
         assert!(UserSelection::Ack.ordinal() == 6);
         assert!(UserSelection::ExportTo("".to_owned()).ordinal() == 7);
