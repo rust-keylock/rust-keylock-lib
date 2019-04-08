@@ -19,7 +19,7 @@ use std::cmp::PartialEq;
 use std::fmt::Debug;
 use std::iter::repeat;
 
-use crypto::bcrypt::bcrypt;
+use bcrypt::bcrypt;
 use base64;
 use aes_ctr::Aes256Ctr;
 use aes_ctr::stream_cipher::generic_array::GenericArray;
@@ -80,7 +80,6 @@ impl BcryptAes {
 
             key.append(&mut legacy_key)
         }
-
 
         let mut ikm: Vec<u8> = repeat(0u8).take(24).collect();
         bcrypt(cost, &salt, input, &mut ikm);
