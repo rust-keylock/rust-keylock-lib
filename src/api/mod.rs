@@ -250,6 +250,7 @@ pub struct Props {
     idle_timeout_seconds: i64,
     /// Fallback to pre v0.8.0 handling
     legacy_handling: bool,
+    bcrypt_cost_v8: bool,
 }
 
 impl Default for Props {
@@ -257,26 +258,31 @@ impl Default for Props {
         Props {
             idle_timeout_seconds: 1800,
             legacy_handling: false,
+            bcrypt_cost_v8: false,
         }
     }
 }
 
 impl Props {
-    pub(crate) fn new(idle_timeout_seconds: i64, legacy_handling: bool) -> Props {
+    pub(crate) fn new(idle_timeout_seconds: i64, legacy_handling: bool, bcrypt_cost_v8: bool) -> Props {
         Props {
             idle_timeout_seconds,
             legacy_handling,
+            bcrypt_cost_v8,
         }
     }
 
     pub fn from_table(table: &Table) -> Result<Props, errors::RustKeylockError> {
         let idle_timeout_seconds = table.get("idle_timeout_seconds").and_then(|value| value.as_integer().and_then(Some));
         let legacy_handling = table.get("legacy_handling").and_then(|value| value.as_bool().and_then(Some));
+        let bcrypt_cost_v8 = table.get("bcrypt_cost_v8").and_then(|value| value.as_bool().and_then(Some));
 
-        match (idle_timeout_seconds, legacy_handling) {
-            (Some(s), Some(l)) => Ok(Self::new(s, l)),
-            (Some(s), None) => Ok(Self::new(s, true)),
-            (_, _) => Err(errors::RustKeylockError::ParseError(toml::ser::to_string(&table).unwrap_or_else(|_| "Cannot serialize toml".to_string()))),
+        match (idle_timeout_seconds, legacy_handling, bcrypt_cost_v8) {
+            (Some(s), Some(l), Some(cv8)) => Ok(Self::new(s, l, cv8)),
+            (Some(s), None, Some(cv8)) => Ok(Self::new(s, true, cv8)),
+            (Some(s), Some(l), None) => Ok(Self::new(s, l, true)),
+            (Some(s), None, None) => Ok(Self::new(s, true, true)),
+            (_, _, _) => Err(errors::RustKeylockError::ParseError(toml::ser::to_string(&table).unwrap_or_else(|_| "Cannot serialize toml".to_string()))),
         }
     }
 
@@ -285,6 +291,7 @@ impl Props {
         let mut table = Table::new();
         table.insert("idle_timeout_seconds".to_string(), toml::Value::Integer(self.idle_timeout_seconds));
         table.insert("legacy_handling".to_string(), toml::Value::Boolean(self.legacy_handling));
+        table.insert("bcrypt_cost_v8".to_string(), toml::Value::Boolean(self.bcrypt_cost_v8));
 
         table
     }
@@ -299,6 +306,14 @@ impl Props {
 
     pub fn set_legacy_handling(&mut self, lh: bool) {
         self.legacy_handling = lh
+    }
+
+    pub fn bcrypt_cost_v8(&self) -> bool {
+        self.bcrypt_cost_v8
+    }
+
+    pub fn set_bcrypt_cost_v8(&mut self, bcv8: bool) {
+        self.bcrypt_cost_v8 = bcv8
     }
 }
 
@@ -751,6 +766,7 @@ mod api_unit_tests {
         let toml = r#"
         idle_timeout_seconds = 33
         legacy_handling = false
+        bcrypt_cost_v8 = false
         "#;
 
         let value = toml.parse::<toml::value::Value>().unwrap();
@@ -763,7 +779,7 @@ mod api_unit_tests {
     }
 
     #[test]
-    fn props_from_table_success_no_legacy_handling_exists() {
+    fn props_from_table_success_no_legacy_exists() {
         let toml = r#"
         idle_timeout_seconds = 33
         "#;
@@ -775,6 +791,24 @@ mod api_unit_tests {
         let props = props_opt.unwrap();
         assert!(props.idle_timeout_seconds() == 33);
         assert!(props.legacy_handling());
+        assert!(props.bcrypt_cost_v8());
+    }
+
+    #[test]
+    fn props_from_table_success_legacy_exists_cost_v8_does_not_exist() {
+        let toml = r#"
+        idle_timeout_seconds = 33
+        legacy_handling = false
+        "#;
+
+        let value = toml.parse::<toml::value::Value>().unwrap();
+        let table = value.as_table().unwrap();
+        let props_opt = super::Props::from_table(&table);
+        assert!(props_opt.is_ok());
+        let props = props_opt.unwrap();
+        assert!(props.idle_timeout_seconds() == 33);
+        assert!(!props.legacy_handling());
+        assert!(props.bcrypt_cost_v8());
     }
 
     #[test]
@@ -801,7 +835,9 @@ mod api_unit_tests {
     fn props_to_table() {
         let toml = r#"
         idle_timeout_seconds = 33
-        legacy_handling = false"#;
+        legacy_handling = false
+        bcrypt_cost_v8 = false
+        "#;
 
         let value = toml.parse::<toml::value::Value>().unwrap();
         let table = value.as_table().unwrap();

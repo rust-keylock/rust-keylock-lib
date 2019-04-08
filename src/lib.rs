@@ -380,7 +380,7 @@ impl CoreLogicHandler {
             }
             UserSelection::ProvidedPassword(pwd, salt_pos) => {
                 debug!("UserSelection::GoTo(Menu::ProvidedPassword)");
-                s.cryptor = file_handler::create_bcryptor(FILENAME, pwd, salt_pos, true, true, s.props.legacy_handling()).unwrap();
+                s.cryptor = file_handler::create_bcryptor(FILENAME, pwd, salt_pos, true, true, s.props.legacy_handling(), s.props.bcrypt_cost_v8()).unwrap();
                 UserSelection::GoTo(Menu::Main)
             }
             UserSelection::GoTo(Menu::EntriesList(filter)) => {
@@ -432,9 +432,10 @@ impl CoreLogicHandler {
                         error!("Could not save... {:?}", error);
                     }
                 };
-                if s.props.legacy_handling() {
+                if s.props.legacy_handling() || s.props.bcrypt_cost_v8() {
                     info!("Changing handling from legacy to current");
                     s.props.set_legacy_handling(false);
+                    s.props.set_bcrypt_cost_v8(false);
                     match file_handler::save_props(&s.props, PROPS_FILENAME) {
                         Ok(_) => { /* Ignore */ }
                         Err(error) => {
@@ -568,7 +569,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                 match us {
                     UserSelection::ImportFrom(path, pwd, salt_pos) |
                     UserSelection::ImportFromDefaultLocation(path, pwd, salt_pos) => {
-                        let cr = file_handler::create_bcryptor(&path, pwd, salt_pos, false, import_from_default_location, s.props.legacy_handling()).unwrap();
+                        let cr = file_handler::create_bcryptor(&path, pwd, salt_pos, false, import_from_default_location, s.props.legacy_handling(), s.props.bcrypt_cost_v8()).unwrap();
                         debug!("UserSelection::ImportFrom(path, pwd, salt_pos)");
 
                         match file_handler::load(&path, &cr, import_from_default_location) {
@@ -646,7 +647,7 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
     match provided_password {
         UserSelection::ProvidedPassword(pwd, salt_pos) => {
             // New Cryptor here
-            let cr = file_handler::create_bcryptor(filename, pwd.clone(), salt_pos, false, true, props.legacy_handling()).unwrap();
+            let cr = file_handler::create_bcryptor(filename, pwd.clone(), salt_pos, false, true, props.legacy_handling(), props.bcrypt_cost_v8()).unwrap();
             // Try to decrypt and load the Entries
             let retrieved_entries = match file_handler::load(filename, &cr, true) {
                 // Success, go to the List of entries
@@ -692,7 +693,7 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
         }
         UserSelection::GoTo(Menu::Exit) => {
             debug!("UserSelection::GoTo(Menu::Exit) was called before providing credentials");
-            let cr = file_handler::create_bcryptor(filename, "dummy".to_string(), 33, false, true, props.legacy_handling()).unwrap();
+            let cr = file_handler::create_bcryptor(filename, "dummy".to_string(), 33, false, true, props.legacy_handling(), props.bcrypt_cost_v8()).unwrap();
             let exit_selection = UserSelection::GoTo(Menu::ForceExit);
             (exit_selection, cr)
         }
@@ -1148,7 +1149,6 @@ mod unit_tests {
                 None => panic!("Don't have more user selections to execute"),
             };
             if available_selections_mut.is_empty() {
-                dbg!(&available_selections_mut);
                 self.completed_tx.send(true).expect("Cannot send to signal completion.");
             }
             to_ret

@@ -34,6 +34,7 @@ use super::errors::{self, RustKeylockError};
 use super::protected::RklSecret;
 
 const NUMBER_OF_SALT_KEY_PAIRS: usize = 10;
+pub(crate) const BCRYPT_COST: u32 = 8u32;
 
 pub trait Cryptor {
     /// Decrypts a given array of bytes
@@ -101,6 +102,7 @@ impl BcryptAes {
     /// * Cost for the bcrypt algorithm
     /// * iv for AES
     /// * hash for Sha3Keccak512 hashing
+    // TODO: The cost can be removed from the arguments. It should be taken from the const BCRYPT_COST.
     pub fn new(password: String,
                salt: Vec<u8>,
                cost: u32,
@@ -117,7 +119,7 @@ impl BcryptAes {
         let mut salt_key_pairs = Vec::new();
         for _ in 0..NUMBER_OF_SALT_KEY_PAIRS {
             let s = create_random(16);
-            let k = BcryptAes::create_key(password.as_bytes(), &s, cost, false, 64);
+            let k = BcryptAes::create_key(password.as_bytes(), &s, BCRYPT_COST, false, 64);
             salt_key_pairs.push((s, RklSecret::new(k)));
         }
 
