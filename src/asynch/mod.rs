@@ -40,7 +40,7 @@ pub fn execute_task(task: Box<AsyncTask>, every: time::Duration) -> AsyncTaskHan
     task.init();
 
     let loop_future = loop_fn((task, every, rx_loop_control), |(task, every, rx_loop_control)| {
-        Delay::new(Instant::now() + every.clone())
+        Delay::new(Instant::now() + every)
             .map_err(|_| ())
             .and_then(move |_| {
                 task.execute().and_then(|cont| ok((cont, task)))
@@ -140,16 +140,13 @@ impl AsyncEditorFacade {
             thread::park_timeout(ASYNC_EDITOR_PARK_TIMEOUT);
 
             // Check if idle timeout
-            match timeout_check(&last_action_time, self.props.idle_timeout_seconds()) {
-                Some(_) => {
-                    let message = format!("Idle time of {} seconds elapsed! Locking...", self.props.idle_timeout_seconds());
-                    self.send(UiCommand::ShowMessage(message, vec![UserOption::ok()], MessageSeverity::default()));
-                    let _ = self.receive();
-                    self.send(UiCommand::ShowPasswordEnter);
-                    user_selection = self.receive();
-                    break;
-                }
-                None => { /*ignore*/ }
+            if timeout_check(&last_action_time, self.props.idle_timeout_seconds()).is_some() {
+                let message = format!("Idle time of {} seconds elapsed! Locking...", self.props.idle_timeout_seconds());
+                self.send(UiCommand::ShowMessage(message, vec![UserOption::ok()], MessageSeverity::default()));
+                let _ = self.receive();
+                self.send(UiCommand::ShowPasswordEnter);
+                user_selection = self.receive();
+                break;
             };
 
             // Get a possible user input
@@ -404,7 +401,7 @@ mod async_tests {
     #[test]
     fn async_execution() {
         let (tx, rx): (Sender<errors::Result<&'static str>>, Receiver<errors::Result<&'static str>>) = mpsc::channel();
-        let task = DummyTask { tx: tx };
+        let task = DummyTask { tx };
 
         thread::spawn(|| {
             tokio::run(lazy(|| {

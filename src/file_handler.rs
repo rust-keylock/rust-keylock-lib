@@ -59,7 +59,7 @@ pub fn create_bcryptor(filename: &str,
                 let iv = if bytes.len() >= 96 && !reinitialize_randoms {
                     bytes.iter()
                         .take(16)
-                        .map(|b| b.clone())
+                        .cloned()
                         .collect()
                 } else {
                     super::datacrypt::create_random(16)
@@ -71,17 +71,11 @@ pub fn create_bcryptor(filename: &str,
                     salt_position + 16
                 };
                 // If the bytes are not more than 96 (iv:16 + salt:16 + hash:64) it means that there is no data for entries
-                let salt = if bytes.len() > 96 && !reinitialize_randoms && bytes.len() >= actual_salt_position {
+                let salt = if (bytes.len() > 96 && !reinitialize_randoms && bytes.len() >= actual_salt_position) || bytes.len() == 96 {
                     bytes.iter()
                         .skip(actual_salt_position)
                         .take(16)
-                        .map(|b| b.clone())
-                        .collect()
-                } else if bytes.len() == 96 {
-                    bytes.iter()
-                        .skip(actual_salt_position)
-                        .take(16)
-                        .map(|b| b.clone())
+                        .cloned()
                         .collect()
                 } else {
                     super::datacrypt::create_random(16)
@@ -94,7 +88,7 @@ pub fn create_bcryptor(filename: &str,
                     bytes.iter()
                         .skip(hash_position)
                         .take(64)
-                        .map(|b| b.clone())
+                        .cloned()
                         .collect()
                 } else {
                     Vec::new()
@@ -143,9 +137,9 @@ pub fn load(filename: &str, cryptor: &Cryptor, use_default_location: bool) -> Re
             let nextcloud_conf = retrieve_nextcloud_conf(table)?;
             let system_conf = retrieve_system_conf(table)?;
             Ok(RklContent {
-                entries: entries,
-                nextcloud_conf: nextcloud_conf,
-                system_conf: system_conf,
+                entries,
+                nextcloud_conf,
+                system_conf,
             })
         }
         None => Err(RustKeylockError::ParseError("No Table found in the toml.".to_string())),
@@ -170,7 +164,8 @@ pub fn save_bytes(filename: &str, bytes: &[u8], do_backup: bool) -> errors::Resu
     let mut file = File::create(full_path)?;
     file.write_all(&bytes)?;
     info!("File saved in {}. Syncing...", filename);
-    Ok(file.sync_all()?)
+    file.sync_all()?;
+    Ok(())
 }
 
 /// Backs up a File with a given name to the default backup directory.
@@ -278,7 +273,7 @@ pub fn load_properties(filename: &str) -> Result<Props, RustKeylockError> {
     debug!("Full Path to load properties from: {:?}", full_path);
     let toml = load_existing_file(&full_path, None)?;
 
-    if toml.len() == 0 {
+    if toml.is_empty() {
         let props = Props::default();
         save_props(&props, filename)?;
         Ok(props)
@@ -348,7 +343,7 @@ pub fn create_certs_path() -> errors::Result<PathBuf> {
 pub fn create_certs_path() -> errors::Result<PathBuf> {
     let mut rust_keylock_home = default_rustkeylock_location();
     rust_keylock_home.push("etc/ssl/certs");
-    let _ = fs::create_dir_all(rust_keylock_home.clone())?;
+    fs::create_dir_all(rust_keylock_home.clone())?;
     Ok(rust_keylock_home)
 }
 
@@ -364,23 +359,23 @@ fn transform_to_dtos(table: &Table, recover: bool) -> Result<Vec<Entry>, RustKey
         Some(value) => {
             match value.as_array() {
                 Some(array) => {
-                    let iter = array.into_iter();
-                    let vec: Vec<Option<Entry>> = iter.map(|value| {
-                        let conversion_result = match value.as_table() {
-                            Some(value_table) => Entry::from_table(value_table),
-                            None => Err(RustKeylockError::ParseError("Entry value should be a table".to_string())),
-                        };
+                    let vec: Vec<Option<Entry>> = array.iter()
+                        .map(|value| {
+                            let conversion_result = match value.as_table() {
+                                Some(value_table) => Entry::from_table(value_table),
+                                None => Err(RustKeylockError::ParseError("Entry value should be a table".to_string())),
+                            };
 
-                        match conversion_result {
-                            Ok(entry) => Some(entry),
-                            Err(error) => {
-                                if recover {
-                                    error!("Error during parsing Entry: {}", error);
+                            match conversion_result {
+                                Ok(entry) => Some(entry),
+                                Err(error) => {
+                                    if recover {
+                                        error!("Error during parsing Entry: {}", error);
+                                    }
+                                    None
                                 }
-                                None
                             }
-                        }
-                    })
+                        })
                         .collect();
 
                     if vec.contains(&None) {
@@ -423,14 +418,14 @@ fn retrieve_system_conf(table: &Table) -> Result<SystemConfiguration, RustKeyloc
 }
 
 /// Loads a file that contains a toml String and returns this String
-fn load_existing_file<'a>(file_path: &PathBuf, cryptor_opt: Option<&Cryptor>) -> errors::Result<String> {
+fn load_existing_file(file_path: &PathBuf, cryptor_opt: Option<&Cryptor>) -> errors::Result<String> {
     let bytes = {
         match File::open(file_path) {
             Ok(file) => {
                 file.bytes()
                     .map(|b_res| {
                         match b_res {
-                            Ok(b) => b.clone(),
+                            Ok(b) => b,
                             Err(error) => {
                                 error!("Could not read from File while loading {:?}", error);
                                 panic!("Could not read from File while loading {:?}", error)
@@ -442,7 +437,7 @@ fn load_existing_file<'a>(file_path: &PathBuf, cryptor_opt: Option<&Cryptor>) ->
             Err(_) => {
                 debug!("Encrypted file does not exist. Initializing...");
                 // Create the rust-keylock home
-                let _ = fs::create_dir_all(default_rustkeylock_location())?;
+                fs::create_dir_all(default_rustkeylock_location())?;
                 // Create the directory for the self signed certificates
                 let _ = create_certs_path()?;
                 debug!("Directories for home and certs created successfully");
@@ -453,7 +448,7 @@ fn load_existing_file<'a>(file_path: &PathBuf, cryptor_opt: Option<&Cryptor>) ->
 
     match cryptor_opt {
         Some(cryptor) => {
-            if bytes.len() > 0 {
+            if !bytes.is_empty() {
                 debug!("Decrypting passwords file...");
                 match cryptor.decrypt(&bytes) {
                     Ok(dbytes) => Ok(String::from_utf8(dbytes)?),
@@ -503,7 +498,7 @@ pub fn save(rkl_content: RklContent, filename: &str, cryptor: &Cryptor, use_defa
     // Insert the entries
     table.insert("entry".to_string(), Value::Array(tables_vec));
 
-    let toml_string = if rkl_content.entries.len() == 0 && !rkl_content.nextcloud_conf.is_filled() {
+    let toml_string = if rkl_content.entries.is_empty() && !rkl_content.nextcloud_conf.is_filled() {
         "".to_string()
     } else {
         toml::ser::to_string(&table)?
@@ -514,7 +509,8 @@ pub fn save(rkl_content: RklContent, filename: &str, cryptor: &Cryptor, use_defa
     let mut file = File::create(path_buf)?;
     file.write_all(&ebytes)?;
     info!("Entries saved in {}. Syncing...", filename);
-    Ok(file.sync_all()?)
+    file.sync_all()?;
+    Ok(())
 }
 
 /// Saves the specified Props to a toml file with the specified name
@@ -527,7 +523,8 @@ pub fn save_props(props: &Props, filename: &str) -> errors::Result<()> {
     let toml_string = toml::ser::to_string(&table)?;
     file.write_all(toml_string.as_bytes())?;
     info!("Properties saved in {}. Syncing...", filename);
-    Ok(file.sync_all()?)
+    file.sync_all()?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -626,11 +623,13 @@ mod test_file_handler {
     fn transform_to_dtos_success() {
         let toml = r#"
 		[[entry]]
+		    url = ""
 			name = "name1"
 			user = "user1"
 			pass = "123"
 			desc = "some description"
 		[[entry]]
+		    url = ""
 			name = "name2"
 			user = "user2"
 			pass = "345"
@@ -678,10 +677,12 @@ mod test_file_handler {
     fn transform_to_dtos_recover_success() {
         let toml = r#"
 		[[entry]]
+		    url = ""
 			name = "name1"
 			user = "user1"
 			desc = "some description"
 		[[entry]]
+		    url = ""
 			name = "name2"
 			user = "user2"
 			pass = "345"
@@ -698,6 +699,7 @@ mod test_file_handler {
         assert!(vec[0].user == "user2");
         assert!(vec[0].pass == "345");
         assert!(vec[0].desc == "other description");
+        assert!(vec[0].url.is_empty())
     }
 
     #[test]
@@ -995,6 +997,7 @@ mod test_file_handler {
 			use_self_signed_certificate = false
         [[entry]]
 			name = "name"
+			url = ""
 			user = "user"
 			pass = "123"
 			desc = "some description"

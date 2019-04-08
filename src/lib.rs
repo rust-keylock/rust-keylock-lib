@@ -74,8 +74,8 @@ mod asynch;
 mod api;
 mod selection_handling;
 
-const FILENAME: &'static str = ".sec";
-const PROPS_FILENAME: &'static str = ".props";
+const FILENAME: &str = ".sec";
+const PROPS_FILENAME: &str = ".props";
 
 /// Takes a reference of `Editor` implementation as argument and executes the _rust-keylock_ logic.
 /// The `Editor` is responsible for the interaction with the user. Currently there are `Editor` implementations for __shell__ and for __Android__.
@@ -146,15 +146,12 @@ pub fn execute_async(editor: Box<dyn AsyncEditor>) {
             Err(TryRecvError::Empty) => { /* ignore */ }
         }
 
-        match try_recv_from_vec(&mut ui_rx_vec) {
-            Some(sel) => {
-                let should_break = sel == UserSelection::GoTo(Menu::ForceExit);
-                send(&ui_tx, sel);
-                if should_break {
-                    break;
-                }
+        if let Some(sel) = try_recv_from_vec(&mut ui_rx_vec) {
+            let should_break = sel == UserSelection::GoTo(Menu::ForceExit);
+            send(&ui_tx, sel);
+            if should_break {
+                break;
             }
-            None => {}
         }
     }
 
@@ -180,7 +177,7 @@ fn try_recv_from_vec(rxs: &mut Vec<Receiver<UserSelection>>) -> Option<UserSelec
             Err(TryRecvError::Empty) => { /* ignore */ }
         }
 
-        i = i + 1;
+        i += 1;
     }
 
     if remove_element {
@@ -196,7 +193,7 @@ pub fn execute(editor: Box<dyn Editor>) {
     let (ui_tx, ui_rx) = mpsc::channel();
 
     thread::spawn(move || {
-        tokio::run(lazy (|| {
+        tokio::run(lazy(|| {
             let props = match file_handler::load_properties(PROPS_FILENAME) {
                 Ok(m) => m,
                 Err(error) => {
@@ -339,6 +336,9 @@ impl CoreLogicHandler {
         }
     }
 
+    // This is the main function that handles all the user selections. Its complexity is expected to be big.
+    // This may change in the future during a refactoring but is accepted for now.
+    #[allow(clippy::cyclomatic_complexity)]
     fn handle(self) -> FutureResult<(CoreLogicHandler, bool), ()> {
         let mut stop = false;
         let mut s = self;
@@ -528,11 +528,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                                                           MessageSeverity::Warn);
 
                     debug!("The user selected {:?} as an answer for overwriting the file {}", selection, path);
-                    if selection == UserSelection::UserOption(UserOption::yes()) {
-                        true
-                    } else {
-                        false
-                    }
+                    selection == UserSelection::UserOption(UserOption::yes())
                 } else {
                     true
                 };

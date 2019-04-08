@@ -46,12 +46,12 @@ pub enum RustKeylockError {
 
 impl fmt::Display for RustKeylockError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &RustKeylockError::GeneralError(ref message) => write!(f, "{}", message),
-            &RustKeylockError::ParseError(ref message) => write!(f, "Cannot parse: \n{}", message),
-            &RustKeylockError::DecryptionError(ref message) => write!(f, "Could not decrypt: {}", message),
-            &RustKeylockError::EncryptionError(ref message) => write!(f, "Could not encrypt: {}", message),
-            &RustKeylockError::SyncError(ref message) => write!(f, "Could not synchronize the rust-keylock data: {}", message),
+        match *self {
+            RustKeylockError::GeneralError(ref message) => write!(f, "{}", message),
+            RustKeylockError::ParseError(ref message) => write!(f, "Cannot parse: \n{}", message),
+            RustKeylockError::DecryptionError(ref message) => write!(f, "Could not decrypt: {}", message),
+            RustKeylockError::EncryptionError(ref message) => write!(f, "Could not encrypt: {}", message),
+            RustKeylockError::SyncError(ref message) => write!(f, "Could not synchronize the rust-keylock data: {}", message),
         }
     }
 }

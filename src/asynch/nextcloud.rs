@@ -99,8 +99,8 @@ impl Synchronizer {
         }
     }
 
-    fn to_status_and_body(response: Response<Body>) -> impl Future<Item=(StatusCode, Vec<u8>), Error=RustKeylockError> {
-        let status = response.status().clone();
+    fn resp_to_status_and_body(response: Response<Body>) -> impl Future<Item=(StatusCode, Vec<u8>), Error=RustKeylockError> {
+        let status = response.status();
         // Create a Future from the Stream of the Body
         response.into_body().concat2()
             .map_err(|error| RustKeylockError::SyncError(debug_error_string(error)))
@@ -129,7 +129,7 @@ impl Synchronizer {
         result(req_res)
             // Do the request
             .and_then(move |req| Self::do_request(req, cloned_capsule.is_not_https(), cloned_capsule.use_self_signed()))
-            .and_then(|res| Self::to_status_and_body(res))
+            .and_then(Self::resp_to_status_and_body)
             // Handle the response
             .and_then(move |(status, body)| {
                 Self::match_propfind_status(status, body, capsule)
@@ -368,6 +368,7 @@ impl Synchronizer {
         web_dav_resp_result
     }
 
+    #[allow(clippy::string_lit_as_bytes)]
     fn create_rust_keylock_col(username: &str,
                                password: String,
                                server_url: &str,
@@ -385,7 +386,7 @@ impl Synchronizer {
         result(req_res)
             .from_err()
             .and_then(move |req| Self::do_request(req, is_not_https, use_self_signed))
-            .and_then(|resp| Self::to_status_and_body(resp))
+            .and_then(Self::resp_to_status_and_body)
             .and_then(|(status, _)| {
                 debug!("Response for creating rust_keylock_col: {}", status);
                 if status.is_client_error() || status.is_server_error() {
@@ -396,6 +397,7 @@ impl Synchronizer {
             })
     }
 
+    #[allow(clippy::string_lit_as_bytes)]
     fn get(username: &str,
            password: String,
            server_url: &str,
@@ -413,7 +415,7 @@ impl Synchronizer {
         result(req_res)
             .from_err()
             .and_then(move |req| Self::do_request(req, is_not_https, use_self_signed))
-            .and_then(|resp| Self::to_status_and_body(resp))
+            .and_then(Self::resp_to_status_and_body)
             .and_then(move |(status, body)| {
                 debug!("Response for GET: {}", status);
                 let res = {
@@ -429,6 +431,7 @@ impl Synchronizer {
     }
 
     /// Put the file and update the property with the file creation seconds using PROPPATCH
+    #[allow(clippy::too_many_arguments)]
     fn put(username: String,
            password: String,
            server_url: String,
@@ -437,9 +440,9 @@ impl Synchronizer {
            local_version: Option<i64>,
            is_not_https: bool,
            use_self_signed: bool) -> impl Future<Item=(), Error=RustKeylockError> {
-        let mut file = file_handler::get_file(&filename).expect(&format!("Could get the file {} while performing HTTP PUT", filename));
+        let mut file = file_handler::get_file(&filename).unwrap_or_else(|_| panic!(format!("Could get the file {} while performing HTTP PUT", filename)));
         let mut file_bytes: Vec<_> = Vec::new();
-        file.read_to_end(&mut file_bytes).expect(&format!("Could not read the file {} while performing HTTP PUT", filename));
+        file.read_to_end(&mut file_bytes).unwrap_or_else(|_| panic!(format!("Could not read the file {} while performing HTTP PUT", filename)));
 
         let uri = format!("{}/remote.php/dav/files/{}/.rust-keylock/{}", server_url, username, filename);
         let mut req_builder = Request::put(uri);
@@ -451,7 +454,7 @@ impl Synchronizer {
         result(req_res)
             .from_err()
             .and_then(move |req| Self::do_request(req, is_not_https, use_self_signed))
-            .and_then(|resp| Self::to_status_and_body(resp))
+            .and_then(Self::resp_to_status_and_body)
             .and_then(|(status, _)| {
                 debug!("Response for PUT: {}", status);
                 let res = {
@@ -475,8 +478,8 @@ impl Synchronizer {
 </d:prop>
 </d:set>
 </d:propertyupdate>"#,
-                                               local_saved_at.map(|s| s.to_string()).unwrap_or("".to_string()),
-                                               local_version.map(|s| s.to_string()).unwrap_or("".to_string()));
+                                               local_saved_at.map(|s| s.to_string()).unwrap_or_else(String::new),
+                                               local_version.map(|s| s.to_string()).unwrap_or_else(String::new));
 
                 let uri_pp = format!("{}/remote.php/dav/files/{}/.rust-keylock/{}", server_url, username, filename);
                 let mut req_builder = Request::builder();
@@ -492,7 +495,7 @@ impl Synchronizer {
                 result(req_pp_res)
             })
             .and_then(move |req| Self::do_request(req, is_not_https, use_self_signed))
-            .and_then(|resp| Self::to_status_and_body(resp))
+            .and_then(Self::resp_to_status_and_body)
             .and_then(move |(status, _)| {
                 debug!("Response for PROPPATCH: {}", status);
                 let res = {
@@ -508,9 +511,9 @@ impl Synchronizer {
     }
 
     fn send_to_channel(res: errors::Result<SyncStatus>, tx: Sender<errors::Result<SyncStatus>>) {
-        match &res {
-            &Ok(ref r) => debug!("Nextcloud Async Task sends to the channel {:?}", r),
-            &Err(ref error) => error!("Nextcloud Async Tasks reported error: {:?}", error),
+        match res {
+            Ok(ref r) => debug!("Nextcloud Async Task sends to the channel {:?}", r),
+            Err(ref error) => error!("Nextcloud Async Tasks reported error: {:?}", error),
         };
 
 
@@ -607,7 +610,7 @@ impl NextcloudConfiguration {
             password: "".to_string(),
             password_cryptor: EntryPasswordCryptor::new(),
             server_url: u.to_string(),
-            use_self_signed_certificate: use_self_signed_certificate,
+            use_self_signed_certificate,
         };
         s.password = s.password_cryptor.encrypt_str(&pw)?;
         Ok(s)
@@ -634,10 +637,10 @@ impl NextcloudConfiguration {
         let user = table.get("user").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
         let pass = table.get("pass").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
         let use_self_signed_certificate = table.get("use_self_signed_certificate")
-            .and_then(|value| value.as_bool().and_then(|bool_ref| Some(bool_ref)));
+            .and_then(|value| value.as_bool().and_then(Some));
         match (url, user, pass, use_self_signed_certificate) {
             (Some(ul), Some(u), Some(p), Some(ssc)) => NextcloudConfiguration::new(ul, u, p, ssc),
-            _ => Err(errors::RustKeylockError::ParseError(toml::ser::to_string(&table).unwrap_or("Cannot deserialize toml".to_string()))),
+            _ => Err(errors::RustKeylockError::ParseError(toml::ser::to_string(&table).unwrap_or_else(|_|"Cannot deserialize toml".to_string()))),
         }
     }
 
@@ -688,6 +691,7 @@ struct ArgsCapsule {
 }
 
 impl ArgsCapsule {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(server_url: String,
                username: String,
                file_name: String,

@@ -66,13 +66,13 @@ impl Safe {
         // Push the Entry
         self.entries.push(entry.encrypted(&self.password_cryptor));
         // Find the correct index of the edited entry in the main Entries Vec
-        let res = match &self.map_filtered_to_unfiltered.get(&index) {
-            &Some(index_in_main_vec) => {
+        let res = match self.map_filtered_to_unfiltered.get(&index) {
+            Some(index_in_main_vec) => {
                 // Replace
                 self.entries.swap_remove(*index_in_main_vec);
                 Ok(())
             }
-            &None => {
+            None => {
                 Err(errors::RustKeylockError::GeneralError("The entry being replaced was not found in the Entries... If the entries \
                                                             changed meanwhile, this is normal. If not, please consider opening a bug to \
                                                             the developers."
@@ -86,13 +86,13 @@ impl Safe {
 
     /// Removes an Entry from the Safe
     pub(crate) fn remove_entry(&mut self, index: usize) -> errors::Result<()> {
-        let res = match &self.map_filtered_to_unfiltered.get(&index) {
-            &Some(index_in_main_vec) => {
+        let res = match self.map_filtered_to_unfiltered.get(&index) {
+            Some(index_in_main_vec) => {
                 // Remove
                 self.entries.remove(*index_in_main_vec);
                 Ok(())
             }
-            &None => {
+            None => {
                 Err(errors::RustKeylockError::GeneralError("The entry being replaced was not found in the Entries... If the entries \
                                                             changed meanwhile, this is normal. If not, please consider opening a bug to \
                                                             the developers."
@@ -155,7 +155,7 @@ impl Safe {
     /// Retrieves __all__ the Entries with the passwords decrypted
     pub(crate) fn get_entries_decrypted(&self) -> Vec<Entry> {
         self.get_entries()
-            .into_iter()
+            .iter()
             .map(|entry| entry.decrypted(&self.password_cryptor))
             .collect()
     }
@@ -172,8 +172,8 @@ impl Safe {
     }
 
     fn apply_filter(&mut self) {
-        let m: Vec<Entry> = if self.filter.len() > 0 {
-            let ref lower_filter = self.filter.to_lowercase();
+        let m: Vec<Entry> = if !self.filter.is_empty() {
+            let lower_filter = self.filter.to_lowercase();
             let mut indexes_vec = Vec::new();
             let mut vec = Vec::new();
 
@@ -182,8 +182,8 @@ impl Safe {
                     .iter()
                     .enumerate()
                     .filter(|&(_, entry)| {
-                        entry.name.to_lowercase().contains(lower_filter) || entry.url.to_lowercase().contains(lower_filter) ||
-                            entry.user.to_lowercase().contains(lower_filter) || entry.desc.to_lowercase().contains(lower_filter)
+                        entry.name.to_lowercase().contains(&lower_filter) || entry.url.to_lowercase().contains(&lower_filter) ||
+                            entry.user.to_lowercase().contains(&lower_filter) || entry.desc.to_lowercase().contains(&lower_filter)
                     });
                 for tup in iter {
                     // Push the entry in the vec
