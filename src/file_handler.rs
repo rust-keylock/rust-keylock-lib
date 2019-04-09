@@ -384,20 +384,21 @@ fn transform_to_dtos(table: &Table, recover: bool) -> Result<Vec<Entry>, RustKey
                         })
                         .collect();
 
-                if vec.contains(&None) {
-                    if recover {
-                        Ok(vec.into_iter().filter(|opt| opt.is_some()).map(|opt| opt.unwrap()).collect())
+                    if vec.contains(&None) {
+                        if recover {
+                            Ok(vec.into_iter().filter(|opt| opt.is_some()).map(|opt| opt.unwrap()).collect())
+                        } else {
+                            Err(RustKeylockError::GeneralError(
+                                "Failed because of previous errors (during mapping)".to_string(),
+                            ))
+                        }
                     } else {
-                        Err(RustKeylockError::GeneralError(
-                            "Failed because of previous errors (during mapping)".to_string(),
-                        ))
+                        Ok(vec.into_iter().map(|opt| opt.unwrap()).collect())
                     }
-                } else {
-                    Ok(vec.into_iter().map(|opt| opt.unwrap()).collect())
                 }
+                None => Err(RustKeylockError::ParseError("Entry shoud be a List of Tables".to_string())),
             }
-            None => Err(RustKeylockError::ParseError("Entry shoud be a List of Tables".to_string())),
-        },
+        }
         None => Ok(Vec::new()),
     }
 }
@@ -761,7 +762,7 @@ mod test_file_handler {
         let sys_conf = SystemConfiguration::new(Some(0), Some(1), Some(2));
 
         let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, false, false).unwrap();
-        assert!(super::save(super::RklContent::new(entries.clone(), nc_conf, sys_conf), filename, &cryptor, true).is_ok());
+        assert!(super::save(super::RklContent::new(entries.clone(), nc_conf, dbx_conf, sys_conf), filename, &cryptor, true).is_ok());
         cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, false, false).unwrap();
 
         let m = super::load(filename, &cryptor, true);
@@ -841,7 +842,7 @@ mod test_file_handler {
         let dbx_conf = DropboxConfiguration::default();
         let sys_conf = SystemConfiguration::new(Some(2), Some(3), Some(2));
 
-        let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, false).unwrap();
+        let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, false, false).unwrap();
         assert!(super::save(
             super::RklContent::new(entries, nc_conf, dbx_conf, sys_conf),
             filename,
@@ -849,7 +850,7 @@ mod test_file_handler {
             true,
         )
             .is_ok());
-        cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, false).unwrap();
+        cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, false, false).unwrap();
         assert!(super::load(filename, &cryptor, true).is_ok());
 
         // Import the file by creating a new cryptor
@@ -877,7 +878,7 @@ mod test_file_handler {
         let sys_conf = SystemConfiguration::default();
 
         let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, false, false).unwrap();
-        assert!(super::save(super::RklContent::new(entries.clone(), nc_conf, sys_conf), filename, &cryptor, true).is_ok());
+        assert!(super::save(super::RklContent::new(entries.clone(), nc_conf, dbx_conf, sys_conf), filename, &cryptor, true).is_ok());
 
         cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, false, false).unwrap();
 
@@ -919,7 +920,7 @@ mod test_file_handler {
         let sys_conf = SystemConfiguration::new(Some(0), Some(1), Some(2));
 
         let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, false, false).unwrap();
-        assert!(super::save(super::RklContent::new(entries.clone(), nc_conf, sys_conf), filename, &cryptor, true).is_ok());
+        assert!(super::save(super::RklContent::new(entries.clone(), nc_conf, dbx_conf, sys_conf), filename, &cryptor, true).is_ok());
 
         cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, false, false).unwrap();
 
