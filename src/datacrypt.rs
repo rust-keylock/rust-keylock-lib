@@ -19,7 +19,7 @@ use std::cmp::PartialEq;
 use std::fmt::Debug;
 use std::iter::repeat;
 
-use crypto::bcrypt::bcrypt;
+use bcrypt::bcrypt;
 use base64;
 use aes_ctr::Aes256Ctr;
 use aes_ctr::stream_cipher::generic_array::GenericArray;
@@ -34,6 +34,7 @@ use super::errors::{self, RustKeylockError};
 use super::protected::RklSecret;
 
 const NUMBER_OF_SALT_KEY_PAIRS: usize = 10;
+pub(crate) const BCRYPT_COST: u32 = 8u32;
 
 pub trait Cryptor {
     /// Decrypts a given array of bytes
@@ -81,15 +82,14 @@ impl BcryptAes {
             key.append(&mut legacy_key)
         }
 
-
         let mut ikm: Vec<u8> = repeat(0u8).take(24).collect();
         bcrypt(cost, &salt, input, &mut ikm);
 
-        let info = "rust-keylock".as_bytes();
+        let info = b"rust-keylock";
 
         let hk = Hkdf::<Sha256>::extract(Some(&salt), &ikm);
         let mut okm: Vec<u8> = repeat(0u8).take(output_bytes_size as usize).collect();
-        hk.expand(&info, &mut okm).unwrap();
+        hk.expand(info, &mut okm).unwrap();
 
         key.append(&mut okm);
         key
@@ -102,6 +102,7 @@ impl BcryptAes {
     /// * Cost for the bcrypt algorithm
     /// * iv for AES
     /// * hash for Sha3Keccak512 hashing
+    // TODO: The cost can be removed from the arguments. It should be taken from the const BCRYPT_COST.
     pub fn new(password: String,
                salt: Vec<u8>,
                cost: u32,
@@ -118,7 +119,7 @@ impl BcryptAes {
         let mut salt_key_pairs = Vec::new();
         for _ in 0..NUMBER_OF_SALT_KEY_PAIRS {
             let s = create_random(16);
-            let k = BcryptAes::create_key(password.as_bytes(), &s, cost, false, 64);
+            let k = BcryptAes::create_key(password.as_bytes(), &s, BCRYPT_COST, false, 64);
             salt_key_pairs.push((s, RklSecret::new(k)));
         }
 
@@ -127,16 +128,16 @@ impl BcryptAes {
 
         BcryptAes {
             key: RklSecret::new(key),
-            iv: iv,
-            salt_position: salt_position,
-            salt_key_pairs: salt_key_pairs,
-            hasher: hasher,
+            iv,
+            salt_position,
+            salt_key_pairs,
+            hasher,
             hash: RklSecret::new(hash_bytes),
         }
     }
 
     fn decrypt_bytes(&self, encrypted: &[u8], key: &[u8]) -> errors::Result<Vec<u8>> {
-        let mut data: Vec<u8> = encrypted.iter().map(|b| b.clone()).collect();
+        let mut data: Vec<u8> = encrypted.to_vec();
         let k = GenericArray::from_slice(key);
         let nonce = GenericArray::from_slice(&self.iv);
         let mut cipher = Aes256Ctr::new(&k, &nonce);
@@ -146,7 +147,7 @@ impl BcryptAes {
     }
 
     fn encrypt_bytes(&self, plain: &[u8], key: &[u8], iv: &[u8]) -> errors::Result<Vec<u8>> {
-        let mut data: Vec<u8> = plain.iter().map(|b| b.clone()).collect();
+        let mut data: Vec<u8> = plain.to_vec();
         let k = GenericArray::from_slice(key);
         let nonce = GenericArray::from_slice(iv);
         let mut cipher = Aes256Ctr::new(&k, &nonce);
@@ -166,7 +167,7 @@ impl Cryptor for BcryptAes {
         let (final_result, integrity_check_ok) = if legacy_handling {
             let key: Vec<u8> = self.key.borrow().iter()
                 .take(32)
-                .map(|b| b.clone())
+                .cloned()
                 .collect();
             let integrity_check_ok = self.hasher.validate_hash(&bytes_to_decrypt, self.hash.borrow());
             let final_result = self.decrypt_bytes(&bytes_to_decrypt, &key)?;
@@ -176,13 +177,13 @@ impl Cryptor for BcryptAes {
             // The first 32 bytes of the key is for hash decryption.
             let hash_decryption_key: Vec<u8> = self.key.borrow().iter()
                 .take(32)
-                .map(|b| b.clone())
+                .cloned()
                 .collect();
             // The second 32 bytes is the key for data decryption.
             let data_decryption_key: Vec<u8> = self.key.borrow().iter()
                 .skip(32)
                 .take(32)
-                .map(|b| b.clone())
+                .cloned()
                 .collect();
 
             let hash = self.decrypt_bytes(self.hash.borrow(), &hash_decryption_key)?;
@@ -209,18 +210,18 @@ impl Cryptor for BcryptAes {
             let mut rng = OsRng::new().ok().unwrap();
             rng.gen_range(0, NUMBER_OF_SALT_KEY_PAIRS)
         };
-        let ref salt_key_pair = self.salt_key_pairs[idx];
+        let salt_key_pair = &self.salt_key_pairs[idx];
 
         // The first 32 bytes is the key for hash encryption.
         let hash_encryption_key: Vec<u8> = salt_key_pair.1.borrow().iter()
             .take(32)
-            .map(|b| b.clone())
+            .cloned()
             .collect();
         // The second 32 bytes is the key for data encryption.
         let data_encryption_key: Vec<u8> = salt_key_pair.1.borrow().iter()
             .skip(32)
             .take(32)
-            .map(|b| b.clone())
+            .cloned()
             .collect();
 
         // Encrypt data
@@ -260,7 +261,7 @@ impl EntryPasswordCryptor {
         // Create and return the EntryPasswordCryptor
         EntryPasswordCryptor {
             key: RklSecret::new(key),
-            iv: iv,
+            iv,
         }
     }
 
@@ -278,9 +279,15 @@ impl EntryPasswordCryptor {
     }
 }
 
+impl Default for EntryPasswordCryptor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Cryptor for EntryPasswordCryptor {
     fn decrypt(&self, input: &[u8]) -> Result<Vec<u8>, RustKeylockError> {
-        let mut data: Vec<u8> = input.iter().map(|b| b.clone()).collect();
+        let mut data: Vec<u8> = input.to_vec();
         let k = GenericArray::from_slice(&self.key.borrow());
         let nonce = GenericArray::from_slice(&self.iv);
         let mut cipher = Aes256Ctr::new(&k, &nonce);
@@ -290,7 +297,7 @@ impl Cryptor for EntryPasswordCryptor {
     }
 
     fn encrypt(&self, input: &[u8]) -> Result<Vec<u8>, RustKeylockError> {
-        let mut data: Vec<u8> = input.iter().map(|b| b.clone()).collect();
+        let mut data: Vec<u8> = input.to_vec();
         let k = GenericArray::from_slice(&self.key.borrow());
         let nonce = GenericArray::from_slice(&self.iv);
         let mut cipher = Aes256Ctr::new(&k, &nonce);
@@ -308,6 +315,12 @@ impl NoCryptor {
     #[allow(dead_code)]
     pub fn new() -> NoCryptor {
         NoCryptor {}
+    }
+}
+
+impl Default for NoCryptor {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -338,6 +351,12 @@ impl Sha3Keccak512 {
     }
 }
 
+impl Default for Sha3Keccak512 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Hasher for Sha3Keccak512 {
     fn validate_hash(&self, data: &[u8], hash: &[u8]) -> bool {
         let mut hasher = Sha3_512::default();
@@ -362,19 +381,8 @@ pub fn create_random(size: usize) -> Vec<u8> {
     random
 }
 
-#[allow(unused_assignments)]
 fn extract_bytes_to_decrypt(input_bytes: &[u8], salt_position: usize) -> Vec<u8> {
-    // If the data bytes are less than 96, fill it with random data. This may happen only in the case of the upgrade to v0.3.0
-    let bytes = if input_bytes.len() < 96 {
-        let bytes_to_add = create_random(96 - input_bytes.len());
-        let mut input_vec = Vec::new();
-        let mut vec_to_add = Vec::from(bytes_to_add);
-        input_vec = Vec::from(input_bytes);
-        input_vec.append(&mut vec_to_add);
-        input_vec
-    } else {
-        Vec::from(input_bytes)
-    };
+    let bytes = Vec::from(input_bytes);
     // Check whether the salt exists between the data.
     // The salt and hash are positioned one right after the other and can generally exist either between the data, or at the end of the data.
     // To calculate this, we need to substract from the overall bytes, 16 bytes which is the iv, 16 bytes which is the salt and 64 bytes which is the hash.
@@ -395,7 +403,8 @@ fn extract_bytes_to_decrypt(input_bytes: &[u8], salt_position: usize) -> Vec<u8>
             }
         })
         // The enumerate function created Tuples. Keep only the second tuple element, which is the actual byte.
-        .map(|tup| tup.1.clone())
+        .map(|tup| tup.1)
+        .cloned()
         .collect();
 
     bytes_to_decrypt

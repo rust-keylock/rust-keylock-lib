@@ -20,13 +20,13 @@ name = "rust_keylock"
 crate-type = ["rlib", "dylib"]
 
 [dependencies]
-rust-crypto = { path = "rust-crypto-stable_0.2", version = "0.2" }
 ctr = "0.3"
 aes-ctr = "0.3"
 sha2 = "0.8"
 sha3 = "0.8"
 hkdf = "0.7"
 stream-cipher = "0.3"
+bcrypt = {git = "https://github.com/astonbitecode/rust-bcrypt.git"}
 base64 = "0.10"
 rand = "0.6"
 log = "0.4"

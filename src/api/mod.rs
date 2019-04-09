@@ -113,16 +113,16 @@ pub struct SystemConfiguration {
 impl SystemConfiguration {
     pub fn new(saved_at: Option<i64>, version: Option<i64>, last_sync_version: Option<i64>) -> SystemConfiguration {
         SystemConfiguration {
-            saved_at: saved_at,
-            version: version,
-            last_sync_version: last_sync_version,
+            saved_at,
+            version,
+            last_sync_version,
         }
     }
 
     pub fn from_table(table: &Table) -> Result<SystemConfiguration, errors::RustKeylockError> {
-        let saved_at = table.get("saved_at").and_then(|value| value.as_integer().and_then(|int_ref| Some(int_ref)));
-        let version = table.get("version").and_then(|value| value.as_integer().and_then(|int_ref| Some(int_ref)));
-        let last_sync_version = table.get("last_sync_version").and_then(|value| value.as_integer().and_then(|int_ref| Some(int_ref)));
+        let saved_at = table.get("saved_at").and_then(|value| value.as_integer().and_then(Some));
+        let version = table.get("version").and_then(|value| value.as_integer().and_then(Some));
+        let last_sync_version = table.get("last_sync_version").and_then(|value| value.as_integer().and_then(Some));
         Ok(SystemConfiguration::new(saved_at, version, last_sync_version))
     }
 
@@ -175,11 +175,11 @@ impl Entry {
     /// Creates a new `Entry` using the provided name, url, username, password and description
     pub fn new(name: String, url: String, user: String, pass: String, desc: String) -> Entry {
         Entry {
-            name: name,
-            url: url,
-            user: user,
-            pass: pass,
-            desc: desc,
+            name,
+            url,
+            user,
+            pass,
+            desc,
             encrypted: false,
         }
     }
@@ -203,10 +203,8 @@ impl Entry {
         let pass = table.get("pass").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
         let desc = table.get("desc").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
         match (name, url, user, pass, desc) {
-            // TODO: match the url as a Some in the release after 0.6.0. This is temporary to support previous releases
-            // where the url field did not exist.
-            (Some(n), ul, Some(u), Some(p), Some(d)) => Ok(Self::new(n, ul.unwrap_or("".to_owned()), u, p, d)),
-            _ => Err(errors::RustKeylockError::ParseError(toml::ser::to_string(&table).unwrap_or("Cannot serialize toml".to_string()))),
+            (Some(n), Some(ul), Some(u), Some(p), Some(d)) => Ok(Self::new(n, ul, u, p, d)),
+            _ => Err(errors::RustKeylockError::ParseError(toml::ser::to_string(&table).unwrap_or_else(|_| "Cannot serialize toml".to_string()))),
         }
     }
 
@@ -260,6 +258,7 @@ pub struct Props {
     idle_timeout_seconds: i64,
     /// Fallback to pre v0.8.0 handling
     legacy_handling: bool,
+    bcrypt_cost_v8: bool,
 }
 
 impl Default for Props {
@@ -267,26 +266,31 @@ impl Default for Props {
         Props {
             idle_timeout_seconds: 1800,
             legacy_handling: false,
+            bcrypt_cost_v8: false,
         }
     }
 }
 
 impl Props {
-    pub(crate) fn new(idle_timeout_seconds: i64, legacy_handling: bool) -> Props {
+    pub(crate) fn new(idle_timeout_seconds: i64, legacy_handling: bool, bcrypt_cost_v8: bool) -> Props {
         Props {
             idle_timeout_seconds,
             legacy_handling,
+            bcrypt_cost_v8,
         }
     }
 
     pub fn from_table(table: &Table) -> Result<Props, errors::RustKeylockError> {
-        let idle_timeout_seconds = table.get("idle_timeout_seconds").and_then(|value| value.as_integer().and_then(|i_ref| Some(i_ref)));
-        let legacy_handling = table.get("legacy_handling").and_then(|value| value.as_bool().and_then(|b_ref| Some(b_ref)));
+        let idle_timeout_seconds = table.get("idle_timeout_seconds").and_then(|value| value.as_integer().and_then(Some));
+        let legacy_handling = table.get("legacy_handling").and_then(|value| value.as_bool().and_then(Some));
+        let bcrypt_cost_v8 = table.get("bcrypt_cost_v8").and_then(|value| value.as_bool().and_then(Some));
 
-        match (idle_timeout_seconds, legacy_handling) {
-            (Some(s), Some(l)) => Ok(Self::new(s, l)),
-            (Some(s), None) => Ok(Self::new(s, true)),
-            (_, _) => Err(errors::RustKeylockError::ParseError(toml::ser::to_string(&table).unwrap_or("Cannot serialize toml".to_string()))),
+        match (idle_timeout_seconds, legacy_handling, bcrypt_cost_v8) {
+            (Some(s), Some(l), Some(cv8)) => Ok(Self::new(s, l, cv8)),
+            (Some(s), None, Some(cv8)) => Ok(Self::new(s, true, cv8)),
+            (Some(s), Some(l), None) => Ok(Self::new(s, l, true)),
+            (Some(s), None, None) => Ok(Self::new(s, true, true)),
+            (_, _, _) => Err(errors::RustKeylockError::ParseError(toml::ser::to_string(&table).unwrap_or_else(|_| "Cannot serialize toml".to_string()))),
         }
     }
 
@@ -295,6 +299,7 @@ impl Props {
         let mut table = Table::new();
         table.insert("idle_timeout_seconds".to_string(), toml::Value::Integer(self.idle_timeout_seconds));
         table.insert("legacy_handling".to_string(), toml::Value::Boolean(self.legacy_handling));
+        table.insert("bcrypt_cost_v8".to_string(), toml::Value::Boolean(self.bcrypt_cost_v8));
 
         table
     }
@@ -309,6 +314,14 @@ impl Props {
 
     pub fn set_legacy_handling(&mut self, lh: bool) {
         self.legacy_handling = lh
+    }
+
+    pub fn bcrypt_cost_v8(&self) -> bool {
+        self.bcrypt_cost_v8
+    }
+
+    pub fn set_bcrypt_cost_v8(&mut self, bcv8: bool) {
+        self.bcrypt_cost_v8 = bcv8
     }
 }
 
@@ -364,24 +377,24 @@ pub enum Menu {
 impl Menu {
     /// Returns the name of a `Menu`.
     pub fn get_name(&self) -> String {
-        match self {
-            &Menu::TryPass(b) => format!("{:?}", Menu::TryPass(b)),
-            &Menu::ChangePass => format!("{:?}", Menu::ChangePass),
-            &Menu::Main => format!("{:?}", Menu::Main),
-            &Menu::EntriesList(_) => "EntriesList".to_string(),
-            &Menu::NewEntry => format!("{:?}", Menu::NewEntry),
-            &Menu::ShowEntry(_) => "ShowEntry".to_string(),
-            &Menu::EditEntry(_) => "EditEntry".to_string(),
-            &Menu::DeleteEntry(_) => "DeleteEntry".to_string(),
-            &Menu::Save(b) => format!("{:?}", Menu::Save(b)),
-            &Menu::Exit => format!("{:?}", Menu::Exit),
-            &Menu::ForceExit => format!("{:?}", Menu::ForceExit),
-            &Menu::TryFileRecovery => format!("{:?}", Menu::TryFileRecovery),
-            &Menu::ImportEntries => format!("{:?}", Menu::ImportEntries),
-            &Menu::ExportEntries => format!("{:?}", Menu::ExportEntries),
-            &Menu::ShowConfiguration => format!("{:?}", Menu::ShowConfiguration),
-            &Menu::WaitForDbxTokenCallback(_) => "WaitForDbxTokenCallback".to_string(),
-            &Menu::Current => format!("{:?}", Menu::Current),
+        match *self {
+            Menu::TryPass(b) => format!("{:?}", Menu::TryPass(b)),
+            Menu::ChangePass => format!("{:?}", Menu::ChangePass),
+            Menu::Main => format!("{:?}", Menu::Main),
+            Menu::EntriesList(_) => "EntriesList".to_string(),
+            Menu::NewEntry => format!("{:?}", Menu::NewEntry),
+            Menu::ShowEntry(_) => "ShowEntry".to_string(),
+            Menu::EditEntry(_) => "EditEntry".to_string(),
+            Menu::DeleteEntry(_) => "DeleteEntry".to_string(),
+            Menu::Save(b) => format!("{:?}", Menu::Save(b)),
+            Menu::Exit => format!("{:?}", Menu::Exit),
+            Menu::ForceExit => format!("{:?}", Menu::ForceExit),
+            Menu::TryFileRecovery => format!("{:?}", Menu::TryFileRecovery),
+            Menu::ImportEntries => format!("{:?}", Menu::ImportEntries),
+            Menu::ExportEntries => format!("{:?}", Menu::ExportEntries),
+            Menu::ShowConfiguration => format!("{:?}", Menu::ShowConfiguration),
+            Menu::WaitForDbxTokenCallback(_) => "WaitForDbxTokenCallback".to_string(),
+            Menu::Current => format!("{:?}", Menu::Current),
         }
     }
 
@@ -584,35 +597,34 @@ pub enum UserOptionType {
 }
 
 impl UserOptionType {
-    fn extract_value_from_string(str: &str) -> errors::Result<String> {
-        let s = str.clone();
-        let start = s.find("(");
-        if s.ends_with(")") {
+    fn extract_value_from_string(s: &str) -> errors::Result<String> {
+        let start = s.find('(');
+        if s.ends_with(')') {
             match start {
                 Some(st) => {
-                    let i = s.chars().skip(st + 1).take(str.len() - st - 2);
+                    let i = s.chars().skip(st + 1).take(s.len() - st - 2);
                     let s = String::from_iter(i);
                     Ok(s)
                 }
                 _ => {
                     Err(errors::RustKeylockError::ParseError(format!("Could not extract UserOptionType value from {}. The \
                                                                       UserOptionType can be extracted from strings like String(value)",
-                                                                     str)))
+                                                                     s)))
                 }
             }
         } else {
             Err(errors::RustKeylockError::ParseError(format!("Could not extract UserOptionType value from {}. The UserOptionType can be \
                                                               extracted from strings like String(value)",
-                                                             str)))
+                                                             s)))
         }
     }
 }
 
 impl ToString for UserOptionType {
     fn to_string(&self) -> String {
-        match self {
-            &UserOptionType::String(ref s) => format!("String({})", s),
-            _ => String::from(format!("{:?}", &self)),
+        match *self {
+            UserOptionType::String(ref s) => format!("String({})", s),
+            _ => format!("{:?}", &self),
         }
     }
 }
@@ -665,10 +677,12 @@ impl Default for MessageSeverity {
 
 impl ToString for MessageSeverity {
     fn to_string(&self) -> String {
-        String::from(format!("{:?}", &self))
+        format!("{:?}", &self)
     }
 }
 
+// Not need for boxing... The largest variant is the most frequent one.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum UiCommand {
     ShowPasswordEnter,
     ShowChangePassword,
@@ -685,26 +699,6 @@ mod api_unit_tests {
 
     use super::{Entry, Menu, UserOption, UserSelection};
     use crate::api::AllConfigurations;
-
-    #[test]
-    fn entry_from_table_before_v0_6_0_success() {
-        let toml = r#"
-			name = "name1"
-			user = "user1"
-			pass = "123"
-			desc = "some description"
-		"#;
-
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
-        let entry_opt = Entry::from_table(&table);
-        assert!(entry_opt.is_ok());
-        let entry = entry_opt.unwrap();
-        assert!(entry.name == "name1");
-        assert!(entry.user == "user1");
-        assert!(entry.pass == "123");
-        assert!(entry.desc == "some description");
-    }
 
     #[test]
     fn entry_from_table_success() {
@@ -806,6 +800,7 @@ mod api_unit_tests {
         let toml = r#"
         idle_timeout_seconds = 33
         legacy_handling = false
+        bcrypt_cost_v8 = false
         "#;
 
         let value = toml.parse::<toml::value::Value>().unwrap();
@@ -818,7 +813,7 @@ mod api_unit_tests {
     }
 
     #[test]
-    fn props_from_table_success_no_legacy_handling_exists() {
+    fn props_from_table_success_no_legacy_exists() {
         let toml = r#"
         idle_timeout_seconds = 33
         "#;
@@ -830,6 +825,24 @@ mod api_unit_tests {
         let props = props_opt.unwrap();
         assert!(props.idle_timeout_seconds() == 33);
         assert!(props.legacy_handling());
+        assert!(props.bcrypt_cost_v8());
+    }
+
+    #[test]
+    fn props_from_table_success_legacy_exists_cost_v8_does_not_exist() {
+        let toml = r#"
+        idle_timeout_seconds = 33
+        legacy_handling = false
+        "#;
+
+        let value = toml.parse::<toml::value::Value>().unwrap();
+        let table = value.as_table().unwrap();
+        let props_opt = super::Props::from_table(&table);
+        assert!(props_opt.is_ok());
+        let props = props_opt.unwrap();
+        assert!(props.idle_timeout_seconds() == 33);
+        assert!(!props.legacy_handling());
+        assert!(props.bcrypt_cost_v8());
     }
 
     #[test]
@@ -856,7 +869,9 @@ mod api_unit_tests {
     fn props_to_table() {
         let toml = r#"
         idle_timeout_seconds = 33
-        legacy_handling = false"#;
+        legacy_handling = false
+        bcrypt_cost_v8 = false
+        "#;
 
         let value = toml.parse::<toml::value::Value>().unwrap();
         let table = value.as_table().unwrap();

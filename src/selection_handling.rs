@@ -24,10 +24,10 @@ use std::error::Error;
 pub(crate) fn add_to_clipboard(content: String, editor: &Editor) -> UserSelection {
     let res = match ClipboardProvider::new() as Result<ClipboardContext, Box<std::error::Error>> {
         Ok(mut ctx) => {
-            ctx.set_contents(content).map_err(|error| errors::RustKeylockError::GeneralError(format!("{}", error.description())))
+            ctx.set_contents(content).map_err(|error| errors::RustKeylockError::GeneralError(error.description().to_string()))
         }
         Err(error) => {
-            Err(errors::RustKeylockError::GeneralError(format!("{}", error.description())))
+            Err(errors::RustKeylockError::GeneralError(error.description().to_string()))
         }
     };
     match res {
