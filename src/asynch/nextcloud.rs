@@ -53,7 +53,7 @@ pub struct Synchronizer {
 }
 
 impl Synchronizer {
-    pub fn new(ncc: &NextcloudConfiguration,
+    pub(crate) fn new(ncc: &NextcloudConfiguration,
                sys_conf: &SystemConfiguration,
                tx: Sender<errors::Result<SyncStatus>>,
                f: &str)

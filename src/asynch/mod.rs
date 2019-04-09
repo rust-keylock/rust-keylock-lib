@@ -333,7 +333,7 @@ fn timeout_check(last_action_time: &SystemTime, timeout_seconds: i64) -> Option<
 
 /// The status of the synchronize actions
 #[derive(PartialEq, Debug)]
-pub enum SyncStatus {
+pub(crate) enum SyncStatus {
     /// An update is available from the server.
     /// The &'static str is the sync that sends the message, String is the name of the file that is ready to be used if the user selects so.
     NewAvailable(&'static str, String),

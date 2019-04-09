@@ -38,7 +38,7 @@ pub struct Synchronizer {
 }
 
 impl Synchronizer {
-    pub fn new(dbc: &DropboxConfiguration,
+    pub(crate) fn new(dbc: &DropboxConfiguration,
                sys_conf: &SystemConfiguration,
                tx: Sender<errors::Result<SyncStatus>>,
                f: &str)

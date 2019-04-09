@@ -908,6 +908,8 @@ mod unit_tests {
     }
 
     #[test]
+    #[ignore]
+    // WARNING: Running this, will mess with the passwords that are stored in the $HOME/.rust-keylock directory
     fn execution_cases() {
         execute_try_pass();
         execute_show_entry();

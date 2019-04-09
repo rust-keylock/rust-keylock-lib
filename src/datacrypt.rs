@@ -18,7 +18,6 @@
 use std::cmp::PartialEq;
 use std::fmt::Debug;
 use std::iter::repeat;
-
 use bcrypt::bcrypt;
 use base64;
 use aes_ctr::Aes256Ctr;
@@ -29,12 +28,15 @@ use rand::{Rng, RngCore};
 use rand::rngs::OsRng;
 use sha2::Sha256;
 use sha3::{Digest, Sha3_512};
+use std::thread;
 
 use super::errors::{self, RustKeylockError};
 use super::protected::RklSecret;
+use std::thread::JoinHandle;
 
 const NUMBER_OF_SALT_KEY_PAIRS: usize = 10;
-pub(crate) const BCRYPT_COST: u32 = 8u32;
+
+pub(crate) const BCRYPT_COST: u32 = 7;
 
 pub trait Cryptor {
     /// Decrypts a given array of bytes
@@ -111,23 +113,37 @@ impl BcryptAes {
                hash_bytes: Vec<u8>,
                legacy_handling: bool)
                -> BcryptAes {
-        // Create bcrypt password for the current encrypted data
-        // Ask for 64 bytes bcrypt key. Use 32 bytes for data encryption and 32 bytes for hash encryption.
-        let key = BcryptAes::create_key(password.as_bytes(), &salt, cost, legacy_handling, 64);
-
-        // Create 10 new salt-key pairs to use them for encryption
         let mut salt_key_pairs = Vec::new();
-        for _ in 0..NUMBER_OF_SALT_KEY_PAIRS {
-            let s = create_random(16);
-            let k = BcryptAes::create_key(password.as_bytes(), &s, BCRYPT_COST, false, 64);
-            salt_key_pairs.push((s, RklSecret::new(k)));
+        let handles: Vec<JoinHandle<(Vec<u8>, RklSecret)>> = (0..NUMBER_OF_SALT_KEY_PAIRS + 1)
+            .map(|i| {
+                let cp = password.clone();
+                let cs = salt.clone();
+                let child = thread::spawn(move || {
+                    if i == 0 {
+                        // Create bcrypt password for the current encrypted data
+                        // Ask for 64 bytes bcrypt key. Use 32 bytes for data encryption and 32 bytes for hash encryption.
+                        let key = BcryptAes::create_key(cp.as_bytes(), &cs, cost, legacy_handling, 64);
+                        (cs, RklSecret::new(key))
+                    } else {
+                        // Create some new salt-key pairs to use them for encryption
+                        // Ask for 64 bytes bcrypt key. Use 32 bytes for data encryption and 32 bytes for hash encryption.
+                        let s = create_random(16);
+                        let k = BcryptAes::create_key(cp.as_bytes(), &s, BCRYPT_COST, false, 64);
+                        (s, RklSecret::new(k))
+                    }
+                });
+                child
+            })
+            .collect();
+        for handle in handles {
+            salt_key_pairs.push(handle.join().unwrap());
         }
 
         // Create the SHA3 hasher
         let hasher = Sha3Keccak512::new();
 
         BcryptAes {
-            key: RklSecret::new(key),
+            key: salt_key_pairs.remove(0).1.clone(),
             iv,
             salt_position,
             salt_key_pairs,
@@ -896,6 +912,19 @@ mod test_crypt {
         match result.err() {
             Some(super::super::errors::RustKeylockError::DecryptionError(_)) => assert!(true),
             _ => assert!(false),
+        }
+    }
+
+    #[test]
+    fn new_bcryptor_checks() {
+        let iv = super::create_random(16);
+        let salt = super::create_random(16);
+        let hash = super::create_random(64);
+        let cryptor = super::BcryptAes::new("password".to_string(), iv, 1, salt.clone(), 33, hash, false);
+        assert!(cryptor.salt_key_pairs.len() == super::NUMBER_OF_SALT_KEY_PAIRS);
+        for skp in cryptor.salt_key_pairs {
+            assert!(&skp.0 != &salt);
+            assert!(&skp.1 != &cryptor.key);
         }
     }
 
