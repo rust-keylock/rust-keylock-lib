@@ -38,6 +38,7 @@ extern crate sha3;
 extern crate toml;
 extern crate xml;
 
+use std::collections::HashMap;
 use std::error::Error;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
@@ -46,7 +47,7 @@ use std::time;
 
 use log::*;
 use tokio::prelude::*;
-use tokio::prelude::future::{FutureResult, Loop, loop_fn, ok, lazy};
+use tokio::prelude::future::{FutureResult, lazy, Loop, loop_fn, ok};
 
 use self::api::{
     Props,
@@ -54,20 +55,19 @@ use self::api::{
     SystemConfiguration,
 };
 pub use self::api::{
+    AllConfigurations,
     Entry,
     Menu,
     MessageSeverity,
     RklConfiguration,
     UserOption,
     UserSelection,
-    AllConfigurations,
 };
 pub use self::api::safe::Safe;
 use self::api::UiCommand;
 use self::asynch::AsyncEditorFacade;
-pub use self::asynch::nextcloud;
 pub use self::asynch::dropbox;
-use std::collections::HashMap;
+pub use self::asynch::nextcloud;
 
 mod file_handler;
 mod errors;
@@ -662,9 +662,13 @@ Warning: Saving will discard all the entries that could not be recovered.
             }
             UserSelection::GoTo(Menu::WaitForDbxTokenCallback(url)) => {
                 debug!("UserSelection::GoTo(Menu::WaitForDbxTokenCallback)");
-                match dropbox::retrieve_token(url) {
-                    Ok(token) => {
-                        println!("-------------------{}", token);
+                let tok_res = dropbox::retrieve_token(url).and_then(|token| {
+                    dropbox::DropboxConfiguration::new(token)
+                });
+                match tok_res {
+                    Ok(dbx_conf) => {
+                        s.contents_changed = true;
+                        s.configuration.dropbox = dbx_conf;
                         UserSelection::GoTo(Menu::ShowConfiguration)
                     }
                     Err(error) => {
@@ -841,15 +845,15 @@ pub trait AsyncEditor {
 #[cfg(test)]
 mod unit_tests {
     use std::mem;
-    use std::sync::mpsc::{Sender, self};
+    use std::sync::mpsc::{self, Sender};
     use std::sync::Mutex;
     use std::time::SystemTime;
 
     use clipboard::{ClipboardContext, ClipboardProvider};
 
-    use super::api::{Entry, Menu, UserOption, UserSelection, AllConfigurations};
-    use super::asynch::nextcloud::NextcloudConfiguration;
+    use super::api::{AllConfigurations, Entry, Menu, UserOption, UserSelection};
     use super::asynch::dropbox::DropboxConfiguration;
+    use super::asynch::nextcloud::NextcloudConfiguration;
     use super::file_handler;
 
     #[test]
@@ -908,7 +912,6 @@ mod unit_tests {
     }
 
     #[test]
-    #[ignore]
     // WARNING: Running this, will mess with the passwords that are stored in the $HOME/.rust-keylock directory
     fn execution_cases() {
         execute_try_pass();

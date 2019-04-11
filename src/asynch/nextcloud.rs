@@ -54,10 +54,10 @@ pub struct Synchronizer {
 
 impl Synchronizer {
     pub(crate) fn new(ncc: &NextcloudConfiguration,
-               sys_conf: &SystemConfiguration,
-               tx: Sender<errors::Result<SyncStatus>>,
-               f: &str)
-               -> errors::Result<Synchronizer> {
+                      sys_conf: &SystemConfiguration,
+                      tx: Sender<errors::Result<SyncStatus>>,
+                      f: &str)
+                      -> errors::Result<Synchronizer> {
         let ncc = NextcloudConfiguration::new(ncc.server_url.clone(),
                                               ncc.username.clone(),
                                               ncc.decrypted_password()?,
@@ -626,7 +626,7 @@ impl NextcloudConfiguration {
             .and_then(|value| value.as_bool().and_then(Some));
         match (url, user, pass, use_self_signed_certificate) {
             (Some(ul), Some(u), Some(p), Some(ssc)) => NextcloudConfiguration::new(ul, u, p, ssc),
-            _ => Err(errors::RustKeylockError::ParseError(toml::ser::to_string(&table).unwrap_or_else(|_|"Cannot deserialize toml".to_string()))),
+            _ => Err(errors::RustKeylockError::ParseError(toml::ser::to_string(&table).unwrap_or_else(|_| "Cannot deserialize toml".to_string()))),
         }
     }
 
