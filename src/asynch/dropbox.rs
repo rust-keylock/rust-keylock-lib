@@ -147,7 +147,6 @@ pub struct DropboxConfiguration {
 impl DropboxConfiguration {
     /// Creates a new DropboxConfiguration
     pub fn new(token: String) -> errors::Result<DropboxConfiguration> {
-        if token.is_empty() { return Err(errors::RustKeylockError::GeneralError(format!("Invalid Dropbox Authentication token"))); };
         let mut s = DropboxConfiguration::default();
         s.token = s.token_cryptor.encrypt_str(&token)?;
         Ok(s)
@@ -504,9 +503,4 @@ mod dropbox_tests {
         assert!(!dbx2.is_filled());
     }
 
-    #[test]
-    fn new_empty_token() {
-        let dbx = DropboxConfiguration::new("".to_string());
-        assert!(dbx.is_err());
-    }
 }

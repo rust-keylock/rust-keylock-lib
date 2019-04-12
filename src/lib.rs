@@ -663,7 +663,11 @@ Warning: Saving will discard all the entries that could not be recovered.
             UserSelection::GoTo(Menu::WaitForDbxTokenCallback(url)) => {
                 debug!("UserSelection::GoTo(Menu::WaitForDbxTokenCallback)");
                 let tok_res = dropbox::retrieve_token(url).and_then(|token| {
-                    dropbox::DropboxConfiguration::new(token)
+                    if token.is_empty() {
+                        Err(errors::RustKeylockError::GeneralError(format!("Invalid Dropbox Authentication token")))
+                    } else {
+                        dropbox::DropboxConfiguration::new(token)
+                    }
                 });
                 match tok_res {
                     Ok(dbx_conf) => {

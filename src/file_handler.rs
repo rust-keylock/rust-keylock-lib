@@ -812,10 +812,10 @@ mod test_file_handler {
             false,
         )
             .unwrap();
+        let dbx_conf_import = DropboxConfiguration::new("token_import".to_string()).unwrap();
 
         let tmp_cryptor_import =
             super::create_bcryptor(filename_import, password_import.clone(), salt_position_import, false, false, false, false).unwrap();
-        let dbx_conf_import = DropboxConfiguration::default();
         let sys_conf_import = SystemConfiguration::new(Some(0), Some(1), Some(2));
         assert!(super::save(
             super::RklContent::new(entries_import, nc_conf_import, dbx_conf_import, sys_conf_import),
@@ -839,7 +839,7 @@ mod test_file_handler {
             "1".to_string(),
         ));
         let nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), false).unwrap();
-        let dbx_conf = DropboxConfiguration::default();
+        let dbx_conf = DropboxConfiguration::new("token".to_string()).unwrap();
         let sys_conf = SystemConfiguration::new(Some(2), Some(3), Some(2));
 
         let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true, false, false).unwrap();
