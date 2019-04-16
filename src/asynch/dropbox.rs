@@ -110,9 +110,8 @@ impl Synchronizer {
                       tx: Sender<errors::Result<SyncStatus>>,
                       f: &str)
                       -> errors::Result<Synchronizer> {
-        let dbc = DropboxConfiguration::new(dbc.token.clone())?;
         let s = Synchronizer {
-            conf: dbc,
+            conf: dbc.clone(),
             tx,
             file_name: f.to_string(),
             saved_at_local: sys_conf.saved_at,
@@ -501,6 +500,13 @@ mod dropbox_tests {
         assert!(dbx1.is_filled());
         let dbx2 = DropboxConfiguration::default();
         assert!(!dbx2.is_filled());
+    }
+
+    #[test]
+    fn use_the_token_derypted() {
+        let token = "thisisatoken";
+        let dbx = DropboxConfiguration::new(token.to_string()).unwrap();
+        assert!(dbx.decrypted_token().unwrap() == token);
     }
 
 }
