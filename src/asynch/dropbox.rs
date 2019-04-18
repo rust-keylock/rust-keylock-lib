@@ -22,7 +22,7 @@ use std::thread;
 use std::time;
 
 use base64;
-use futures::future::ok;
+use futures::future::{ok, result};
 use futures::Stream;
 use futures::sync::oneshot;
 use http::StatusCode;
@@ -34,6 +34,7 @@ use percent_encoding::{percent_decode, USERINFO_ENCODE_SET, utf8_percent_encode}
 use toml;
 use toml::value::Table;
 use url::Url;
+use j4rs::{Instance, InvocationArg, Jvm, JvmBuilder, MavenArtifact};
 
 use crate::asynch::SyncStatus;
 use crate::datacrypt::{create_random, EntryPasswordCryptor};
@@ -125,13 +126,76 @@ impl Synchronizer {
     fn use_token(&self) -> errors::Result<String> {
         self.conf.decrypted_token()
     }
+
+    fn do_execute(&self) -> errors::Result<SyncStatus> {
+        let jvm = JvmBuilder::new().build().unwrap();
+
+        let request_config = jvm.create_instance(
+            "com.dropbox.core.DbxRequestConfig",
+            &[InvocationArg::from("rkl-operations")],
+        )?;
+        let dbx_client = jvm.create_instance(
+            "com.dropbox.core.v2.DbxClientV2",
+            &[InvocationArg::from(request_config), InvocationArg::from(self.use_token()?)],
+        )?;
+        let dbx_client_base = jvm.cast(&dbx_client, "com.dropbox.core.v2.DbxClientV2Base")?;
+        let users = jvm.invoke(
+            &dbx_client_base,
+            "users",
+            &[],
+        )?;
+        let account_info = jvm.invoke(
+            &users,
+            "getCurrentAccount",
+            &[],
+        )?;
+        let multiline = jvm.invoke(
+            &account_info,
+            "toStringMultiline",
+            &[],
+        )?;
+        let info: String = jvm.to_rust(multiline)?;
+        println!("---------------{}", info);
+
+        Ok(SyncStatus::None)
+    }
+
+    fn send_to_channel(res: errors::Result<SyncStatus>, tx: Sender<errors::Result<SyncStatus>>) {
+        match res {
+            Ok(ref r) => debug!("Nextcloud Async Task sends to the channel {:?}", r),
+            Err(ref error) => error!("Nextcloud Async Tasks reported error: {:?}", error),
+        };
+
+
+        match tx.send(res) {
+            Ok(_) => {
+                // ignore
+            }
+            Err(error) => {
+                error!("Error while the Nextcloud synchronizer attempted to send the status to the channel: {:?}.", error);
+            }
+        }
+    }
 }
 
 impl super::AsyncTask for Synchronizer {
     fn init(&mut self) {}
 
     fn execute(&self) -> Box<dyn Future<Item=bool, Error=()> + Send> {
-        Box::new(ok(true))
+        let cloned_tx_ok = self.tx.clone();
+        let cloned_tx_err = self.tx.clone();
+
+        let f = result(self.do_execute())
+            .map(move |sync_status| {
+                // Return true to continue the task only if the SyncStatus was None.
+                // In all the other cases we need to stop the task in order to allow the user to take an action.
+                let to_ret = sync_status == SyncStatus::None;
+                Self::send_to_channel(Ok(sync_status), cloned_tx_ok);
+                to_ret
+            })
+            .map_err(move |error| Self::send_to_channel(Err(error), cloned_tx_err));
+
+        Box::new(f)
     }
 }
 
@@ -356,11 +420,26 @@ mod dropbox_tests {
     use std::sync::mpsc;
     use std::thread;
     use std::time;
+    use std::env;
 
     use hyper::{Client, Method, Request};
     use hyper::rt::{self, Future};
 
     use super::*;
+    use crate::asynch::AsyncTask;
+
+    #[test]
+    #[ignore]
+    fn invoke() {
+        let (tx, rx) = mpsc::channel();
+        let s = Synchronizer::new(
+            &DropboxConfiguration::new(env::var("DBX_TOKEN").unwrap().to_string()).unwrap(),
+            &SystemConfiguration::default(),
+            tx,
+            "filename").unwrap();
+
+        s.do_execute().unwrap();
+    }
 
     #[test]
     fn retrieve_a_token_and_a_state_from_post_body() {

@@ -30,6 +30,7 @@ use stream_cipher::LoopError;
 use url;
 use tokio;
 use futures::Canceled;
+use j4rs;
 
 pub type Result<T> = result::Result<T, RustKeylockError>;
 
@@ -163,6 +164,12 @@ impl From<url::ParseError> for RustKeylockError {
 
 impl From<tokio::timer::timeout::Error<Canceled>> for RustKeylockError {
     fn from(err: tokio::timer::timeout::Error<Canceled>) -> RustKeylockError {
+        RustKeylockError::GeneralError(format!("{:?}", err))
+    }
+}
+
+impl From<j4rs::errors::J4RsError> for RustKeylockError {
+    fn from(err: j4rs::errors::J4RsError) -> RustKeylockError {
         RustKeylockError::GeneralError(format!("{:?}", err))
     }
 }
