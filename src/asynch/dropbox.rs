@@ -29,12 +29,12 @@ use http::StatusCode;
 use hyper::{self, Body, Request, Response, Server};
 use hyper::rt::Future;
 use hyper::service::service_fn_ok;
+use j4rs::{Instance, InvocationArg, Jvm, JvmBuilder, MavenArtifact};
 use log::*;
 use percent_encoding::{percent_decode, USERINFO_ENCODE_SET, utf8_percent_encode};
 use toml;
 use toml::value::Table;
 use url::Url;
-use j4rs::{Instance, InvocationArg, Jvm, JvmBuilder, MavenArtifact};
 
 use crate::asynch::SyncStatus;
 use crate::datacrypt::{create_random, EntryPasswordCryptor};
@@ -155,7 +155,7 @@ impl Synchronizer {
             &[],
         )?;
         let info: String = jvm.to_rust(multiline)?;
-        println!("---------------{}", info);
+        println!("---------------{}, ================= {}", info, self.use_token()?);
 
         Ok(SyncStatus::None)
     }
@@ -286,7 +286,7 @@ pub(crate) fn retrieve_token(url_string: String) -> errors::Result<String> {
                     resp_builder.body(Body::from(HTTP_GET_RESPONSE_BODY)).unwrap()
                 } else if req.method() == &hyper::Method::POST {
                     // The post body should be like:
-                    // tkninput=%23access_token%3DAHO6fSqhEBAAAAAAAAAAZeiCpsEkwQSDd4bgz3vOWTsx2RnZ1uQ2NyS5N315lGRq%26token_type%3Dbearer%26state%3DmiRHqBMRYjKMd089A4904USkjjrV7uh7mrrFaU1MrtXQPstDuf4ojC2bFQjkS83kslXrlhksomcopvFHV6e0BF7Ta6c4D1sDsOhYA864b6rwrqJlZzJZ%2B%252FpUeaQ4NvpP1tV%252FhCqUqdj5juK1h49x5DbCYNQMe54DeZe5XBPYl%2Bs%253D%26uid%3D1417302560%26account_id%3Ddbid%253AAAABRSgfZEneZO8ogIDXa0EH3BdpFWNRVc0
+                    // tkninput=%23access_token%thisisatoken%26token_type%3Dbearer%26state%3DmiRHqBMRYjKMd089A4904USkjjrV7uh7mrrFaU1MrtXQPstDuf4ojC2bFQjkS83kslXrlhksomcopvFHV6e0BF7Ta6c4D1sDsOhYA864b6rwrqJlZzJZ%2B%252FpUeaQ4NvpP1tV%252FhCqUqdj5juK1h49x5DbCYNQMe54DeZe5XBPYl%2Bs%253D%26uid%3D1417302560%26account_id%3Ddbid%253AAAABRSgfZEneZO8ogIDXa0EH3BdpFWNRVc0
                     let shared_tx_2 = shared_tx.clone();
                     let shared_state_2 = shared_state.clone();
                     let bdy = req_to_body(req)
@@ -417,16 +417,17 @@ fn retrieve_token_and_state_from_post_body(post_body: &str) -> errors::Result<(S
 
 #[cfg(test)]
 mod dropbox_tests {
+    use std::env;
     use std::sync::mpsc;
     use std::thread;
     use std::time;
-    use std::env;
 
     use hyper::{Client, Method, Request};
     use hyper::rt::{self, Future};
 
-    use super::*;
     use crate::asynch::AsyncTask;
+
+    use super::*;
 
     #[test]
     #[ignore]
@@ -587,5 +588,4 @@ mod dropbox_tests {
         let dbx = DropboxConfiguration::new(token.to_string()).unwrap();
         assert!(dbx.decrypted_token().unwrap() == token);
     }
-
 }

@@ -43,7 +43,7 @@ openssl-probe = "0.1"
 clipboard = "0.5"
 dirs = "1.0"
 tokio = "0.1"
-j4rs = {git = "https://github.com/astonbitecode/j4rs.git"}
+j4rs = "0.6"
 
 [dependencies.toml]
 version = "0.5"
@@ -54,4 +54,4 @@ features = ["preserve_order"]
 lazy_static = "1.2"
 
 [build-dependencies]
-j4rs = {git = "https://github.com/astonbitecode/j4rs.git"}
+j4rs = "0.6"
