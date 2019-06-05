@@ -57,7 +57,7 @@ impl RklContent {
                                                                     tup.1.username.clone(),
                                                                     tup.1.decrypted_password()?,
                                                                     tup.1.use_self_signed_certificate);
-        let dropbox_conf = dropbox::DropboxConfiguration::new(tup.2.token.clone());
+        let dropbox_conf = dropbox::DropboxConfiguration::new(tup.2.decrypted_token()?);
         let system_conf = SystemConfiguration::new(tup.3.saved_at, tup.3.version, tup.3.last_sync_version);
 
         Ok(RklContent::new(entries, nextcloud_conf?, dropbox_conf?, system_conf))
