@@ -260,7 +260,7 @@ pub fn replace(source: &str, target: &str) -> errors::Result<()> {
 }
 
 /// Deletes the file with a given name in the default directory.
-fn delete_file(name: &str) -> errors::Result<()> {
+pub(crate) fn delete_file(name: &str) -> errors::Result<()> {
     let path_buf = default_toml_path(name);
     let path = path_buf.to_str().unwrap();
     fs::remove_file(path)?;

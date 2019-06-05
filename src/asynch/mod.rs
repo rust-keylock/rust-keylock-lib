@@ -17,6 +17,8 @@
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread;
 use std::time::{self, Duration, SystemTime, Instant};
+use std::str::FromStr;
+
 use tokio::prelude::*;
 use tokio::prelude::future::{ok, Loop, loop_fn};
 use tokio::timer::Delay;
@@ -106,6 +108,107 @@ impl AsyncTaskHandle {
     }
 }
 
+#[derive(PartialEq, Debug)]
+pub(crate) struct ServerVersionData {
+    version: String,
+    last_modified: String,
+}
+
+#[derive(PartialEq, Debug)]
+pub(crate) enum SynchronizerAction {
+    Download,
+    Upload,
+    Ignore,
+    DownloadMergeAndUpload,
+}
+
+/// Returns the action that should be taken after parsing a Webdav response
+///
+/// ## Algorithm:
+///
+/// |           version_local        |     last_sync_version    |          Action
+/// | :---------------------------:  | :----------------------: | :------------------------:
+/// | bigger than server             | equal to server          | Upload
+/// | bigger than server             | smaller than server      | Merge
+/// | bigger than server             | bigger than server       | Upload
+///
+/// | smaller than server            | not equal to local       | Merge
+/// | smaller than server            | equal to local           | Download
+///
+/// | equal to server                | equal to server          | Ignore
+///
+/// | equal to server                | not equal to server      | Merge
+///
+/// | other                          | other                    | Ignore (Error)
+
+pub(crate) fn synchronizer_action(svd: &ServerVersionData,
+                          filename: &str,
+                          saved_at_local: &Option<i64>,
+                          version_local: &Option<i64>,
+                          last_sync_version: &Option<i64>)
+                          -> errors::Result<SynchronizerAction> {
+    debug!("The file '{}' on the server was saved at {} with version {}",
+           filename,
+           svd.last_modified,
+           svd.version);
+    let version_server = i64::from_str(&svd.version)?;
+
+    debug!("The file '{}' locally was saved at {:?} with version {:?}. Last sync version is {:?}",
+           filename,
+           saved_at_local,
+           version_local,
+           last_sync_version);
+
+    match (version_local, version_server, last_sync_version) {
+        (&Some(vl), vs, &Some(lsv)) if vl > vs && lsv == vs => {
+            debug!("The local version is bigger than the server. The last sync version is equal to the server. \
+                        Need to Upload");
+            Ok(SynchronizerAction::Upload)
+        }
+        (&Some(vl), vs, &Some(lsv)) if vl > vs && lsv < vs => {
+            debug!("The local version is bigger than the server. The last sync version is smaller than the server. \
+                        Need to Merge");
+            Ok(SynchronizerAction::DownloadMergeAndUpload)
+        }
+        (&Some(vl), vs, &Some(lsv)) if vl > vs && lsv > vs => {
+            debug!("The local version is bigger than the server. The last sync version is bigger than the server. \
+                        Need to Upload");
+            Ok(SynchronizerAction::Upload)
+        }
+        (&Some(vl), vs, &Some(lsv)) if vl < vs && vl != lsv => {
+            debug!("The local version is smaller than the server The last sync version is not equal to the local version. \
+                        Need to Merge");
+            Ok(SynchronizerAction::DownloadMergeAndUpload)
+        }
+        (&Some(vl), vs, &Some(lsv)) if vl < vs && vl == lsv => {
+            debug!("The local version is smaller than the server The last sync version equal to the local version. \
+                        Need to Download");
+            Ok(SynchronizerAction::Download)
+        }
+        (&Some(vl), vs, &Some(lsv)) if vl == vs && lsv == vs => {
+            debug!("The local version is equal to the server. The last sync version is equal to the server. \
+                        Ignoring");
+            Ok(SynchronizerAction::Ignore)
+        }
+        (&Some(vl), vs, &Some(lsv)) if vl == vs && lsv != vs => {
+            debug!("The local version is equal to the server. The last sync version is not equal to the server. \
+                        Need to merge");
+            Ok(SynchronizerAction::DownloadMergeAndUpload)
+        }
+        (&None, _, _) => {
+            debug!("Nothing is saved locally... Need to download");
+            Ok(SynchronizerAction::Download)
+        }
+        (&Some(_), _, &None) => {
+            debug!("Nothing is saved at the server... Need to upload");
+            Ok(SynchronizerAction::Upload)
+        }
+        (_, _, _) => {
+            error!("The local version, server version and last sync version seem corrupted.");
+            Ok(SynchronizerAction::Ignore)
+        }
+    }
+}
 
 // Used in the execute function
 pub(crate) struct AsyncEditorFacade {
@@ -354,9 +457,12 @@ mod async_tests {
     use tokio::prelude::*;
     use tokio::prelude::future::{lazy, ok};
     use std::thread;
+    use std::fs::{self, File};
 
     use super::super::errors;
     use super::super::{UserOption, MessageSeverity, UserSelection, Editor, UiCommand};
+    use super::*;
+    use crate::file_handler;
 
     #[test]
     fn facade_show_change_password() {
@@ -457,6 +563,98 @@ mod async_tests {
         assert!(rx.recv_timeout(time::Duration::from_millis(10000)).is_ok());
     }
 
+    #[test]
+    fn parse_web_dav_response() {
+        let filename = "parse_web_dav_response";
+        create_file_with_contents(filename, "This is a test file");
+
+        // Upload because version_local is bigger than version_server and last_sync_version is equal to version_server
+        let wdr1 = ServerVersionData {
+            last_modified: "133".to_string(),
+            version: "1".to_string(),
+        };
+        let res1 = synchronizer_action(
+            &wdr1,
+            filename,
+            &Some(133),
+            &Some(2),
+            &Some(1));
+        assert!(res1.is_ok());
+        assert!(res1.as_ref().unwrap() == &SynchronizerAction::Upload);
+
+        // Merge because version_local is bigger than version_server and last_sync_version is not equal to version_server
+        let wdr2 = ServerVersionData {
+            last_modified: "133".to_string(),
+            version: "2".to_string(),
+        };
+        let res2 = synchronizer_action(
+            &wdr2,
+            filename,
+            &Some(133),
+            &Some(3),
+            &Some(1));
+        assert!(res2.is_ok());
+        assert!(res2.as_ref().unwrap() == &SynchronizerAction::DownloadMergeAndUpload);
+
+        // Merge because version_local is smaller than version_server and last_sync_version is not equal to version_local
+        let wdr3 = ServerVersionData {
+            last_modified: "133".to_string(),
+            version: "3".to_string(),
+        };
+        let res3 = synchronizer_action(
+            &wdr3,
+            filename,
+            &Some(133),
+            &Some(2),
+            &Some(1));
+        assert!(res3.is_ok());
+        assert!(res3.as_ref().unwrap() == &SynchronizerAction::DownloadMergeAndUpload);
+
+        // Download because version_local is smaller than version_server and last_sync_version equal to version_local
+        let wdr4 = ServerVersionData {
+            last_modified: "133".to_string(),
+            version: "3".to_string(),
+        };
+        let res4 = synchronizer_action(
+            &wdr4,
+            filename,
+            &Some(133),
+            &Some(2),
+            &Some(2));
+        assert!(res4.is_ok());
+        assert!(res4.as_ref().unwrap() == &SynchronizerAction::Download);
+
+        // Ignore because version_local is equal to version_server and last_sync_version equal to version_server
+        let wdr5 = ServerVersionData {
+            last_modified: "133".to_string(),
+            version: "3".to_string(),
+        };
+        let res5 = synchronizer_action(
+            &wdr5,
+            filename,
+            &Some(133),
+            &Some(3),
+            &Some(3));
+        assert!(res5.is_ok());
+        assert!(res5.as_ref().unwrap() == &SynchronizerAction::Ignore);
+
+        // Merge because version_local is equal to version_server and last_sync_version is not equal to version_server
+        let wdr6 = ServerVersionData {
+            last_modified: "133".to_string(),
+            version: "3".to_string(),
+        };
+        let res6 = synchronizer_action(
+            &wdr6,
+            filename,
+            &Some(133),
+            &Some(3),
+            &Some(2));
+        assert!(res6.is_ok());
+        assert!(res6.as_ref().unwrap() == &SynchronizerAction::DownloadMergeAndUpload);
+
+        let _ = file_handler::delete_file(filename);
+    }
+
     pub struct DummyTask {
         tx: Sender<errors::Result<&'static str>>,
     }
@@ -468,5 +666,17 @@ mod async_tests {
             let _ = self.tx.send(Ok("dummy"));
             Box::new(lazy(|| ok(true)))
         }
+    }
+
+    fn create_file_with_contents(filename: &str, contents: &str) {
+        let default_rustkeylock_dir_path_buf = file_handler::default_rustkeylock_location();
+        let default_rustkeylock_dir = default_rustkeylock_dir_path_buf.to_str().unwrap();
+        let creation_result = fs::create_dir_all(default_rustkeylock_dir).map(|_| {
+            let path_buf = file_handler::default_toml_path(filename);
+            let path = path_buf.to_str().unwrap();
+            let mut file = File::create(path).unwrap();
+            assert!(file.write_all(contents.as_bytes()).is_ok());
+        });
+        assert!(creation_result.is_ok());
     }
 }

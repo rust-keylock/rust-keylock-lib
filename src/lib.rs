@@ -76,6 +76,7 @@ pub mod datacrypt;
 mod asynch;
 mod api;
 mod selection_handling;
+mod utils;
 
 const FILENAME: &str = ".sec";
 const PROPS_FILENAME: &str = ".props";
@@ -916,6 +917,7 @@ mod unit_tests {
     }
 
     #[test]
+    #[ignore]
     // WARNING: Running this, will mess with the passwords that are stored in the $HOME/.rust-keylock directory
     fn execution_cases() {
         execute_try_pass();

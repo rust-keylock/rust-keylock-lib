@@ -15,7 +15,9 @@
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
 
 use std::error::Error;
+use std::fs;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self, Sender};
 use std::thread;
@@ -29,18 +31,21 @@ use http::StatusCode;
 use hyper::{self, Body, Request, Response, Server};
 use hyper::rt::Future;
 use hyper::service::service_fn_ok;
-use j4rs::{Instance, InvocationArg, Jvm, JvmBuilder, MavenArtifact};
+use j4rs::{Instance, InvocationArg, Jvm, JvmBuilder};
 use log::*;
 use percent_encoding::{percent_decode, USERINFO_ENCODE_SET, utf8_percent_encode};
 use toml;
 use toml::value::Table;
 use url::Url;
 
-use crate::asynch::SyncStatus;
+use crate::asynch::{self, ServerVersionData, SynchronizerAction, SyncStatus};
 use crate::datacrypt::{create_random, EntryPasswordCryptor};
 use crate::errors;
 use crate::errors::RustKeylockError;
+use crate::file_handler;
+use crate::file_handler::default_toml_path;
 use crate::SystemConfiguration;
+use crate::utils;
 
 const HTTP_GET_RESPONSE_BODY: &str = r#"
 <!DOCTYPE html>
@@ -138,26 +143,94 @@ impl Synchronizer {
             "com.dropbox.core.v2.DbxClientV2",
             &[InvocationArg::from(request_config), InvocationArg::from(self.use_token()?)],
         )?;
-        let dbx_client_base = jvm.cast(&dbx_client, "com.dropbox.core.v2.DbxClientV2Base")?;
-        let users = jvm.invoke(
-            &dbx_client_base,
-            "users",
-            &[],
-        )?;
-        let account_info = jvm.invoke(
-            &users,
-            "getCurrentAccount",
-            &[],
-        )?;
-        let multiline = jvm.invoke(
-            &account_info,
-            "toStringMultiline",
-            &[],
-        )?;
-        let info: String = jvm.to_rust(multiline)?;
-        println!("---------------{}, ================= {}", info, self.use_token()?);
 
-        Ok(SyncStatus::None)
+        let server_version = self.get_version(&jvm, &dbx_client)?;
+        let synchronizer_action = asynch::synchronizer_action(&server_version, &self.file_name, &self.saved_at_local, &self.version_local, &self.last_sync_version)?;
+        Self::parse_synchronizer_action(synchronizer_action, &self.file_name, &jvm, &dbx_client, self.version_local, self.saved_at_local)
+    }
+
+    fn get_version(&self, jvm: &Jvm, client: &Instance) -> errors::Result<ServerVersionData> {
+        match Self::download(".version", jvm, client) {
+            Ok(tmp_file_name) => {
+                let tmp_file_pb = default_toml_path(&tmp_file_name);
+                let svd = parse_version_file(&tmp_file_pb)?;
+
+                let _ = file_handler::delete_file(&tmp_file_name);
+
+                Ok(svd)
+            }
+            Err(_) => {
+                let svd = ServerVersionData {
+                    version: "0".to_string(),
+                    last_modified: "0".to_string(),
+                };
+                Ok(svd)
+            }
+        }
+    }
+
+    fn download(filename: &str, jvm: &Jvm, client: &Instance) -> errors::Result<String> {
+        let tmp_file_name = format!("tmp_{}", filename);
+        let tmp_file_pb = default_toml_path(&tmp_file_name);
+        let tmp_file_path_str = tmp_file_pb.to_str().unwrap();
+
+        let fos = jvm.create_instance("java.io.FileOutputStream", &vec![InvocationArg::from(tmp_file_path_str.clone())])?;
+        let os = jvm.cast(&fos, "java.io.OutputStream")?;
+
+        let downloader = jvm.chain(jvm.clone_instance(client)?)
+            .invoke("files", &[])?
+            .invoke("download", &vec![InvocationArg::from("/.version")])?
+            .collect();
+
+        jvm.invoke(&downloader, "download", &vec![InvocationArg::from(os)])?;
+        jvm.invoke(&downloader, "close", &[])?;
+
+        Ok(tmp_file_name)
+    }
+
+    fn upload(filename: &str, jvm: &Jvm, client: &Instance) -> errors::Result<()> {
+        let file_pb = default_toml_path(&filename);
+        let file_path_str = file_pb.to_str().unwrap();
+
+        let fis = jvm.create_instance("java.io.FileInputStream", &vec![InvocationArg::from(file_path_str.clone())])?;
+        let is = jvm.cast(&fis, "java.io.InputStream")?;
+
+        let uploader = jvm.chain(jvm.clone_instance(client)?)
+            .invoke("files", &[])?
+            .invoke("uploadBuilder", &vec![InvocationArg::from(format!("/{}", filename))])?
+            .collect();
+
+        let uploader_base = jvm.cast(&uploader, "com.dropbox.core.v2.DbxUploadStyleBuilder")?;
+
+        jvm.invoke(&uploader_base, "uploadAndFinish", &vec![InvocationArg::from(is)])?;
+
+        Ok(())
+    }
+
+    fn parse_synchronizer_action(sa: SynchronizerAction, filename: &str, jvm: &Jvm, client: &Instance, version_local: Option<i64>, saved_at_local: Option<i64>) -> errors::Result<SyncStatus> {
+        match sa {
+            SynchronizerAction::Download => {
+                info!("Downloading file from the server");
+                let tmp_file_name = Self::download(filename, jvm, client)?;
+                Ok(SyncStatus::NewAvailable("dropbox", tmp_file_name))
+            }
+            SynchronizerAction::Ignore => {
+                debug!("No sync is needed");
+                Ok(SyncStatus::None)
+            }
+            SynchronizerAction::Upload => {
+                info!("Uploading file on the server");
+                Self::upload(filename, jvm, client)?;
+                create_version_file_locally(version_local, saved_at_local)?;
+                Self::upload(".version", jvm, client)?;
+                let _ = file_handler::delete_file(".version");
+                Ok(SyncStatus::UploadSuccess("dropbox"))
+            }
+            SynchronizerAction::DownloadMergeAndUpload => {
+                let tmp_file_name = Self::download(filename, jvm, client)?;
+                Ok(SyncStatus::NewAvailable("dropbox", tmp_file_name))
+            }
+        }
     }
 
     fn send_to_channel(res: errors::Result<SyncStatus>, tx: Sender<errors::Result<SyncStatus>>) {
@@ -197,6 +270,26 @@ impl super::AsyncTask for Synchronizer {
 
         Box::new(f)
     }
+}
+
+fn parse_version_file(pb: &PathBuf) -> errors::Result<ServerVersionData> {
+    let v_content = fs::read_to_string(&pb)?;
+    let v: Vec<String> = v_content.split(",")
+        .map(|entry| {
+            let s = entry.trim();
+            s.to_string()
+        })
+        .collect();
+
+    Ok(ServerVersionData {
+        version: utils::to_result(v.get(0))?.to_owned(),
+        last_modified: utils::to_result(v.get(1))?.to_owned(),
+    })
+}
+
+fn create_version_file_locally(version: Option<i64>, last_modified: Option<i64>) -> errors::Result<()> {
+    let contents = format!("{},{}", version.unwrap_or(0), last_modified.unwrap_or(0));
+    file_handler::save_bytes(".version", contents.as_bytes(), false)
 }
 
 /// The configuration that is retrieved from the rust-keylock encrypted file
@@ -425,21 +518,56 @@ mod dropbox_tests {
     use hyper::{Client, Method, Request};
     use hyper::rt::{self, Future};
 
-    use crate::asynch::AsyncTask;
+    use crate::file_handler;
 
     use super::*;
 
-    #[test]
-    #[ignore]
-    fn invoke() {
-        let (tx, rx) = mpsc::channel();
+    //    #[test]
+//    #[ignore]
+    fn _invoke() {
+        let (tx, _rx) = mpsc::channel();
+
+        let sc = SystemConfiguration::new(Some(11), Some(11), None);
         let s = Synchronizer::new(
             &DropboxConfiguration::new(env::var("DBX_TOKEN").unwrap().to_string()).unwrap(),
-            &SystemConfiguration::default(),
+            &sc,
             tx,
-            "filename").unwrap();
+            ".sec").unwrap();
 
         s.do_execute().unwrap();
+    }
+
+    //    #[test]
+//    #[ignore]
+    fn _dummy() {
+        let token = env::var("DBX_TOKEN").unwrap();
+        let jvm = JvmBuilder::new().build().unwrap();
+
+        let request_config = jvm.create_instance(
+            "com.dropbox.core.DbxRequestConfig",
+            &[InvocationArg::from("rkl-operations")],
+        ).unwrap();
+        let dbx_client = jvm.create_instance(
+            "com.dropbox.core.v2.DbxClientV2",
+            &[InvocationArg::from(request_config), InvocationArg::from(token.clone())],
+        ).unwrap();
+
+        let filename = "tmp_dummy";
+        let _ = file_handler::save_bytes(filename, "123,321".as_bytes(), false);
+
+        Synchronizer::upload(filename, &jvm, &dbx_client).unwrap();
+        let _ = file_handler::delete_file(filename);
+    }
+
+    #[test]
+    fn test_parse_version_file() {
+        let filename = "tmp_version";
+        let _ = file_handler::save_bytes(filename, "123,321".as_bytes(), false);
+        let pb = file_handler::default_toml_path(filename);
+        let sv = parse_version_file(&pb).unwrap();
+        assert!(sv.version == "123");
+        assert!(sv.last_modified == "321");
+        let _ = file_handler::delete_file(&filename);
     }
 
     #[test]

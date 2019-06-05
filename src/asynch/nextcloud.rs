@@ -15,7 +15,6 @@
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
 
 use std::io::prelude::*;
-use std::str::FromStr;
 use std::sync::mpsc::Sender;
 
 use base64;
@@ -31,7 +30,7 @@ use toml::value::Table;
 use xml::reader::{EventReader, XmlEvent};
 
 use crate::{errors, file_handler};
-use crate::asynch::SyncStatus;
+use crate::asynch::{self, SyncStatus, SynchronizerAction, ServerVersionData};
 use crate::datacrypt::EntryPasswordCryptor;
 use crate::errors::{debug_error_string, RustKeylockError};
 use crate::SystemConfiguration;
@@ -172,7 +171,7 @@ impl Synchronizer {
                                                                           &capsule.version_local,
                                                                           &capsule.last_sync_version));
                 let f = result(parse_web_dav_resp_res)
-                    .and_then(|parse_web_dav_resp| Self::parse_multi_status_response(parse_web_dav_resp, capsule));
+                    .and_then(|sa| Self::parse_synchronizer_action(sa, capsule));
 
                 Box::new(f)
             }
@@ -182,9 +181,9 @@ impl Synchronizer {
         }
     }
 
-    fn parse_multi_status_response(parse_web_dav_resp: ParseWebDavResponse, capsule: ArgsCapsule) -> Box<dyn Future<Item=SyncStatus, Error=RustKeylockError> + Send> {
-        match parse_web_dav_resp {
-            ParseWebDavResponse::Download => {
+    fn parse_synchronizer_action(sa: SynchronizerAction, capsule: ArgsCapsule) -> Box<dyn Future<Item=SyncStatus, Error=RustKeylockError> + Send> {
+        match sa {
+            SynchronizerAction::Download => {
                 info!("Downloading file from the server");
                 Box::new(Self::get(&capsule.username,
                                    capsule.password(),
@@ -194,11 +193,11 @@ impl Synchronizer {
                                    capsule.use_self_signed)
                     .and_then(|tmp_file_name| ok(SyncStatus::NewAvailable("nextcloud", tmp_file_name))))
             }
-            ParseWebDavResponse::Ignore => {
+            SynchronizerAction::Ignore => {
                 debug!("No sync is needed");
                 Box::new(ok(SyncStatus::None))
             }
-            ParseWebDavResponse::Upload => {
+            SynchronizerAction::Upload => {
                 info!("Uploading file on the server");
                 Box::new(Self::put(capsule.username(),
                                    capsule.password(),
@@ -210,7 +209,7 @@ impl Synchronizer {
                                    capsule.use_self_signed())
                     .and_then(|_| ok(SyncStatus::UploadSuccess("nextcloud"))))
             }
-            ParseWebDavResponse::DownloadMergeAndUpload => {
+            SynchronizerAction::DownloadMergeAndUpload => {
                 Box::new(Self::get(&capsule.username,
                                    capsule.password(),
                                    &capsule.server_url,
@@ -222,88 +221,17 @@ impl Synchronizer {
         }
     }
 
-    /// Returns the action that should be taken after parsing a Webdav response
-    ///
-    /// ## Algorithm:
-    ///
-    /// |           version_local        |     last_sync_version    |          Action
-    /// | :---------------------------:  | :----------------------: | :------------------------:
-    /// | bigger than server             | equal to server          | Upload
-    /// | bigger than server             | smaller than server      | Merge
-    /// | bigger than server             | bigger than server       | Upload
-    ///
-    /// | smaller than server            | not equal to local       | Merge
-    /// | smaller than server            | equal to local           | Download
-    ///
-    /// | equal to server                | equal to server          | Ignore
-    ///
-    /// | equal to server                | not equal to server      | Merge
-    ///
-    /// | other                          | other                    | Ignore (Error)
-
     fn parse_web_dav_response(web_dav_response: &WebDavResponse,
                               filename: &str,
                               saved_at_local: &Option<i64>,
                               version_local: &Option<i64>,
                               last_sync_version: &Option<i64>)
-                              -> errors::Result<ParseWebDavResponse> {
-        debug!("The file '{}' on the server was saved at {} with version {}",
-               filename,
-               web_dav_response.last_modified,
-               web_dav_response.version);
-        let version_server = i64::from_str(&web_dav_response.version)?;
-
-        debug!("The file '{}' locally was saved at {:?} with version {:?}. Last sync version is {:?}",
-               filename,
-               saved_at_local,
-               version_local,
-               last_sync_version);
-
-        match (version_local, version_server, last_sync_version) {
-            (&Some(vl), vs, &Some(lsv)) if vl > vs && lsv == vs => {
-                debug!("The local version is bigger than the server. The last sync version is equal to the server. \
-                        Need to Upload");
-                Ok(ParseWebDavResponse::Upload)
-            }
-            (&Some(vl), vs, &Some(lsv)) if vl > vs && lsv < vs => {
-                debug!("The local version is bigger than the server. The last sync version is smaller than the server. \
-                        Need to Merge");
-                Ok(ParseWebDavResponse::DownloadMergeAndUpload)
-            }
-            (&Some(vl), vs, &Some(lsv)) if vl > vs && lsv > vs => {
-                debug!("The local version is bigger than the server. The last sync version is bigger than the server. \
-                        Need to Upload");
-                Ok(ParseWebDavResponse::Upload)
-            }
-            (&Some(vl), vs, &Some(lsv)) if vl < vs && vl != lsv => {
-                debug!("The local version is smaller than the server The last sync version is not equal to the local version. \
-                        Need to Merge");
-                Ok(ParseWebDavResponse::DownloadMergeAndUpload)
-            }
-            (&Some(vl), vs, &Some(lsv)) if vl < vs && vl == lsv => {
-                debug!("The local version is smaller than the server The last sync version equal to the local version. \
-                        Need to Download");
-                Ok(ParseWebDavResponse::Download)
-            }
-            (&Some(vl), vs, &Some(lsv)) if vl == vs && lsv == vs => {
-                debug!("The local version is equal to the server. The last sync version is equal to the server. \
-                        Ignoring");
-                Ok(ParseWebDavResponse::Ignore)
-            }
-            (&Some(vl), vs, &Some(lsv)) if vl == vs && lsv != vs => {
-                debug!("The local version is equal to the server. The last sync version is not equal to the server. \
-                        Need to merge");
-                Ok(ParseWebDavResponse::DownloadMergeAndUpload)
-            }
-            (&None, _, _) | (_, _, &None) => {
-                debug!("First time contacting the server... Need to download");
-                Ok(ParseWebDavResponse::Download)
-            }
-            (_, _, _) => {
-                error!("The local version, server version and last sync version seem corrupted.");
-                Ok(ParseWebDavResponse::Ignore)
-            }
-        }
+                              -> errors::Result<SynchronizerAction> {
+        let svd = &ServerVersionData {
+            version: web_dav_response.version.clone(),
+            last_modified: web_dav_response.last_modified.clone(),
+        };
+        asynch::synchronizer_action(&svd, filename, saved_at_local, version_local, last_sync_version)
     }
 
     fn parse_xml(bytes: &[u8], filename: &str) -> errors::Result<WebDavResponse> {
@@ -561,14 +489,6 @@ impl super::AsyncTask for Synchronizer {
 
         Box::new(f)
     }
-}
-
-#[derive(PartialEq, Debug)]
-enum ParseWebDavResponse {
-    Download,
-    Upload,
-    Ignore,
-    DownloadMergeAndUpload,
 }
 
 /// The configuration that is retrieved from the rust-keylock encrypted file
@@ -891,7 +811,7 @@ mod nextcloud_tests {
         assert!(rx.recv_timeout(timeout).unwrap().unwrap() == super::SyncStatus::UploadSuccess("nextcloud"));
 
         // Delete the dummy file
-        delete_file(filename);
+        let _ = file_handler::delete_file(filename);
     }
 
     #[test]
@@ -932,8 +852,8 @@ mod nextcloud_tests {
             super::SyncStatus::NewAvailable("nextcloud", "tmp_download_a_file_from_the_server".to_string()));
 
         // Delete the dummy file
-        delete_file(filename);
-        delete_file("tmp_download_a_file_from_the_server");
+        let _ = file_handler::delete_file(filename);
+        let _ = file_handler::delete_file("tmp_download_a_file_from_the_server");
     }
 
     #[test]
@@ -970,7 +890,7 @@ mod nextcloud_tests {
         assert!(rx.recv_timeout(timeout).unwrap().is_err());
 
         // Delete the dummy file
-        delete_file(filename);
+        let _ = file_handler::delete_file(filename);
     }
 
     #[test]
@@ -1011,7 +931,7 @@ mod nextcloud_tests {
         assert!(rx.recv_timeout(timeout).unwrap().is_err());
 
         // Delete the dummy file
-        delete_file(filename);
+        let _ = file_handler::delete_file(filename);
     }
 
     #[test]
@@ -1054,7 +974,7 @@ mod nextcloud_tests {
         assert!(rx.recv_timeout(timeout).unwrap().is_err());
 
         // Delete the dummy file
-        delete_file(filename);
+        let _ = file_handler::delete_file(filename);
     }
 
     #[test]
@@ -1093,7 +1013,7 @@ mod nextcloud_tests {
         assert!(rx.recv_timeout(timeout).unwrap().is_err());
 
         // Delete the dummy file
-        delete_file(filename);
+        let _ = file_handler::delete_file(filename);
     }
 
     #[test]
@@ -1123,7 +1043,7 @@ mod nextcloud_tests {
         assert!(stat.is_err());
 
         // Delete the dummy file
-        delete_file(filename);
+        let _ = file_handler::delete_file(filename);
     }
 
     #[test]
@@ -1229,110 +1149,6 @@ mod nextcloud_tests {
         let res = super::Synchronizer::parse_xml(xml.as_bytes(), filename);
 
         assert!(res.is_err());
-    }
-
-    #[test]
-    fn parse_web_dav_response() {
-        let filename = "parse_web_dav_response";
-        create_file_with_contents(filename, "This is a test file");
-
-        // Upload because version_local is bigger than version_server and last_sync_version is equal to version_server
-        let wdr1 = super::WebDavResponse {
-            href: "not needed".to_string(),
-            last_modified: "133".to_string(),
-            version: "1".to_string(),
-            status: "not needed".to_string(),
-        };
-        let res1 = super::Synchronizer::parse_web_dav_response(
-            &wdr1,
-            filename,
-            &Some(133),
-            &Some(2),
-            &Some(1));
-        assert!(res1.is_ok());
-        assert!(res1.as_ref().unwrap() == &super::ParseWebDavResponse::Upload);
-
-        // Merge because version_local is bigger than version_server and last_sync_version is not equal to version_server
-        let wdr2 = super::WebDavResponse {
-            href: "not needed".to_string(),
-            last_modified: "133".to_string(),
-            version: "2".to_string(),
-            status: "not needed".to_string(),
-        };
-        let res2 = super::Synchronizer::parse_web_dav_response(
-            &wdr2,
-            filename,
-            &Some(133),
-            &Some(3),
-            &Some(1));
-        assert!(res2.is_ok());
-        assert!(res2.as_ref().unwrap() == &super::ParseWebDavResponse::DownloadMergeAndUpload);
-
-        // Merge because version_local is smaller than version_server and last_sync_version is not equal to version_local
-        let wdr3 = super::WebDavResponse {
-            href: "not needed".to_string(),
-            last_modified: "133".to_string(),
-            version: "3".to_string(),
-            status: "not needed".to_string(),
-        };
-        let res3 = super::Synchronizer::parse_web_dav_response(
-            &wdr3,
-            filename,
-            &Some(133),
-            &Some(2),
-            &Some(1));
-        assert!(res3.is_ok());
-        assert!(res3.as_ref().unwrap() == &super::ParseWebDavResponse::DownloadMergeAndUpload);
-
-        // Download because version_local is smaller than version_server and last_sync_version equal to version_local
-        let wdr4 = super::WebDavResponse {
-            href: "not needed".to_string(),
-            last_modified: "133".to_string(),
-            version: "3".to_string(),
-            status: "not needed".to_string(),
-        };
-        let res4 = super::Synchronizer::parse_web_dav_response(
-            &wdr4,
-            filename,
-            &Some(133),
-            &Some(2),
-            &Some(2));
-        assert!(res4.is_ok());
-        assert!(res4.as_ref().unwrap() == &super::ParseWebDavResponse::Download);
-
-        // Ignore because version_local is equal to version_server and last_sync_version equal to version_server
-        let wdr5 = super::WebDavResponse {
-            href: "not needed".to_string(),
-            last_modified: "133".to_string(),
-            version: "3".to_string(),
-            status: "not needed".to_string(),
-        };
-        let res5 = super::Synchronizer::parse_web_dav_response(
-            &wdr5,
-            filename,
-            &Some(133),
-            &Some(3),
-            &Some(3));
-        assert!(res5.is_ok());
-        assert!(res5.as_ref().unwrap() == &super::ParseWebDavResponse::Ignore);
-
-        // Merge because version_local is equal to version_server and last_sync_version is not equal to version_server
-        let wdr6 = super::WebDavResponse {
-            href: "not needed".to_string(),
-            last_modified: "133".to_string(),
-            version: "3".to_string(),
-            status: "not needed".to_string(),
-        };
-        let res6 = super::Synchronizer::parse_web_dav_response(
-            &wdr6,
-            filename,
-            &Some(133),
-            &Some(3),
-            &Some(2));
-        assert!(res6.is_ok());
-        assert!(res6.as_ref().unwrap() == &super::ParseWebDavResponse::DownloadMergeAndUpload);
-
-        delete_file(filename);
     }
 
     fn start_web_dav_server(command: &'static str, port: u16) {
@@ -1555,12 +1371,6 @@ mod nextcloud_tests {
             assert!(file.write_all(contents.as_bytes()).is_ok());
         });
         assert!(creation_result.is_ok());
-    }
-
-    fn delete_file(name: &str) {
-        let path_buf = file_handler::default_toml_path(name);
-        let path = path_buf.to_str().unwrap();
-        assert!(fs::remove_file(path).is_ok());
     }
 }
 // From https://users.rust-lang.org/t/tls-sockets-without-certificate-validation/13929/4:
