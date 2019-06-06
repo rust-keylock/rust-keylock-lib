@@ -194,10 +194,13 @@ impl Synchronizer {
 
         let fis = jvm.create_instance("java.io.FileInputStream", &vec![InvocationArg::from(file_path_str.clone())])?;
         let is = jvm.cast(&fis, "java.io.InputStream")?;
+        let wm = jvm.static_class("com.dropbox.core.v2.files.WriteMode")?;
+        let mode_overwrite = jvm.field(&wm, "OVERWRITE")?;
 
         let uploader = jvm.chain(jvm.clone_instance(client)?)
             .invoke("files", &[])?
             .invoke("uploadBuilder", &vec![InvocationArg::from(format!("/{}", filename))])?
+            .invoke("withMode", &vec![InvocationArg::from(mode_overwrite)])?
             .collect();
 
         let uploader_base = jvm.cast(&uploader, "com.dropbox.core.v2.DbxUploadStyleBuilder")?;
@@ -522,7 +525,7 @@ mod dropbox_tests {
 
     use super::*;
 
-    //    #[test]
+//        #[test]
 //    #[ignore]
     fn _invoke() {
         let (tx, _rx) = mpsc::channel();
