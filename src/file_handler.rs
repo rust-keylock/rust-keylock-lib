@@ -23,6 +23,7 @@ use std::io::prelude::*;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[allow(unused)]
 use dirs;
 use log::*;
 use toml;

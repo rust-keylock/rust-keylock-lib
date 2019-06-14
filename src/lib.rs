@@ -663,13 +663,24 @@ Warning: Saving will discard all the entries that could not be recovered.
             }
             UserSelection::GoTo(Menu::WaitForDbxTokenCallback(url)) => {
                 debug!("UserSelection::GoTo(Menu::WaitForDbxTokenCallback)");
-                let tok_res = dropbox::retrieve_token(url).and_then(|token| {
-                    if token.is_empty() {
-                        Err(errors::RustKeylockError::GeneralError(format!("Invalid Dropbox Authentication token")))
-                    } else {
-                        dropbox::DropboxConfiguration::new(token)
+                match dropbox::retrieve_token(url) {
+                    Ok(token) => {
+                        if token.is_empty() {
+                            let _ = s.editor.show_message("Empty Dropbox Authentication token was retrieved.", vec![UserOption::ok()], MessageSeverity::Error);
+                            UserSelection::GoTo(Menu::ShowConfiguration)
+                        } else {
+                            UserSelection::GoTo(Menu::SetDbxToken(token.clone()))
+                        }
                     }
-                });
+                    Err(error) => {
+                        let _ = s.editor.show_message(&format!("Error while retrieving Dropbox Authentication token: {}", error.description()), vec![UserOption::ok()], MessageSeverity::Error);
+                        UserSelection::GoTo(Menu::ShowConfiguration)
+                    }
+                }
+            }
+            UserSelection::GoTo(Menu::SetDbxToken(token)) => {
+                debug!("UserSelection::GoTo(Menu::SetDbxToken)");
+                let tok_res = dropbox::DropboxConfiguration::new(token);
                 match tok_res {
                     Ok(dbx_conf) => {
                         s.contents_changed = true;
@@ -677,7 +688,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                         UserSelection::GoTo(Menu::ShowConfiguration)
                     }
                     Err(error) => {
-                        error!("Could not obtain the Dropbox token: {:?}", error);
+                        error!("Could not set the Dropbox token: {:?}", error);
                         let _ = s.editor.show_message("Could not obtain the Dropbox token. Please see the logs for more details.", vec![UserOption::ok()], MessageSeverity::Error);
                         UserSelection::GoTo(Menu::ShowConfiguration)
                     }

@@ -370,6 +370,8 @@ pub enum Menu {
     ShowConfiguration,
     /// Temporarily creates a web server and waits for the callback HTTP request that obtains the Dropbox token
     WaitForDbxTokenCallback(String),
+    /// Sets the dropbox token
+    SetDbxToken(String),
     /// Stay in the current menu
     Current,
 }
@@ -394,6 +396,7 @@ impl Menu {
             Menu::ExportEntries => format!("{:?}", Menu::ExportEntries),
             Menu::ShowConfiguration => format!("{:?}", Menu::ShowConfiguration),
             Menu::WaitForDbxTokenCallback(_) => "WaitForDbxTokenCallback".to_string(),
+            Menu::SetDbxToken(_) => "SetDbxToken".to_string(),
             Menu::Current => format!("{:?}", Menu::Current),
         }
     }
@@ -424,6 +427,7 @@ impl Menu {
             (ref n, None, None) if &Menu::ExportEntries.get_name() == n => Menu::ExportEntries,
             (ref n, None, None) if &Menu::ShowConfiguration.get_name() == n => Menu::ShowConfiguration,
             (ref n, None, Some(ref arg)) if &Menu::WaitForDbxTokenCallback(arg.clone()).get_name() == n => Menu::WaitForDbxTokenCallback(arg.clone()),
+            (ref n, None, Some(ref arg)) if &Menu::SetDbxToken(arg.clone()).get_name() == n => Menu::SetDbxToken(arg.clone()),
             (ref n, None, None) if &Menu::Current.get_name() == n => Menu::Current,
             (ref other, _, _) => {
                 let message = format!("Cannot create Menu from String '{}' and arguments usize: '{:?}', String: '{:?}'. Please, consider \

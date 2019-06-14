@@ -47,6 +47,7 @@ use crate::file_handler::default_toml_path;
 use crate::SystemConfiguration;
 use crate::utils;
 
+const APP_KEY:&str = "7git6ovjwtdbfvm";
 const HTTP_GET_RESPONSE_BODY: &str = r#"
 <!DOCTYPE html>
 <html>
@@ -319,7 +320,7 @@ impl DropboxConfiguration {
         let random_bytes = create_random(128);
         let b64 = base64::encode(&random_bytes);
         let random_string = utf8_percent_encode(&b64, USERINFO_ENCODE_SET).to_string();
-        format!("https://www.dropbox.com/1/oauth2/authorize?client_id=7git6ovjwtdbfvm&response_type=token&redirect_uri=http://localhost:8899&state={}", random_string)
+        format!("https://www.dropbox.com/1/oauth2/authorize?client_id={}&response_type=token&redirect_uri=http://localhost:8899&state={}", APP_KEY, random_string)
     }
 
     /// Creates a TOML table form this NextcloudConfiguration. The resulted table contains the decrypted password.
