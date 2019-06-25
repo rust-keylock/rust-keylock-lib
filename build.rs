@@ -19,5 +19,5 @@ use j4rs::{JvmBuilder, MavenArtifact};
 fn main() {
     let jvm = JvmBuilder::new().build().unwrap();
     let artifact = MavenArtifact::from("com.dropbox.core:dropbox-core-sdk:3.0.11");
-    jvm.deploy_maven(artifact).unwrap();
+    jvm.deploy_artifact(&artifact).unwrap();
 }

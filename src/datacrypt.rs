@@ -401,8 +401,7 @@ fn extract_bytes_to_decrypt(input_bytes: &[u8], salt_position: usize) -> Vec<u8>
     let bytes = Vec::from(input_bytes);
     // Check whether the salt exists between the data.
     // The salt and hash are positioned one right after the other and can generally exist either between the data, or at the end of the data.
-    // To calculate this, we need to substract from the overall bytes, 16 bytes which is the iv, 16 bytes which is the salt and 64 bytes which is the hash.
-    let salt_between_data = salt_position < (bytes.len() - 96);
+    let salt_between_data = bytes.len() >= 96 && salt_position < (bytes.len() - 96);
 
     // We need to extract the bytes to be decrypted in order to create correct toml data.
     let bytes_to_decrypt: Vec<u8> = bytes
