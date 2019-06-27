@@ -126,20 +126,25 @@ pub(crate) enum SynchronizerAction {
 ///
 /// ## Algorithm:
 ///
-/// |           version_local        |     last_sync_version    |          Action
-/// | :---------------------------:  | :----------------------: | :------------------------:
-/// | bigger than server             | equal to server          | Upload
-/// | bigger than server             | smaller than server      | Merge
-/// | bigger than server             | bigger than server       | Upload
+/// |           version_local        |     last_sync_version        |          Action
+/// | :---------------------------:  | :--------------------------: | :------------------------:
+/// | bigger than server             | equal to server              | Upload
+/// | bigger than server             | smaller than server          | Merge
+/// | bigger than server             | bigger than server           | Upload
 ///
-/// | smaller than server            | not equal to local       | Merge
-/// | smaller than server            | equal to local           | Download
+/// | smaller than server            | not equal to local           | Merge
+/// | smaller than server            | equal to local               | Download
 ///
-/// | equal to server                | equal to server          | Ignore
+/// | equal to server                | equal to server              | Ignore
 ///
-/// | equal to server                | not equal to server      | Merge
+/// | equal to server                | not equal to server          | Merge
 ///
-/// | other                          | other                    | Ignore (Error)
+/// | non existing                   | *                            | Download
+///
+/// | *                              | non existing                 | Upload
+/// |                                |(version_server non existing) |
+///
+/// | other                          | other                        | Ignore (Error)
 
 pub(crate) fn synchronizer_action(svd: &ServerVersionData,
                           filename: &str,
@@ -199,7 +204,7 @@ pub(crate) fn synchronizer_action(svd: &ServerVersionData,
             debug!("Nothing is saved locally... Need to download");
             Ok(SynchronizerAction::Download)
         }
-        (&Some(_), _, &None) => {
+        (&Some(_), &None, &None) => {
             debug!("Nothing is saved at the server... Need to upload");
             Ok(SynchronizerAction::Upload)
         }
