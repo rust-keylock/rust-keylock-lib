@@ -180,7 +180,7 @@ impl Synchronizer {
 
         let downloader = jvm.chain(jvm.clone_instance(client)?)
             .invoke("files", &[])?
-            .invoke("download", &vec![InvocationArg::from("/.version")])?
+            .invoke("download", &vec![InvocationArg::from(InvocationArg::from(format!("/{}", filename)))])?
             .collect();
 
         jvm.invoke(&downloader, "download", &vec![InvocationArg::from(os)])?;
@@ -232,7 +232,7 @@ impl Synchronizer {
             }
             SynchronizerAction::DownloadMergeAndUpload => {
                 let tmp_file_name = Self::download(filename, jvm, client)?;
-                Ok(SyncStatus::NewAvailable("dropbox", tmp_file_name))
+                Ok(SyncStatus::NewToMerge("dropbox", tmp_file_name))
             }
         }
     }

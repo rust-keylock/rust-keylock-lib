@@ -326,39 +326,6 @@ impl Synchronizer {
             })
     }
 
-    #[allow(clippy::string_lit_as_bytes)]
-    fn get(username: &str,
-           password: String,
-           server_url: &str,
-           filename: &str,
-           is_not_https: bool,
-           use_self_signed: bool) -> impl Future<Item=String, Error=RustKeylockError> {
-        let tmp_file_name = format!("tmp_{}", filename);
-        let uri = format!("{}/remote.php/dav/files/{}/.rust-keylock/{}", server_url, username, filename);
-        let mut req_builder = Request::get(uri);
-        let req_res = req_builder
-            .header(header::AUTHORIZATION, basic_auth(username, password.as_ref()))
-            .header(header::CONTENT_TYPE, "application/octet-stream")
-            .body(Body::from("".as_bytes()));
-
-        result(req_res)
-            .from_err()
-            .and_then(move |req| Self::do_request(req, is_not_https, use_self_signed))
-            .and_then(Self::resp_to_status_and_body)
-            .and_then(move |(status, body)| {
-                debug!("Response for GET: {}", status);
-                let res = {
-                    if status.is_client_error() || status.is_server_error() {
-                        Err(errors::RustKeylockError::SyncError(format!("{:?}", status)))
-                    } else {
-                        file_handler::save_bytes(&tmp_file_name, &body, false).map(|_| tmp_file_name)
-                    }
-                };
-
-                FutureResult::from(res)
-            })
-    }
-
     /// Put the file and update the property with the file creation seconds using PROPPATCH
     #[allow(clippy::too_many_arguments)]
     fn put(username: String,
@@ -432,6 +399,39 @@ impl Synchronizer {
                         Err(errors::RustKeylockError::SyncError(format!("{:?}", status)))
                     } else {
                         Ok(())
+                    }
+                };
+
+                FutureResult::from(res)
+            })
+    }
+
+    #[allow(clippy::string_lit_as_bytes)]
+    fn get(username: &str,
+           password: String,
+           server_url: &str,
+           filename: &str,
+           is_not_https: bool,
+           use_self_signed: bool) -> impl Future<Item=String, Error=RustKeylockError> {
+        let tmp_file_name = format!("tmp_{}", filename);
+        let uri = format!("{}/remote.php/dav/files/{}/.rust-keylock/{}", server_url, username, filename);
+        let mut req_builder = Request::get(uri);
+        let req_res = req_builder
+            .header(header::AUTHORIZATION, basic_auth(username, password.as_ref()))
+            .header(header::CONTENT_TYPE, "application/octet-stream")
+            .body(Body::from("".as_bytes()));
+
+        result(req_res)
+            .from_err()
+            .and_then(move |req| Self::do_request(req, is_not_https, use_self_signed))
+            .and_then(Self::resp_to_status_and_body)
+            .and_then(move |(status, body)| {
+                debug!("Response for GET: {}", status);
+                let res = {
+                    if status.is_client_error() || status.is_server_error() {
+                        Err(errors::RustKeylockError::SyncError(format!("{:?}", status)))
+                    } else {
+                        file_handler::save_bytes(&tmp_file_name, &body, false).map(|_| tmp_file_name)
                     }
                 };
 
