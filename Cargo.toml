@@ -26,7 +26,7 @@ sha2 = "0.8"
 sha3 = "0.8"
 hkdf = "0.7"
 stream-cipher = "0.3"
-bcrypt = {git = "https://github.com/astonbitecode/rust-bcrypt.git"}
+bcrypt = "0.5"
 base64 = "0.10"
 rand = "0.6"
 log = "0.4"
