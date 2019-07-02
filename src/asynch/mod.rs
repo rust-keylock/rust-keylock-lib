@@ -139,6 +139,10 @@ pub(crate) enum SynchronizerAction {
 ///
 /// | equal to server                | not equal to server      | Merge
 ///
+/// | non-existing                   | *                        | Download
+///
+/// | *                              | no information           | Merge (Try to download and then upload)
+///
 /// | other                          | other                    | Ignore (Error)
 
 pub(crate) fn synchronizer_action(svd: &ServerVersionData,
@@ -200,8 +204,8 @@ pub(crate) fn synchronizer_action(svd: &ServerVersionData,
             Ok(SynchronizerAction::Download)
         }
         (&Some(_), _, &None) => {
-            debug!("Nothing is saved at the server... Need to upload");
-            Ok(SynchronizerAction::Upload)
+            debug!("No information about server... Need to merge");
+            Ok(SynchronizerAction::DownloadMergeAndUpload)
         }
         (_, _, _) => {
             error!("The local version, server version and last sync version seem corrupted.");

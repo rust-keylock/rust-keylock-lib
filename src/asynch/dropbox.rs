@@ -47,7 +47,7 @@ use crate::file_handler::default_toml_path;
 use crate::SystemConfiguration;
 use crate::utils;
 
-const APP_KEY:&str = "7git6ovjwtdbfvm";
+const APP_KEY: &str = "7git6ovjwtdbfvm";
 const HTTP_GET_RESPONSE_BODY: &str = r#"
 <!DOCTYPE html>
 <html>
@@ -224,17 +224,30 @@ impl Synchronizer {
             }
             SynchronizerAction::Upload => {
                 info!("Uploading file on the server");
-                Self::upload(filename, jvm, client)?;
-                create_version_file_locally(version_local, saved_at_local)?;
-                Self::upload(".version", jvm, client)?;
-                let _ = file_handler::delete_file(".version");
+                Self::upload_all(filename, jvm, client, version_local, saved_at_local)?;
                 Ok(SyncStatus::UploadSuccess("dropbox"))
             }
             SynchronizerAction::DownloadMergeAndUpload => {
-                let tmp_file_name = Self::download(filename, jvm, client)?;
-                Ok(SyncStatus::NewToMerge("dropbox", tmp_file_name))
+                match Self::download(filename, jvm, client) {
+                    Ok(tmp_file_name) => {
+                        Ok(SyncStatus::NewToMerge("dropbox", tmp_file_name))
+                    }
+                    Err(_) => {
+                        info!("Could not download from the server and do the merge. The files do not exist. Uploading...");
+                        Self::upload_all(filename, jvm, client, version_local, saved_at_local)?;
+                        Ok(SyncStatus::UploadSuccess("dropbox"))
+                    }
+                }
             }
         }
+    }
+
+    fn upload_all(filename: &str, jvm: &Jvm, client: &Instance, version_local: Option<i64>, saved_at_local: Option<i64>) -> errors::Result<()> {
+        Self::upload(filename, jvm, client)?;
+        create_version_file_locally(version_local, saved_at_local)?;
+        Self::upload(".version", jvm, client)?;
+        let _ = file_handler::delete_file(".version");
+        Ok(())
     }
 
     fn send_to_channel(res: errors::Result<SyncStatus>, tx: Sender<errors::Result<SyncStatus>>) {
@@ -526,7 +539,7 @@ mod dropbox_tests {
 
     use super::*;
 
-//        #[test]
+    //        #[test]
 //    #[ignore]
     fn _invoke() {
         let (tx, _rx) = mpsc::channel();

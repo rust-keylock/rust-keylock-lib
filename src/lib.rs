@@ -432,56 +432,64 @@ impl CoreLogicHandler {
             }
             UserSelection::GoTo(Menu::Save(update_last_sync_version)) => {
                 debug!("UserSelection::GoTo(Menu::Save({}))", update_last_sync_version);
-                let _ = s.configuration.update_system_for_save(update_last_sync_version).map_err(|error| error!("Cannot update system for save: {:?}", error));
-                // Reset the filter
-                s.safe.set_filter("".to_string());
-                let rkl_content = RklContent::from((&s.safe, &s.configuration.nextcloud, &s.configuration.dropbox, &s.configuration.system));
-                let res = rkl_content.and_then(|c| file_handler::save(c, FILENAME, &s.cryptor, true));
-                match res {
-                    Ok(_) => {
-                        // Cancel any pending background tasks
-                        for handle in s.async_task_handles.values() {
-                            let _ = handle.stop();
-                        }
-                        // Clean the flag for unsaved data
-                        s.contents_changed = false;
-                        if s.configuration.nextcloud.is_filled() {
-                            // Start a new background async task
-                            let (handle, nextcloud_sync_status_rx) = spawn_nextcloud_async_task(FILENAME, &s.configuration, &s.async_task_handles);
-                            s.async_task_handles.insert("nextcloud", handle);
-                            s.editor.update_nextcloud_rx(Some(nextcloud_sync_status_rx));
-                        }
-                        if s.configuration.dropbox.is_filled() {
-                            // Start a new background async task
-                            let (handle, dropbox_sync_status_rx) = spawn_dropbox_async_task(FILENAME, &s.configuration, &s.async_task_handles);
-                            s.async_task_handles.insert("dropbox", handle);
-                            s.editor.update_dropbox_rx(Some(dropbox_sync_status_rx));
-                        }
-                        if !update_last_sync_version {
-                            let _ = s.editor.show_message("Encrypted and saved successfully!", vec![UserOption::ok()], MessageSeverity::default());
-                        }
-                    }
-                    Err(error) => {
-                        let _ = s.editor.show_message("Could not save...", vec![UserOption::ok()], MessageSeverity::Error);
-                        error!("Could not save... {:?}", error);
-                    }
-                };
-                if s.props.legacy_handling() || s.props.bcrypt_cost_v8() {
-                    info!("Changing handling from legacy to current");
-                    s.props.set_legacy_handling(false);
-                    s.props.set_bcrypt_cost_v8(false);
-                    match file_handler::save_props(&s.props, PROPS_FILENAME) {
-                        Ok(_) => { /* Ignore */ }
-                        Err(error) => {
-                            let _ = s.editor.show_message("Could not update the properties file to non-legacy...", vec![UserOption::ok()], MessageSeverity::Error);
-                            error!("Could not update the properties file to non-legacy... {:?}", error);
-                        }
-                    };
-                }
-                if update_last_sync_version {
+                if s.configuration.nextcloud.is_filled() &&
+                    s.configuration.dropbox.is_filled() {
+                    error!("Cannot save because both Nextcloud and Dropbox are configured");
+                    s.editor.show_message("Having both Nextcloud and Dropbox configured may lead to unexpected state and currently is not allowed.\
+                    Please configure ony one of them.", vec![UserOption::ok()], MessageSeverity::Error);
                     UserSelection::GoTo(Menu::Current)
                 } else {
-                    UserSelection::GoTo(Menu::Main)
+                    let _ = s.configuration.update_system_for_save(update_last_sync_version).map_err(|error| error!("Cannot update system for save: {:?}", error));
+                    // Reset the filter
+                    s.safe.set_filter("".to_string());
+                    let rkl_content = RklContent::from((&s.safe, &s.configuration.nextcloud, &s.configuration.dropbox, &s.configuration.system));
+                    let res = rkl_content.and_then(|c| file_handler::save(c, FILENAME, &s.cryptor, true));
+                    match res {
+                        Ok(_) => {
+                            // Cancel any pending background tasks
+                            for handle in s.async_task_handles.values() {
+                                let _ = handle.stop();
+                            }
+                            // Clean the flag for unsaved data
+                            s.contents_changed = false;
+                            if s.configuration.nextcloud.is_filled() {
+                                // Start a new background async task
+                                let (handle, nextcloud_sync_status_rx) = spawn_nextcloud_async_task(FILENAME, &s.configuration, &s.async_task_handles);
+                                s.async_task_handles.insert("nextcloud", handle);
+                                s.editor.update_nextcloud_rx(Some(nextcloud_sync_status_rx));
+                            }
+                            if s.configuration.dropbox.is_filled() {
+                                // Start a new background async task
+                                let (handle, dropbox_sync_status_rx) = spawn_dropbox_async_task(FILENAME, &s.configuration, &s.async_task_handles);
+                                s.async_task_handles.insert("dropbox", handle);
+                                s.editor.update_dropbox_rx(Some(dropbox_sync_status_rx));
+                            }
+                            if !update_last_sync_version {
+                                let _ = s.editor.show_message("Encrypted and saved successfully!", vec![UserOption::ok()], MessageSeverity::default());
+                            }
+                        }
+                        Err(error) => {
+                            let _ = s.editor.show_message("Could not save...", vec![UserOption::ok()], MessageSeverity::Error);
+                            error!("Could not save... {:?}", error);
+                        }
+                    };
+                    if s.props.legacy_handling() || s.props.bcrypt_cost_v8() {
+                        info!("Changing handling from legacy to current");
+                        s.props.set_legacy_handling(false);
+                        s.props.set_bcrypt_cost_v8(false);
+                        match file_handler::save_props(&s.props, PROPS_FILENAME) {
+                            Ok(_) => { /* Ignore */ }
+                            Err(error) => {
+                                let _ = s.editor.show_message("Could not update the properties file to non-legacy...", vec![UserOption::ok()], MessageSeverity::Error);
+                                error!("Could not update the properties file to non-legacy... {:?}", error);
+                            }
+                        };
+                    }
+                    if update_last_sync_version {
+                        UserSelection::GoTo(Menu::Current)
+                    } else {
+                        UserSelection::GoTo(Menu::Main)
+                    }
                 }
             }
             UserSelection::GoTo(Menu::Exit) => {
@@ -638,24 +646,32 @@ Warning: Saving will discard all the entries that could not be recovered.
             }
             UserSelection::UpdateConfiguration(new_conf) => {
                 debug!("UserSelection::UpdateConfiguration");
-                s.configuration.nextcloud = new_conf.nextcloud;
-                if s.configuration.nextcloud.is_filled() {
-                    debug!("A valid configuration for Nextcloud synchronization was found after being updated by the User. Spawning \
+                if new_conf.nextcloud.is_filled() &&
+                    new_conf.dropbox.is_filled() {
+                    error!("Cannot update the configuration because both Nextcloud and Dropbox are configured");
+                    s.editor.show_message("Having both Nextcloud and Dropbox configured may lead to unexpected state and currently is not allowed.\
+                    Please configure ony one of them.", vec![UserOption::ok()], MessageSeverity::Error);
+                    UserSelection::GoTo(Menu::Current)
+                } else {
+                    s.configuration.nextcloud = new_conf.nextcloud;
+                    if s.configuration.nextcloud.is_filled() {
+                        debug!("A valid configuration for Nextcloud synchronization was found after being updated by the User. Spawning \
                             nextcloud sync task");
-                    let (handle, nextcloud_sync_status_rx) = spawn_nextcloud_async_task(FILENAME, &s.configuration, &s.async_task_handles);
-                    s.async_task_handles.insert("nextcloud", handle);
-                    s.editor.update_nextcloud_rx(Some(nextcloud_sync_status_rx));
-                    s.contents_changed = true;
-                }
-                if s.configuration.dropbox.is_filled() {
-                    debug!("A valid configuration for dropbox synchronization was found after being updated by the User. Spawning \
+                        let (handle, nextcloud_sync_status_rx) = spawn_nextcloud_async_task(FILENAME, &s.configuration, &s.async_task_handles);
+                        s.async_task_handles.insert("nextcloud", handle);
+                        s.editor.update_nextcloud_rx(Some(nextcloud_sync_status_rx));
+                        s.contents_changed = true;
+                    }
+                    if s.configuration.dropbox.is_filled() {
+                        debug!("A valid configuration for dropbox synchronization was found after being updated by the User. Spawning \
                             dropbox sync task");
-                    let (handle, dropbox_sync_status_rx) = spawn_dropbox_async_task(FILENAME, &s.configuration, &s.async_task_handles);
-                    s.async_task_handles.insert("dropbox", handle);
-                    s.editor.update_dropbox_rx(Some(dropbox_sync_status_rx));
-                    s.contents_changed = true;
+                        let (handle, dropbox_sync_status_rx) = spawn_dropbox_async_task(FILENAME, &s.configuration, &s.async_task_handles);
+                        s.async_task_handles.insert("dropbox", handle);
+                        s.editor.update_dropbox_rx(Some(dropbox_sync_status_rx));
+                        s.contents_changed = true;
+                    }
+                    UserSelection::GoTo(Menu::Main)
                 }
-                UserSelection::GoTo(Menu::Main)
             }
             UserSelection::AddToClipboard(content) => {
                 debug!("UserSelection::AddToClipboard");
@@ -1171,7 +1187,7 @@ mod unit_tests {
             "pw".to_string(),
             false).unwrap();
 
-        let dbx_conf = DropboxConfiguration::new("token".to_string()).unwrap();
+        let dbx_conf = DropboxConfiguration::default();
 
         let new_conf = AllConfigurations::new(nc_conf, dbx_conf);
 
