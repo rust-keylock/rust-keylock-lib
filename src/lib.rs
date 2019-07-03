@@ -436,7 +436,7 @@ impl CoreLogicHandler {
                     s.configuration.dropbox.is_filled() {
                     error!("Cannot save because both Nextcloud and Dropbox are configured");
                     s.editor.show_message("Having both Nextcloud and Dropbox configured may lead to unexpected state and currently is not allowed.\
-                    Please configure ony one of them.", vec![UserOption::ok()], MessageSeverity::Error);
+                    Please configure only one of them.", vec![UserOption::ok()], MessageSeverity::Error);
                     UserSelection::GoTo(Menu::Current)
                 } else {
                     let _ = s.configuration.update_system_for_save(update_last_sync_version).map_err(|error| error!("Cannot update system for save: {:?}", error));
@@ -650,7 +650,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                     new_conf.dropbox.is_filled() {
                     error!("Cannot update the configuration because both Nextcloud and Dropbox are configured");
                     s.editor.show_message("Having both Nextcloud and Dropbox configured may lead to unexpected state and currently is not allowed.\
-                    Please configure ony one of them.", vec![UserOption::ok()], MessageSeverity::Error);
+                    Please configure only one of them.", vec![UserOption::ok()], MessageSeverity::Error);
                     UserSelection::GoTo(Menu::Current)
                 } else {
                     s.configuration.nextcloud = new_conf.nextcloud;
