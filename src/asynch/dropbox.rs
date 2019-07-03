@@ -31,7 +31,7 @@ use http::StatusCode;
 use hyper::{self, Body, Request, Response, Server};
 use hyper::rt::Future;
 use hyper::service::service_fn_ok;
-use j4rs::{Instance, InvocationArg, Jvm, JvmBuilder};
+use j4rs::{Instance, InvocationArg, Jvm};
 use log::*;
 use percent_encoding::{percent_decode, USERINFO_ENCODE_SET, utf8_percent_encode};
 use toml;
@@ -134,7 +134,7 @@ impl Synchronizer {
     }
 
     fn do_execute(&self) -> errors::Result<SyncStatus> {
-        let jvm = JvmBuilder::new().build().unwrap();
+        let jvm = utils::create_jvm().unwrap();
 
         let request_config = jvm.create_instance(
             "com.dropbox.core.DbxRequestConfig",
@@ -538,6 +538,7 @@ mod dropbox_tests {
     use crate::file_handler;
 
     use super::*;
+    use j4rs::JvmBuilder;
 
     //        #[test]
 //    #[ignore]

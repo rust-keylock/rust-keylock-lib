@@ -15,9 +15,23 @@
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
 
 use crate::errors;
+use j4rs::{Jvm, JvmBuilder};
 
 pub(crate) fn to_result<T>(opt: Option<T>) -> errors::Result<T> {
     opt.ok_or(errors::RustKeylockError::GeneralError("Value was not found".to_string()))
+}
+
+#[cfg(not(target_os = "android"))]
+pub(crate) fn create_jvm() -> errors::Result<Jvm> {
+    Ok(JvmBuilder::new().build()?)
+}
+
+#[cfg(target_os = "android")]
+pub(crate) fn create_jvm() -> errors::Result<Jvm> {
+    Ok(JvmBuilder::new()
+        .detach_thread_on_drop(false)
+        .with_no_implicit_classpath()
+        .build()?)
 }
 
 #[cfg(test)]
