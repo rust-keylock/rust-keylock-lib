@@ -26,16 +26,16 @@ The project has not yet received any formal / official security reviews. Use it 
  * The data is locked with a user-defined master password, using _bcrypt_ password hashing
  * Encryption using _AES_ with _CTR_ mode
  * Data integrity checks with SHA3 (Keccak)
- * Encrypted bytes blending
  * During runtime, the passwords are kept encrypted in memory
  * During runtime, the encryption keys are stored in safe, non-swappable memory
  * Upon saving, the encryption keys change, even if the user master password remains the same. This results to different encrypted products, even if the data that is being encrypted is the same.
 
 ### Data Availability
 
+ * Synchronization over Dropbox
  * Synchronization over Nextcloud or Owncloud
  * Export/import encrypted passwords to/from the filesystem
- * Automatic backups
+ * Automatic local backups
  
 ### Application Portability
 
