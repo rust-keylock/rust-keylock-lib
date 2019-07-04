@@ -17,7 +17,10 @@
 use j4rs::{JvmBuilder, MavenArtifact};
 
 fn main() {
-    let jvm = JvmBuilder::new().build().unwrap();
-    let artifact = MavenArtifact::from("com.dropbox.core:dropbox-core-sdk:3.0.11");
-    jvm.deploy_artifact(&artifact).unwrap();
+    if let Ok(jvm) = JvmBuilder::new().build() {
+        let artifact = MavenArtifact::from("com.dropbox.core:dropbox-core-sdk:3.0.11");
+        jvm.deploy_artifact(&artifact).unwrap();
+    } else {
+        println!("cargo:warning=Maven dependencies could not be downloaded because the Jvm could not be initialized in the build script...");
+    }
 }
