@@ -69,6 +69,8 @@ use self::asynch::AsyncEditorFacade;
 pub use self::asynch::dropbox;
 pub use self::asynch::nextcloud;
 
+pub use file_handler::default_rustkeylock_location;
+
 mod file_handler;
 mod errors;
 mod protected;
