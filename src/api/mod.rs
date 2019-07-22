@@ -376,72 +376,6 @@ pub enum Menu {
     Current,
 }
 
-impl Menu {
-    /// Returns the name of a `Menu`.
-    pub fn get_name(&self) -> String {
-        match *self {
-            Menu::TryPass(b) => format!("{:?}", Menu::TryPass(b)),
-            Menu::ChangePass => format!("{:?}", Menu::ChangePass),
-            Menu::Main => format!("{:?}", Menu::Main),
-            Menu::EntriesList(_) => "EntriesList".to_string(),
-            Menu::NewEntry => format!("{:?}", Menu::NewEntry),
-            Menu::ShowEntry(_) => "ShowEntry".to_string(),
-            Menu::EditEntry(_) => "EditEntry".to_string(),
-            Menu::DeleteEntry(_) => "DeleteEntry".to_string(),
-            Menu::Save(b) => format!("{:?}", Menu::Save(b)),
-            Menu::Exit => format!("{:?}", Menu::Exit),
-            Menu::ForceExit => format!("{:?}", Menu::ForceExit),
-            Menu::TryFileRecovery => format!("{:?}", Menu::TryFileRecovery),
-            Menu::ImportEntries => format!("{:?}", Menu::ImportEntries),
-            Menu::ExportEntries => format!("{:?}", Menu::ExportEntries),
-            Menu::ShowConfiguration => format!("{:?}", Menu::ShowConfiguration),
-            Menu::WaitForDbxTokenCallback(_) => "WaitForDbxTokenCallback".to_string(),
-            Menu::SetDbxToken(_) => "SetDbxToken".to_string(),
-            Menu::Current => format!("{:?}", Menu::Current),
-        }
-    }
-
-    /// Parses a String and creates a `Menu`.
-    ///
-    /// Menus that have additional `usize` and `String` arguments exist. Thus the existence of the `Option`al arguments during parsing.
-    pub fn from(name: String, opt_num: Option<usize>, opt_string: Option<String>) -> Menu {
-        debug!("Creating Menu from name {} and additional arguments usize: {:?}, String: {:?}", &name, &opt_num, &opt_string);
-        match (name, opt_num, opt_string.clone()) {
-            (ref n, None, None) if &Menu::TryPass(false).get_name() == n => Menu::TryPass(false),
-            (ref n, None, None) if &Menu::TryPass(true).get_name() == n => Menu::TryPass(true),
-            (ref n, None, None) if "TryPass" == n => Menu::TryPass(false),
-            (ref n, None, None) if &Menu::ChangePass.get_name() == n => Menu::ChangePass,
-            (ref n, None, None) if &Menu::Main.get_name() == n => Menu::Main,
-            (ref n, None, Some(ref arg)) if &Menu::EntriesList(arg.clone()).get_name() == n => Menu::EntriesList(arg.clone()),
-            (ref n, None, None) if &Menu::NewEntry.get_name() == n => Menu::NewEntry,
-            (ref n, Some(arg), None) if &Menu::ShowEntry(arg).get_name() == n => Menu::ShowEntry(arg),
-            (ref n, Some(arg), None) if &Menu::EditEntry(arg).get_name() == n => Menu::EditEntry(arg),
-            (ref n, Some(arg), None) if &Menu::DeleteEntry(arg).get_name() == n => Menu::DeleteEntry(arg),
-            (ref n, None, None) if &Menu::Save(false).get_name() == n => Menu::Save(false),
-            (ref n, None, None) if &Menu::Save(true).get_name() == n => Menu::Save(true),
-            (ref n, None, None) if "Save" == n => Menu::Save(false),
-            (ref n, None, None) if &Menu::Exit.get_name() == n => Menu::Exit,
-            (ref n, None, None) if &Menu::ForceExit.get_name() == n => Menu::ForceExit,
-            (ref n, None, None) if &Menu::TryFileRecovery.get_name() == n => Menu::TryFileRecovery,
-            (ref n, None, None) if &Menu::ImportEntries.get_name() == n => Menu::ImportEntries,
-            (ref n, None, None) if &Menu::ExportEntries.get_name() == n => Menu::ExportEntries,
-            (ref n, None, None) if &Menu::ShowConfiguration.get_name() == n => Menu::ShowConfiguration,
-            (ref n, None, Some(ref arg)) if &Menu::WaitForDbxTokenCallback(arg.clone()).get_name() == n => Menu::WaitForDbxTokenCallback(arg.clone()),
-            (ref n, None, Some(ref arg)) if &Menu::SetDbxToken(arg.clone()).get_name() == n => Menu::SetDbxToken(arg.clone()),
-            (ref n, None, None) if &Menu::Current.get_name() == n => Menu::Current,
-            (ref other, _, _) => {
-                let message = format!("Cannot create Menu from String '{}' and arguments usize: '{:?}', String: '{:?}'. Please, consider \
-                                       opening a bug to the developers.",
-                                      other,
-                                      opt_num,
-                                      opt_string);
-                error!("{}", message);
-                panic!(message);
-            }
-        }
-    }
-}
-
 /// Represents a User selection that is returned after showing a `Menu`.
 #[derive(Debug, PartialEq, Clone)]
 pub enum UserSelection {
@@ -884,56 +818,6 @@ mod api_unit_tests {
         let props = props_opt.unwrap();
         let new_table = props.to_table();
         assert!(table == &new_table);
-    }
-
-    #[test]
-    fn menu_get_name() {
-        let m1 = Menu::TryPass(false).get_name();
-        assert!(m1 == "TryPass(false)");
-        let m2 = Menu::EntriesList("".to_string()).get_name();
-        assert!(m2 == "EntriesList");
-        let m3 = Menu::EditEntry(33).get_name();
-        assert!(m3 == "EditEntry");
-        let m4 = Menu::DeleteEntry(1).get_name();
-        assert!(m4 == "DeleteEntry");
-        let m5 = Menu::NewEntry.get_name();
-        assert!(m5 == "NewEntry");
-        let m6 = Menu::ForceExit.get_name();
-        assert!(m6 == "ForceExit");
-        let m7 = Menu::ChangePass.get_name();
-        assert!(m7 == "ChangePass");
-        let m8 = Menu::Save(false).get_name();
-        assert!(m8 == "Save(false)");
-        let m9 = Menu::Exit.get_name();
-        assert!(m9 == "Exit");
-        let m10 = Menu::Main.get_name();
-        assert!(m10 == "Main");
-        let m11 = Menu::Current.get_name();
-        assert!(m11 == "Current");
-        let m12 = Menu::EditEntry(1).get_name();
-        assert!(m12 == "EditEntry");
-        let m13 = Menu::EntriesList("".to_owned()).get_name();
-        assert!(m13 == "EntriesList");
-        let m14 = Menu::ExportEntries.get_name();
-        assert!(m14 == "ExportEntries");
-        let m15 = Menu::ImportEntries.get_name();
-        assert!(m15 == "ImportEntries");
-        let m16 = Menu::ShowConfiguration.get_name();
-        assert!(m16 == "ShowConfiguration");
-        let m17 = Menu::ShowEntry(1).get_name();
-        assert!(m17 == "ShowEntry");
-        let m18 = Menu::TryFileRecovery.get_name();
-        assert!(m18 == "TryFileRecovery");
-    }
-
-    #[test]
-    fn menu_from_name() {
-        let m1 = Menu::from("TryPass(false)".to_string(), None, None);
-        assert!(m1 == Menu::TryPass(false));
-        let m2 = Menu::from("EntriesList".to_string(), None, Some("".to_string()));
-        assert!(m2 == Menu::EntriesList("".to_string()));
-        let m3 = Menu::from("ShowEntry".to_string(), Some(1), None);
-        assert!(m3 == Menu::ShowEntry(1));
     }
 
     #[test]
