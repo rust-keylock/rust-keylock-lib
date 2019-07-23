@@ -96,7 +96,7 @@ const HTTP_POST_RESPONSE_BODY: &str = r#"
 "#;
 
 /// A Dropbox synchronizer
-pub struct Synchronizer {
+pub(crate) struct Synchronizer {
     /// The configuration needed for this synchronizer
     conf: DropboxConfiguration,
     /// The TX to notify about sync status
@@ -337,14 +337,14 @@ impl DropboxConfiguration {
     }
 
     /// Creates a TOML table form this NextcloudConfiguration. The resulted table contains the decrypted password.
-    pub fn to_table(&self) -> errors::Result<Table> {
+    pub(crate) fn to_table(&self) -> errors::Result<Table> {
         let mut table = Table::new();
         table.insert("token".to_string(), toml::Value::String(self.decrypted_token()?));
         Ok(table)
     }
 
     /// Creates a NextcloudConfiguration from a TOML table. The password gets encrypted once the `new` function is called.
-    pub fn from_table(table: &Table) -> Result<DropboxConfiguration, errors::RustKeylockError> {
+    pub(crate) fn from_table(table: &Table) -> Result<DropboxConfiguration, errors::RustKeylockError> {
         let token = table.get("token").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
         match token {
             Some(tok) => DropboxConfiguration::new(tok),
@@ -353,7 +353,7 @@ impl DropboxConfiguration {
     }
 
     /// Returns true is the configuration contains the needed values to operate correctly
-    pub fn is_filled(&self) -> bool {
+    pub(crate) fn is_filled(&self) -> bool {
         let res = self.decrypted_token();
         (res.is_ok() && res.unwrap() != "")
     }

@@ -21,16 +21,17 @@ use log::*;
 use toml;
 use toml::value::Table;
 
-use super::{datacrypt, errors, nextcloud, dropbox};
+use crate::asynch::dropbox::DropboxConfiguration;
+use crate::asynch::nextcloud::NextcloudConfiguration;
+
+use super::{datacrypt, dropbox, errors, nextcloud};
 
 use self::safe::Safe;
-use crate::asynch::nextcloud::NextcloudConfiguration;
-use crate::asynch::dropbox::DropboxConfiguration;
 
 pub mod safe;
 
 /// Struct to use for retrieving and saving data from/to the file
-pub struct RklContent {
+pub(crate) struct RklContent {
     pub entries: Vec<Entry>,
     pub nextcloud_conf: nextcloud::NextcloudConfiguration,
     pub dropbox_conf: dropbox::DropboxConfiguration,
@@ -66,7 +67,7 @@ impl RklContent {
 
 /// Keeps the Configuration
 #[derive(Debug, PartialEq, Clone)]
-pub struct RklConfiguration {
+pub(crate) struct RklConfiguration {
     pub system: SystemConfiguration,
     pub nextcloud: nextcloud::NextcloudConfiguration,
     pub dropbox: dropbox::DropboxConfiguration,
@@ -248,6 +249,17 @@ impl Entry {
         };
         Entry::new(self.name.clone(), self.url.clone(), self.user.clone(), decrypted_password, self.desc.clone())
     }
+}
+
+/// Indicates to the Editors the way how an entry should be presented to the user
+#[derive(Debug)]
+pub enum EntryPresentationType {
+    /// Only View an Entry.
+    View,
+    /// Show an entry before it gets deleted.
+    Delete,
+    /// Edit an entry
+    Edit,
 }
 
 /// A struct that allows storing general configuration values.
@@ -624,7 +636,10 @@ impl ToString for MessageSeverity {
 pub(crate) enum UiCommand {
     ShowPasswordEnter,
     ShowChangePassword,
-    ShowMenu(Menu, Safe, RklConfiguration),
+    ShowMenu(Menu),
+    ShowEntries(Vec<Entry>, String),
+    ShowEntry(Entry, usize, EntryPresentationType),
+    ShowConfiguration(NextcloudConfiguration, DropboxConfiguration),
     Exit(bool),
     ShowMessage(String, Vec<UserOption>, MessageSeverity),
 }
@@ -633,10 +648,10 @@ pub(crate) enum UiCommand {
 mod api_unit_tests {
     use toml;
 
+    use crate::api::AllConfigurations;
     use crate::datacrypt::EntryPasswordCryptor;
 
     use super::{Entry, Menu, UserOption, UserSelection};
-    use crate::api::AllConfigurations;
 
     #[test]
     fn entry_from_table_success() {

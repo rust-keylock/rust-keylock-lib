@@ -14,17 +14,22 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
 
+use std::str::FromStr;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread;
-use std::time::{self, Duration, SystemTime, Instant};
-use std::str::FromStr;
+use std::time::{self, Duration, Instant, SystemTime};
 
-use tokio::prelude::*;
-use tokio::prelude::future::{ok, Loop, loop_fn};
-use tokio::timer::Delay;
 use log::*;
+use tokio::prelude::*;
+use tokio::prelude::future::{Loop, loop_fn, ok};
+use tokio::timer::Delay;
 
-use super::{Editor, Menu, MessageSeverity, Props, RklConfiguration, Safe, UserOption, UserSelection};
+use crate::api::EntryPresentationType;
+use crate::asynch::dropbox::DropboxConfiguration;
+use crate::asynch::nextcloud::NextcloudConfiguration;
+use crate::Entry;
+
+use super::{Editor, Menu, MessageSeverity, Props, UserOption, UserSelection};
 use super::api::UiCommand;
 use super::errors;
 
@@ -146,11 +151,11 @@ pub(crate) enum SynchronizerAction {
 /// | other                          | other                    | Ignore (Error)
 
 pub(crate) fn synchronizer_action(svd: &ServerVersionData,
-                          filename: &str,
-                          saved_at_local: &Option<i64>,
-                          version_local: &Option<i64>,
-                          last_sync_version: &Option<i64>)
-                          -> errors::Result<SynchronizerAction> {
+                                  filename: &str,
+                                  saved_at_local: &Option<i64>,
+                                  version_local: &Option<i64>,
+                                  last_sync_version: &Option<i64>)
+                                  -> errors::Result<SynchronizerAction> {
     debug!("The file '{}' on the server was saved at {} with version {}",
            filename,
            svd.last_modified,
@@ -392,8 +397,23 @@ impl Editor for AsyncEditorFacade {
         self.receive()
     }
 
-    fn show_menu(&self, menu: &Menu, safe: &Safe, configuration: &RklConfiguration) -> UserSelection {
-        self.send(UiCommand::ShowMenu(menu.clone(), safe.clone(), configuration.clone()));
+    fn show_menu(&self, menu: &Menu) -> UserSelection {
+        self.send(UiCommand::ShowMenu(menu.clone()));
+        self.receive()
+    }
+
+    fn show_entries(&self, entries: Vec<Entry>, filter: String) -> UserSelection {
+        self.send(UiCommand::ShowEntries(entries, filter));
+        self.receive()
+    }
+
+    fn show_entry(&self, entry: Entry, index: usize, presentation_type: EntryPresentationType) -> UserSelection {
+        self.send(UiCommand::ShowEntry(entry, index, presentation_type));
+        self.receive()
+    }
+
+    fn show_configuration(&self, nextcloud: NextcloudConfiguration, dropbox: DropboxConfiguration) -> UserSelection {
+        self.send(UiCommand::ShowConfiguration(nextcloud, dropbox));
         self.receive()
     }
 
@@ -456,17 +476,19 @@ pub(crate) enum SyncStatus {
 
 #[cfg(test)]
 mod async_tests {
+    use std::fs::{self, File};
     use std::sync::mpsc::{self, Receiver, Sender};
+    use std::thread;
     use std::time::{self, SystemTime};
+
     use tokio::prelude::*;
     use tokio::prelude::future::{lazy, ok};
-    use std::thread;
-    use std::fs::{self, File};
 
-    use super::super::errors;
-    use super::super::{UserOption, MessageSeverity, UserSelection, Editor, UiCommand};
-    use super::*;
     use crate::file_handler;
+
+    use super::*;
+    use super::super::{Editor, MessageSeverity, UiCommand, UserOption, UserSelection};
+    use super::super::errors;
 
     #[test]
     fn facade_show_change_password() {

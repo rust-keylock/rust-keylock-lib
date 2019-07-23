@@ -14,12 +14,14 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
 
-use clipboard::{ClipboardContext, ClipboardProvider};
-use crate::{Editor, errors};
-use crate::api::{Menu, MessageSeverity, UserOption, UserSelection};
-use log::*;
 use std;
 use std::error::Error;
+
+use clipboard::{ClipboardContext, ClipboardProvider};
+use log::*;
+
+use crate::{Editor, errors};
+use crate::api::{Menu, MessageSeverity, UserOption, UserSelection};
 
 pub(crate) fn add_to_clipboard(content: String, editor: &Editor) -> UserSelection {
     let res = match ClipboardProvider::new() as Result<ClipboardContext, Box<std::error::Error>> {
@@ -47,11 +49,12 @@ pub(crate) fn add_to_clipboard(content: String, editor: &Editor) -> UserSelectio
 
 #[cfg(test)]
 mod selection_handling_unit_tests {
-    use clipboard::{ClipboardContext, ClipboardProvider};
-    use crate::api::{Menu, MessageSeverity, RklConfiguration, UserOption, UserSelection};
-    use crate::api::safe::Safe;
-    use crate::Editor;
     use std;
+
+    use clipboard::{ClipboardContext, ClipboardProvider};
+
+    use crate::{DropboxConfiguration, Editor, Entry, EntryPresentationType, NextcloudConfiguration};
+    use crate::api::{Menu, MessageSeverity, UserOption, UserSelection};
 
     #[test]
     fn add_to_clipboard_success() {
@@ -85,11 +88,23 @@ mod selection_handling_unit_tests {
             UserSelection::Ack
         }
 
-        fn show_menu(&self, _: &Menu, _: &Safe, _: &RklConfiguration) -> UserSelection {
+        fn show_menu(&self, _: &Menu) -> UserSelection {
+            UserSelection::Ack
+        }
+
+        fn show_entries(&self, _: Vec<Entry>, _: String) -> UserSelection {
+            UserSelection::Ack
+        }
+
+        fn show_entry(&self, _: Entry, _: usize, _: EntryPresentationType) -> UserSelection {
             UserSelection::Ack
         }
 
         fn exit(&self, _: bool) -> UserSelection {
+            UserSelection::Ack
+        }
+
+        fn show_configuration(&self, _: NextcloudConfiguration, _: DropboxConfiguration) -> UserSelection {
             UserSelection::Ack
         }
 

@@ -37,7 +37,7 @@ use super::datacrypt::{BcryptAes, Cryptor};
 use super::errors::{self, RustKeylockError};
 use crate::datacrypt::BCRYPT_COST;
 
-pub fn create_bcryptor(filename: &str,
+pub(crate) fn create_bcryptor(filename: &str,
                        password: String,
                        salt_position: usize,
                        reinitialize_randoms: bool,
@@ -110,19 +110,19 @@ pub fn create_bcryptor(filename: &str,
 }
 
 /// Returns false if the passwords file exists in the Filesystem, true otherwise
-pub fn is_first_run(filename: &str) -> bool {
+pub(crate) fn is_first_run(filename: &str) -> bool {
     let full_path = default_toml_path(filename);
     !file_exists(&full_path)
 }
 
 /// Returns true if the file exists in the Filesystem, flase otherwise
-pub fn file_exists(file: &PathBuf) -> bool {
+pub(crate) fn file_exists(file: &PathBuf) -> bool {
     File::open(file).is_ok()
 }
 
 /// Loads a toml file with the specified name
 /// If the file does not exist, it is created.
-pub fn load(filename: &str, cryptor: &Cryptor, use_default_location: bool) -> Result<RklContent, RustKeylockError> {
+pub(crate) fn load(filename: &str, cryptor: &Cryptor, use_default_location: bool) -> Result<RklContent, RustKeylockError> {
     debug!("Loading {}", filename);
     let full_path = if use_default_location {
         default_toml_path(filename)
@@ -150,14 +150,14 @@ pub fn load(filename: &str, cryptor: &Cryptor, use_default_location: bool) -> Re
 }
 
 /// Creates a `File` using a given file name, searching in the default directory
-pub fn get_file(filename: &str) -> errors::Result<File> {
+pub(crate) fn get_file(filename: &str) -> errors::Result<File> {
     let full_path = default_toml_path(filename);
     debug!("Loading File from {:?}", full_path);
     Ok(File::open(full_path)?)
 }
 
 /// Saves a `File` with a given name in the default directory.
-pub fn save_bytes(filename: &str, bytes: &[u8], do_backup: bool) -> errors::Result<()> {
+pub(crate) fn save_bytes(filename: &str, bytes: &[u8], do_backup: bool) -> errors::Result<()> {
     let full_path = default_toml_path(filename);
 
     if do_backup && file_exists(&full_path) {
@@ -172,7 +172,7 @@ pub fn save_bytes(filename: &str, bytes: &[u8], do_backup: bool) -> errors::Resu
 }
 
 /// Backs up a File with a given name to the default backup directory.
-pub fn backup(filename: &str) -> errors::Result<()> {
+pub(crate) fn backup(filename: &str) -> errors::Result<()> {
     let mut dest_path = default_rustkeylock_location();
     dest_path.push("backups");
     let _ = fs::create_dir(&dest_path);
@@ -194,7 +194,7 @@ pub fn backup(filename: &str) -> errors::Result<()> {
 
 /// Cleans the backup directory in order to always contain 10 files.
 /// The number 10 is currently hard-coded, but will be part of the properties in the future.
-pub fn clean_backup_dir() -> errors::Result<()> {
+pub(crate) fn clean_backup_dir() -> errors::Result<()> {
     // TODO: Use the properties to take the value 10
     let max_files_in_backup_dir = 10;
     let mut backup_path = default_rustkeylock_location();
@@ -251,7 +251,7 @@ impl FileAndPath {
 
 /// Replaces a target `File` with a source one, deleting the source file. Similarly with the mv command.
 /// The source and target are names of files in the default directory.
-pub fn replace(source: &str, target: &str) -> errors::Result<()> {
+pub(crate) fn replace(source: &str, target: &str) -> errors::Result<()> {
     let mut source_file = get_file(source)?;
     let mut file_bytes: Vec<_> = Vec::new();
     source_file.read_to_end(&mut file_bytes)?;
@@ -270,7 +270,7 @@ pub(crate) fn delete_file(name: &str) -> errors::Result<()> {
 
 /// Loads a toml file with the specified name.
 /// If the file does not exist, it is created.
-pub fn load_properties(filename: &str) -> Result<Props, RustKeylockError> {
+pub(crate) fn load_properties(filename: &str) -> Result<Props, RustKeylockError> {
     debug!("Loading Properties from {}", filename);
     let full_path = default_toml_path(filename);
     debug!("Full Path to load properties from: {:?}", full_path);
@@ -292,7 +292,7 @@ pub fn load_properties(filename: &str) -> Result<Props, RustKeylockError> {
 }
 
 /// Attempts to recover a toml file
-pub fn recover(filename: &str, cryptor: &Cryptor) -> Result<Vec<Entry>, RustKeylockError> {
+pub(crate) fn recover(filename: &str, cryptor: &Cryptor) -> Result<Vec<Entry>, RustKeylockError> {
     info!("Trying to recover {}", filename);
     let full_path = default_toml_path(filename);
     info!("Full path of file to recover {:?}", full_path);
@@ -310,7 +310,7 @@ pub fn recover(filename: &str, cryptor: &Cryptor) -> Result<Vec<Entry>, RustKeyl
 
 /// Returns a PathBuf representing the path of the default location of the toml file.
 /// home/$USER/.rust-keylock/rk.toml
-pub fn default_toml_path(filename: &str) -> PathBuf {
+pub(crate) fn default_toml_path(filename: &str) -> PathBuf {
     let mut default_rustkeylock_location = default_rustkeylock_location();
     default_rustkeylock_location.push(filename);
     default_rustkeylock_location
@@ -339,7 +339,7 @@ pub fn default_rustkeylock_location() -> PathBuf {
 }
 
 #[cfg(target_os = "android")]
-pub fn create_certs_path() -> errors::Result<PathBuf> {
+pub(crate) fn create_certs_path() -> errors::Result<PathBuf> {
     let mut rust_keylock_home = default_rustkeylock_location();
     rust_keylock_home.push("/sdcard/Download/rust-keylock/etc/ssl/certs");
     let _ = fs::create_dir_all(rust_keylock_home.clone())?;
@@ -347,7 +347,7 @@ pub fn create_certs_path() -> errors::Result<PathBuf> {
 }
 
 #[cfg(not(target_os = "android"))]
-pub fn create_certs_path() -> errors::Result<PathBuf> {
+pub(crate) fn create_certs_path() -> errors::Result<PathBuf> {
     let mut rust_keylock_home = default_rustkeylock_location();
     rust_keylock_home.push("etc/ssl/certs");
     fs::create_dir_all(rust_keylock_home.clone())?;
@@ -490,7 +490,7 @@ fn load_existing_file(file_path: &PathBuf, cryptor_opt: Option<&Cryptor>) -> err
 }
 
 /// Saves the specified entries to a toml file with the specified name
-pub fn save(rkl_content: RklContent, filename: &str, cryptor: &Cryptor, use_default_location: bool) -> errors::Result<()> {
+pub(crate) fn save(rkl_content: RklContent, filename: &str, cryptor: &Cryptor, use_default_location: bool) -> errors::Result<()> {
     info!("Saving rust-keylock content in {}", filename);
     let path_buf = if use_default_location {
         default_toml_path(filename)
@@ -534,7 +534,7 @@ pub fn save(rkl_content: RklContent, filename: &str, cryptor: &Cryptor, use_defa
 
 /// Saves the specified Props to a toml file with the specified name
 #[allow(dead_code)]
-pub fn save_props(props: &Props, filename: &str) -> errors::Result<()> {
+pub(crate) fn save_props(props: &Props, filename: &str) -> errors::Result<()> {
     info!("Saving Properties in {}", filename);
     let path_buf = default_toml_path(filename);
     let mut file = File::create(path_buf)?;

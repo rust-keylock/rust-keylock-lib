@@ -49,32 +49,36 @@ use log::*;
 use tokio::prelude::*;
 use tokio::prelude::future::{FutureResult, lazy, Loop, loop_fn, ok};
 
+pub use file_handler::default_rustkeylock_location;
+
+use crate::asynch::dropbox::DropboxConfiguration;
+use crate::asynch::nextcloud::NextcloudConfiguration;
+
 use self::api::{
     Props,
+    RklConfiguration,
     RklContent,
     SystemConfiguration,
 };
 pub use self::api::{
     AllConfigurations,
     Entry,
+    EntryPresentationType,
     Menu,
     MessageSeverity,
-    RklConfiguration,
     UserOption,
     UserSelection,
 };
-pub use self::api::safe::Safe;
+use self::api::safe::Safe;
 use self::api::UiCommand;
 use self::asynch::AsyncEditorFacade;
 pub use self::asynch::dropbox;
 pub use self::asynch::nextcloud;
 
-pub use file_handler::default_rustkeylock_location;
-
 mod file_handler;
 mod errors;
 mod protected;
-pub mod datacrypt;
+mod datacrypt;
 mod asynch;
 mod api;
 mod selection_handling;
@@ -135,8 +139,17 @@ pub fn execute_async(editor: Box<dyn AsyncEditor>) {
                     UiCommand::ShowChangePassword => {
                         ui_rx_vec.push(editor.show_change_password());
                     }
-                    UiCommand::ShowMenu(menu, safe, rkl_configuration) => {
-                        ui_rx_vec.push(editor.show_menu(&menu, &safe, &rkl_configuration));
+                    UiCommand::ShowMenu(menu) => {
+                        ui_rx_vec.push(editor.show_menu(&menu));
+                    }
+                    UiCommand::ShowEntries(entries, filter) => {
+                        ui_rx_vec.push(editor.show_entries(entries, filter));
+                    }
+                    UiCommand::ShowEntry(entry, index, presentation_type) => {
+                        ui_rx_vec.push(editor.show_entry(entry, index, presentation_type));
+                    }
+                    UiCommand::ShowConfiguration(nextcloud, dropbox) => {
+                        ui_rx_vec.push(editor.show_configuration(nextcloud, dropbox));
                     }
                     UiCommand::ShowMessage(message, options, severity) => {
                         ui_rx_vec.push(editor.show_message(&message, options, severity));
@@ -240,14 +253,26 @@ pub fn execute(editor: Box<dyn Editor>) {
                         debug!("Showing change password");
                         send(&ui_tx, editor.show_change_password())
                     }
-                    UiCommand::ShowMenu(menu, safe, rkl_configuration) => {
+                    UiCommand::ShowMenu(menu) => {
                         debug!("Showing menu {:?}", menu);
-                        let sel = editor.show_menu(&menu, &safe, &rkl_configuration);
+                        let sel = editor.show_menu(&menu);
                         let should_break = sel == UserSelection::GoTo(Menu::ForceExit);
                         send(&ui_tx, sel);
                         if should_break {
                             break;
                         }
+                    }
+                    UiCommand::ShowEntries(entries, filter) => {
+                        debug!("Showing entries");
+                        send(&ui_tx, editor.show_entries(entries, filter))
+                    }
+                    UiCommand::ShowEntry(entry, index, presentation_type) => {
+                        debug!("Showing entry");
+                        send(&ui_tx, editor.show_entry(entry, index, presentation_type))
+                    }
+                    UiCommand::ShowConfiguration(nextcloud, dropbox) => {
+                        debug!("Showing configuration");
+                        send(&ui_tx, editor.show_configuration(nextcloud, dropbox))
                     }
                     UiCommand::ShowMessage(message, options, severity) => {
                         debug!("Showing message");
@@ -397,7 +422,7 @@ impl CoreLogicHandler {
             }
             UserSelection::GoTo(Menu::Main) => {
                 debug!("UserSelection::GoTo(Menu::Main)");
-                let m = s.editor.show_menu(&Menu::Main, &s.safe, &s.configuration);
+                let m = s.editor.show_menu(&Menu::Main);
                 debug!("UserSelection::GoTo(Menu::Main) returns {:?}", &m);
                 m
             }
@@ -414,23 +439,23 @@ impl CoreLogicHandler {
             UserSelection::GoTo(Menu::EntriesList(filter)) => {
                 debug!("UserSelection::GoTo(Menu::EntriesList) with filter '{}'", &filter);
                 s.safe.set_filter(filter.clone());
-                s.editor.show_menu(&Menu::EntriesList(filter), &s.safe, &s.configuration)
+                s.editor.show_entries(s.safe.get_entries().to_vec(), s.safe.get_filter())
             }
             UserSelection::GoTo(Menu::NewEntry) => {
                 debug!("UserSelection::GoTo(Menu::NewEntry)");
-                s.editor.show_menu(&Menu::NewEntry, &s.safe, &s.configuration)
+                s.editor.show_menu(&Menu::NewEntry)
             }
             UserSelection::GoTo(Menu::ShowEntry(index)) => {
                 debug!("UserSelection::GoTo(Menu::ShowEntry(index))");
-                s.editor.show_menu(&Menu::ShowEntry(index), &s.safe, &s.configuration)
+                s.editor.show_entry(s.safe.get_entry_decrypted(index), index, EntryPresentationType::View)
             }
             UserSelection::GoTo(Menu::EditEntry(index)) => {
                 debug!("UserSelection::GoTo(Menu::EditEntry(index))");
-                s.editor.show_menu(&Menu::EditEntry(index), &s.safe, &s.configuration)
+                s.editor.show_entry(s.safe.get_entry_decrypted(index), index, EntryPresentationType::Edit)
             }
             UserSelection::GoTo(Menu::DeleteEntry(index)) => {
                 debug!("UserSelection::GoTo(Menu::DeleteEntry(index))");
-                s.editor.show_menu(&Menu::DeleteEntry(index), &s.safe, &s.configuration)
+                s.editor.show_entry(s.safe.get_entry_decrypted(index), index, EntryPresentationType::Delete)
             }
             UserSelection::GoTo(Menu::Save(update_last_sync_version)) => {
                 debug!("UserSelection::GoTo(Menu::Save({}))", update_last_sync_version);
@@ -563,7 +588,7 @@ Warning: Saving will discard all the entries that could not be recovered.
             }
             UserSelection::GoTo(Menu::ExportEntries) => {
                 debug!("UserSelection::GoTo(Menu::ExportEntries)");
-                s.editor.show_menu(&Menu::ExportEntries, &s.safe, &s.configuration)
+                s.editor.show_menu(&Menu::ExportEntries)
             }
             UserSelection::ExportTo(path) => {
                 debug!("UserSelection::ExportTo(path)");
@@ -601,7 +626,7 @@ Warning: Saving will discard all the entries that could not be recovered.
             }
             UserSelection::GoTo(Menu::ImportEntries) => {
                 debug!("UserSelection::GoTo(Menu::ImportEntries)");
-                s.editor.show_menu(&Menu::ImportEntries, &s.safe, &s.configuration)
+                s.editor.show_menu(&Menu::ImportEntries)
             }
             us @ UserSelection::ImportFrom(_, _, _) |
             us @ UserSelection::ImportFromDefaultLocation(_, _, _) => {
@@ -644,7 +669,7 @@ Warning: Saving will discard all the entries that could not be recovered.
             }
             UserSelection::GoTo(Menu::ShowConfiguration) => {
                 debug!("UserSelection::GoTo(Menu::ShowConfiguration)");
-                s.editor.show_menu(&Menu::ShowConfiguration, &s.safe, &s.configuration)
+                s.editor.show_configuration(s.configuration.nextcloud.clone(), s.configuration.dropbox.clone())
             }
             UserSelection::UpdateConfiguration(new_conf) => {
                 debug!("UserSelection::UpdateConfiguration");
@@ -714,7 +739,7 @@ Warning: Saving will discard all the entries that could not be recovered.
             }
             UserSelection::GoTo(Menu::Current) => {
                 debug!("UserSelection::GoTo(Menu::Current)");
-                s.editor.show_menu(&Menu::Current, &s.safe, &s.configuration)
+                s.editor.show_menu(&Menu::Current)
             }
             other => {
                 let message = format!("Bug: User Selection '{:?}' should not be handled in the main loop. Please, consider opening a bug \
@@ -840,9 +865,15 @@ pub trait Editor {
     /// Shows the interface for changing a Password and/or a Number.
     fn show_change_password(&self) -> UserSelection;
     /// Shows the specified `Menu` to the User.
-    fn show_menu(&self, menu: &Menu, safe: &Safe, configuration: &RklConfiguration) -> UserSelection;
+    fn show_menu(&self, menu: &Menu) -> UserSelection;
+    /// Shows the provided entries to the User. The provided entries are already filtered with the filter argument.
+    fn show_entries(&self, entries: Vec<Entry>, filter: String) -> UserSelection;
+    /// Shows the provided entry details to the User following a PresentationType.
+    fn show_entry(&self, entry: Entry, index: usize, presentation_type: EntryPresentationType) -> UserSelection;
     /// Shows the Exit `Menu` to the User.
     fn exit(&self, contents_changed: bool) -> UserSelection;
+    /// Shows the configuration screen.
+    fn show_configuration(&self, nextcloud: NextcloudConfiguration, dropbox: DropboxConfiguration) -> UserSelection;
     /// Shows a message to the User.
     /// Along with the message, the user should select one of the offered `UserOption`s.
     fn show_message(&self, message: &str, options: Vec<UserOption>, severity: MessageSeverity) -> UserSelection;
@@ -863,9 +894,15 @@ pub trait AsyncEditor {
     /// Shows the interface for changing a Password and/or a Number.
     fn show_change_password(&self) -> Receiver<UserSelection>;
     /// Shows the specified `Menu` to the User.
-    fn show_menu(&self, menu: &Menu, safe: &Safe, configuration: &RklConfiguration) -> Receiver<UserSelection>;
+    fn show_menu(&self, menu: &Menu) -> Receiver<UserSelection>;
+    /// Shows the provided entries to the User. The provided entries are already filtered with the filter argument.
+    fn show_entries(&self, entries: Vec<Entry>, filter: String) -> Receiver<UserSelection>;
+    /// Shows the provided entry details to the User following a presentation type.
+    fn show_entry(&self, entry: Entry, index: usize, presentation_type: EntryPresentationType) -> Receiver<UserSelection>;
     /// Shows the Exit `Menu` to the User.
     fn exit(&self, contents_changed: bool) -> Receiver<UserSelection>;
+    /// Shows the configuration screen.
+    fn show_configuration(&self, nextcloud: NextcloudConfiguration, dropbox: DropboxConfiguration) -> Receiver<UserSelection>;
     /// Shows a message to the User.
     /// Along with the message, the user should select one of the offered `UserOption`s.
     fn show_message(&self, message: &str, options: Vec<UserOption>, severity: MessageSeverity) -> Receiver<UserSelection>;
@@ -884,6 +921,8 @@ mod unit_tests {
     use std::time::SystemTime;
 
     use clipboard::{ClipboardContext, ClipboardProvider};
+
+    use crate::EntryPresentationType;
 
     use super::api::{AllConfigurations, Entry, Menu, UserOption, UserSelection};
     use super::asynch::dropbox::DropboxConfiguration;
@@ -1288,8 +1327,22 @@ mod unit_tests {
             to_ret
         }
 
-        fn show_menu(&self, m: &Menu, s: &super::Safe, _: &super::RklConfiguration) -> UserSelection {
-            println!("TestEditor::show_menu {:?} with entries: {:?}", m, s.get_entries());
+        fn show_menu(&self, m: &Menu) -> UserSelection {
+            println!("TestEditor::show_menu {:?}", m);
+            let to_ret = self.return_first_selection();
+            println!("Returning {:?}", to_ret);
+            to_ret
+        }
+
+        fn show_entries(&self, entries: Vec<Entry>, filter: String) -> UserSelection {
+            println!("TestEditor::show_entries {:?} with filter {}", entries, filter);
+            let to_ret = self.return_first_selection();
+            println!("Returning {:?}", to_ret);
+            to_ret
+        }
+
+        fn show_entry(&self, entry: Entry, index: usize, presentation_type: EntryPresentationType) -> UserSelection {
+            println!("TestEditor::show_entry {:?} with index {} and presentation_type {:?}", entry, index, presentation_type);
             let to_ret = self.return_first_selection();
             println!("Returning {:?}", to_ret);
             to_ret
@@ -1297,6 +1350,13 @@ mod unit_tests {
 
         fn exit(&self, force: bool) -> UserSelection {
             println!("TestEditor::exit {}", force);
+            let to_ret = self.return_first_selection();
+            println!("Returning {:?}", to_ret);
+            to_ret
+        }
+
+        fn show_configuration(&self, nextcloud: NextcloudConfiguration, dropbox: DropboxConfiguration) -> UserSelection {
+            println!("TestEditor::show_configuration with {:?} and {:?}", nextcloud, dropbox);
             let to_ret = self.return_first_selection();
             println!("Returning {:?}", to_ret);
             to_ret

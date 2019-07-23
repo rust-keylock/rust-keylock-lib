@@ -23,7 +23,7 @@ use super::Entry;
 /// This includes the password entries and a Cryptor that is used to encrypt the passwords of the entries when they are stored in memory
 /// and decrypt them when needed (to be presented to the User)
 #[derive(Clone)]
-pub struct Safe {
+pub(crate) struct Safe {
     pub(crate) entries: Vec<Entry>,
     filtered_entries: Vec<Entry>,
     /// Maps the filtered Entries to the Vec that contains all the entries.
@@ -138,17 +138,17 @@ impl Safe {
     }
 
     /// Retrieves an Entry at a given index, after applying the filter to the Vector
-    pub fn get_entry(&self, index: usize) -> &Entry {
+    pub(crate) fn get_entry(&self, index: usize) -> &Entry {
         &self.get_entries()[index]
     }
 
     /// Retrieves an Entry at a given index with the password decrypted
-    pub fn get_entry_decrypted(&self, index: usize) -> Entry {
+    pub(crate) fn get_entry_decrypted(&self, index: usize) -> Entry {
         self.get_entry(index).decrypted(&self.password_cryptor)
     }
 
     /// Retrieves the existing entries, after applying the filter to the Vector
-    pub fn get_entries(&self) -> &[Entry] {
+    pub(crate) fn get_entries(&self) -> &[Entry] {
         &self.filtered_entries
     }
 
@@ -167,7 +167,7 @@ impl Safe {
     }
 
     /// Gets the filter of the Safe
-    pub fn get_filter(&self) -> String {
+    pub(crate) fn get_filter(&self) -> String {
         self.filter.clone()
     }
 

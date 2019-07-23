@@ -36,7 +36,7 @@ use crate::errors::{debug_error_string, RustKeylockError};
 use crate::SystemConfiguration;
 
 /// A (Next/Own)cloud synchronizer
-pub struct Synchronizer {
+pub(crate) struct Synchronizer {
     /// The configuration needed for this synchronizer
     conf: NextcloudConfiguration,
     /// The TX to notify about sync status
@@ -527,7 +527,7 @@ impl NextcloudConfiguration {
     }
 
     /// Creates a TOML table form this NextcloudConfiguration. The resulted table contains the decrypted password.
-    pub fn to_table(&self) -> errors::Result<Table> {
+    pub(crate) fn to_table(&self) -> errors::Result<Table> {
         let mut table = Table::new();
         table.insert("url".to_string(), toml::Value::String(self.server_url.clone()));
         table.insert("user".to_string(), toml::Value::String(self.username.clone()));
@@ -538,7 +538,7 @@ impl NextcloudConfiguration {
     }
 
     /// Creates a NextcloudConfiguration from a TOML table. The password gets encrypted once the `new` function is called.
-    pub fn from_table(table: &Table) -> Result<NextcloudConfiguration, errors::RustKeylockError> {
+    pub(crate) fn from_table(table: &Table) -> Result<NextcloudConfiguration, errors::RustKeylockError> {
         let url = table.get("url").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
         let user = table.get("user").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
         let pass = table.get("pass").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
@@ -551,7 +551,7 @@ impl NextcloudConfiguration {
     }
 
     /// Returns true is the configuration contains the needed values to operate correctly
-    pub fn is_filled(&self) -> bool {
+    pub(crate) fn is_filled(&self) -> bool {
         let dp = self.decrypted_password();
         (dp.is_ok() && dp.unwrap() != "") && self.server_url != "" && self.username != ""
     }
