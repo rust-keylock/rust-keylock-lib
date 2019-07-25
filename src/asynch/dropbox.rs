@@ -353,7 +353,7 @@ impl DropboxConfiguration {
     }
 
     /// Returns true is the configuration contains the needed values to operate correctly
-    pub(crate) fn is_filled(&self) -> bool {
+    pub fn is_filled(&self) -> bool {
         let res = self.decrypted_token();
         (res.is_ok() && res.unwrap() != "")
     }
