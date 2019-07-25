@@ -716,6 +716,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                         }
                     }
                     Err(error) => {
+                        error!("Error while retrieving Dropbox Authentication token: {} ({:?})", error.description(), error);
                         let _ = s.editor.show_message(&format!("Error while retrieving Dropbox Authentication token: {}", error.description()), vec![UserOption::ok()], MessageSeverity::Error);
                         UserSelection::GoTo(Menu::ShowConfiguration)
                     }
