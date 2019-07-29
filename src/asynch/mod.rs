@@ -19,6 +19,9 @@ use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread;
 use std::time::{self, Duration, Instant, SystemTime};
 
+use actix_rt::System;
+use awc::Client;
+use futures::lazy;
 use log::*;
 use tokio::prelude::*;
 use tokio::prelude::future::{Loop, loop_fn, ok};
@@ -32,6 +35,7 @@ use crate::Entry;
 use super::{Editor, Menu, MessageSeverity, Props, UserOption, UserSelection};
 use super::api::UiCommand;
 use super::errors;
+use actix_service::ServiceExt;
 
 pub mod nextcloud;
 pub mod dropbox;
@@ -474,6 +478,68 @@ pub(crate) enum SyncStatus {
     None,
 }
 
+pub(crate) trait RklHttpClient {
+    type RES_TYPE;
+    fn header(&mut self, k: &str, v: &str);
+    fn get(&mut self, uri: &str);
+    fn post(&mut self, uri: &str, body: &[u8]);
+    fn result(self) -> errors::Result<Self::RES_TYPE>;
+}
+
+pub(crate) struct ActixWebClient {
+    headers: Vec<(String, String)>,
+    client: Client,
+    res: Option<String>,
+}
+
+impl ActixWebClient {
+    fn new() -> ActixWebClient {
+        let client = Client::default();
+        let headers = Vec::new();
+        let res = None;
+        ActixWebClient { headers, client, res }
+    }
+}
+
+impl RklHttpClient for ActixWebClient {
+    type RES_TYPE = String;
+
+    fn header(&mut self, k: &str, v: &str) {
+        self.headers.push((k.to_owned(), v.to_owned()));
+    }
+
+    fn get(&mut self, uri: &str) {
+        System::new("req").block_on(lazy(|| {
+            self.client.get(uri)
+                .send()
+                .map_err(|_| Ok(()))
+                .and_then(|mut response| {
+                    response.body().map(move |body_out| {
+                        (response, body_out)
+                    })
+                  .map_err(|error| Err(errors::RustKeylockError::HttpError(format!("Payload error: {:?}", error))))
+                })
+                .and_then(|(response, body)| {
+                    println!("Response: {:?}, Body: {:?}", response, body);
+                    Ok(())
+                })
+                .map_err(|_| ())
+        }));
+    }
+
+    fn post(&mut self, uri: &str, body: &[u8]) {
+        unimplemented!()
+    }
+
+    fn result(self) -> errors::Result<Self::RES_TYPE> {
+        match self.res {
+            Some(r) => Ok(r),
+            None => Err(errors::RustKeylockError::HttpError("".to_string())),
+        }
+    }
+}
+
+
 #[cfg(test)]
 mod async_tests {
     use std::fs::{self, File};
@@ -489,6 +555,13 @@ mod async_tests {
     use super::*;
     use super::super::{Editor, MessageSeverity, UiCommand, UserOption, UserSelection};
     use super::super::errors;
+
+    #[test]
+    #[ignore]
+    fn dummy() {
+        let mut client = ActixWebClient::new();
+        client.get("https://www.rust-lang.org");
+    }
 
     #[test]
     fn facade_show_change_password() {

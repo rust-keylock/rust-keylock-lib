@@ -46,6 +46,7 @@ pub enum RustKeylockError {
     DecryptionError(String),
     EncryptionError(String),
     SyncError(String),
+    HttpError(String),
 }
 
 impl fmt::Display for RustKeylockError {
@@ -56,6 +57,7 @@ impl fmt::Display for RustKeylockError {
             RustKeylockError::DecryptionError(ref message) => write!(f, "Could not decrypt: {}", message),
             RustKeylockError::EncryptionError(ref message) => write!(f, "Could not encrypt: {}", message),
             RustKeylockError::SyncError(ref message) => write!(f, "Could not synchronize the rust-keylock data: {}", message),
+            RustKeylockError::HttpError(ref message) => write!(f, "HTTP error: {}", message),
         }
     }
 }
@@ -68,6 +70,7 @@ impl Error for RustKeylockError {
             RustKeylockError::DecryptionError(_) => ("Error during decryption"),
             RustKeylockError::EncryptionError(_) => ("Error during encryption"),
             RustKeylockError::SyncError(_) => ("Error while synchronizing"),
+            RustKeylockError::HttpError(_) => ("Error while executing HTTP operations"),
         }
     }
 }

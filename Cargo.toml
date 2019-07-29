@@ -43,7 +43,14 @@ openssl-probe = "0.1"
 clipboard = "0.5"
 dirs = "1.0"
 tokio = "0.1"
+actix-rt = "0.2"
+actix-service = "0.4"
 j4rs = {git="https://github.com/astonbitecode/j4rs.git"}
+
+[dependencies.awc]
+version = "0.2"
+default-features = false
+features = ["ssl"]
 
 [dependencies.toml]
 version = "0.5"
