@@ -15,9 +15,8 @@
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
 
 use std::error::Error;
-use std::fs;
+use std::io::Read;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self, Sender};
 use std::thread;
@@ -31,19 +30,17 @@ use http::StatusCode;
 use hyper::{self, Body, Request, Response, Server};
 use hyper::rt::Future;
 use hyper::service::service_fn_ok;
-use j4rs::{Instance, InvocationArg, Jvm};
 use log::*;
 use percent_encoding::{percent_decode, USERINFO_ENCODE_SET, utf8_percent_encode};
 use toml;
 use toml::value::Table;
 use url::Url;
 
-use crate::asynch::{self, ServerVersionData, SynchronizerAction, SyncStatus};
+use crate::asynch::{self, ReqwestClient, RklHttpAsyncClient, ServerVersionData, SynchronizerAction, SyncStatus};
 use crate::datacrypt::{create_random, EntryPasswordCryptor};
 use crate::errors;
 use crate::errors::RustKeylockError;
 use crate::file_handler;
-use crate::file_handler::default_toml_path;
 use crate::SystemConfiguration;
 use crate::utils;
 
@@ -133,127 +130,137 @@ impl Synchronizer {
         self.conf.decrypted_token()
     }
 
-    fn do_execute(&self) -> errors::Result<SyncStatus> {
-        let jvm = utils::create_jvm().unwrap();
-
-        let request_config = jvm.create_instance(
-            "com.dropbox.core.DbxRequestConfig",
-            &[InvocationArg::from("rkl-operations")],
-        )?;
-        let dbx_client = jvm.create_instance(
-            "com.dropbox.core.v2.DbxClientV2",
-            &[InvocationArg::from(request_config), InvocationArg::from(self.use_token()?)],
-        )?;
-
-        let server_version = self.get_version(&jvm, &dbx_client)?;
-        let synchronizer_action = asynch::synchronizer_action(&server_version, &self.file_name, &self.saved_at_local, &self.version_local, &self.last_sync_version)?;
-        Self::parse_synchronizer_action(synchronizer_action, &self.file_name, &jvm, &dbx_client, self.version_local, self.saved_at_local)
+    fn do_execute(&self) -> impl Future<Item=SyncStatus, Error=RustKeylockError> {
+        let file_name = self.file_name.clone();
+        let saved_at_local = self.saved_at_local.clone();
+        let version_local = self.version_local.clone();
+        let last_sync_version = self.last_sync_version.clone();
+        result(self.use_token())
+            .and_then(move |token| {
+                let mut client = ReqwestClient::new();
+                client.header("Authorization", &format!("Bearer {}", token));
+                ok(client)
+            })
+            .and_then(move |client| {
+                Self::get_version(client)
+                    .map(move |(sv, client)| (
+                        sv,
+                        client,
+                        file_name,
+                        saved_at_local,
+                        version_local,
+                        last_sync_version))
+            })
+            .and_then(|(server_version, client, file_name, saved_at_local, version_local, last_sync_version)| {
+                asynch::synchronizer_action(&server_version, &file_name, &saved_at_local, &version_local, &last_sync_version)
+                    .map(|sa| (sa, client, file_name, version_local, saved_at_local))
+            })
+            .and_then(|(synchronizer_action, client, file_name, version_local, saved_at_local)| {
+                Self::parse_synchronizer_action(synchronizer_action, &file_name, client, version_local, saved_at_local)
+            })
     }
 
-    fn get_version(&self, jvm: &Jvm, client: &Instance) -> errors::Result<ServerVersionData> {
-        match Self::download(".version", jvm, client) {
-            Ok(tmp_file_name) => {
-                let tmp_file_pb = default_toml_path(&tmp_file_name);
-                let svd = parse_version_file(&tmp_file_pb)?;
-
-                let _ = file_handler::delete_file(&tmp_file_name);
-
-                Ok(svd)
-            }
-            Err(_) => {
-                let svd = ServerVersionData {
-                    version: "0".to_string(),
-                    last_modified: "0".to_string(),
-                };
-                Ok(svd)
-            }
-        }
+    fn get_version(client: ReqwestClient) -> impl Future<Item=(ServerVersionData, ReqwestClient), Error=RustKeylockError> {
+        let mut client = client;
+        let client_clone = client.clone();
+        client.post(
+            "https://content.dropboxapi.com/2/files/download",
+            &[("Dropbox-API-Arg", r#"{"path": "/.version"}"#)],
+            Vec::new())
+            .and_then(|bytes| {
+                let s = std::str::from_utf8(bytes.as_ref())?;
+                parse_version_str(s)
+            })
+            .and_then(|version_data| ok((version_data, client)))
+            .or_else(|_| ok((ServerVersionData::default(), client_clone)))
     }
 
-    fn download(filename: &str, jvm: &Jvm, client: &Instance) -> errors::Result<String> {
+    fn download(filename: &str, client: ReqwestClient) -> impl Future<Item=(String, ReqwestClient), Error=RustKeylockError> {
+        let mut client = client;
         let tmp_file_name = format!("tmp_{}", filename);
-        let tmp_file_pb = default_toml_path(&tmp_file_name);
-        let tmp_file_path_str = tmp_file_pb.to_str().unwrap();
 
-        let fos = jvm.create_instance("java.io.FileOutputStream", &vec![InvocationArg::from(tmp_file_path_str.clone())])?;
-        let os = jvm.cast(&fos, "java.io.OutputStream")?;
-
-        let downloader = jvm.chain(jvm.clone_instance(client)?)
-            .invoke("files", &[])?
-            .invoke("download", &vec![InvocationArg::from(InvocationArg::from(format!("/{}", filename)))])?
-            .collect();
-
-        jvm.invoke(&downloader, "download", &vec![InvocationArg::from(os)])?;
-        jvm.invoke(&downloader, "close", &[])?;
-
-        Ok(tmp_file_name)
+        client.post(
+            "https://content.dropboxapi.com/2/files/download",
+            &[("Dropbox-API-Arg", &format!(r#"{{"path": "/{}"}}"#, filename))],
+            Vec::new())
+            .and_then(|bytes| {
+                file_handler::save_bytes(&tmp_file_name, &bytes, false)
+                    .and_then(|_| Ok(tmp_file_name))
+            })
+            .map(|tmp_file_name| (tmp_file_name, client))
     }
 
-    fn upload(filename: &str, jvm: &Jvm, client: &Instance) -> errors::Result<()> {
-        let file_pb = default_toml_path(&filename);
-        let file_path_str = file_pb.to_str().unwrap();
-
-        let fis = jvm.create_instance("java.io.FileInputStream", &vec![InvocationArg::from(file_path_str.clone())])?;
-        let is = jvm.cast(&fis, "java.io.InputStream")?;
-        let wm = jvm.static_class("com.dropbox.core.v2.files.WriteMode")?;
-        let mode_overwrite = jvm.field(&wm, "OVERWRITE")?;
-
-        let uploader = jvm.chain(jvm.clone_instance(client)?)
-            .invoke("files", &[])?
-            .invoke("uploadBuilder", &vec![InvocationArg::from(format!("/{}", filename))])?
-            .invoke("withMode", &vec![InvocationArg::from(mode_overwrite)])?
-            .collect();
-
-        let uploader_base = jvm.cast(&uploader, "com.dropbox.core.v2.DbxUploadStyleBuilder")?;
-
-        jvm.invoke(&uploader_base, "uploadAndFinish", &vec![InvocationArg::from(is)])?;
-
-        Ok(())
+    fn upload(filename: &str, client: ReqwestClient) -> impl Future<Item=ReqwestClient, Error=RustKeylockError> {
+        let mut client = client;
+        let filename_string = filename.to_string();
+        result(file_handler::get_file(filename))
+            .and_then(|mut file| {
+                let mut post_body: Vec<u8> = Vec::new();
+                result(file.read_to_end(&mut post_body))
+                    .from_err()
+                    .and_then(move |_| {
+                        client.post(
+                            "https://content.dropboxapi.com/2/files/upload",
+                            &[
+                                ("Dropbox-API-Arg", &format!(r#"{{"path":"/{}","mode":"overwrite"}}"#, filename_string)),
+                                ("Content-Type", "application/octet-stream"),
+                            ],
+                            post_body).map(|_| client)
+                    })
+            })
+            .and_then(|c| ok(c))
     }
 
-    fn parse_synchronizer_action(sa: SynchronizerAction, filename: &str, jvm: &Jvm, client: &Instance, version_local: Option<i64>, saved_at_local: Option<i64>) -> errors::Result<SyncStatus> {
+    fn parse_synchronizer_action(sa: SynchronizerAction, filename: &str, client: ReqwestClient, version_local: Option<i64>, saved_at_local: Option<i64>) -> Box<dyn Future<Item=SyncStatus, Error=RustKeylockError> + Send> {
         match sa {
             SynchronizerAction::Download => {
                 info!("Downloading file from the server");
-                let tmp_file_name = Self::download(filename, jvm, client)?;
-                Ok(SyncStatus::NewAvailable("dropbox", tmp_file_name))
+                Box::new(Self::download(filename, client)
+                    .and_then(|(tmp_file_name, _)| Ok(SyncStatus::NewAvailable("dropbox", tmp_file_name))))
             }
             SynchronizerAction::Ignore => {
                 debug!("No sync is needed");
-                Ok(SyncStatus::None)
+                Box::new(ok(SyncStatus::None))
             }
             SynchronizerAction::Upload => {
                 info!("Uploading file on the server");
-                Self::upload_all(filename, jvm, client, version_local, saved_at_local)?;
-                Ok(SyncStatus::UploadSuccess("dropbox"))
+                Box::new(Self::upload_all(filename, client, version_local, saved_at_local)
+                    .and_then(|_| ok(SyncStatus::UploadSuccess("dropbox"))))
             }
             SynchronizerAction::DownloadMergeAndUpload => {
-                match Self::download(filename, jvm, client) {
-                    Ok(tmp_file_name) => {
-                        Ok(SyncStatus::NewToMerge("dropbox", tmp_file_name))
-                    }
-                    Err(_) => {
+                let filename_clone = filename.to_string();
+                let client_clone = client.clone();
+                Box::new(Self::download(filename, client)
+                    .and_then(|(tmp_file_name, _)| {
+                        ok(SyncStatus::NewToMerge("dropbox", tmp_file_name))
+                    })
+                    .or_else(move |_| {
                         info!("Could not download from the server and do the merge. The files do not exist. Uploading...");
-                        Self::upload_all(filename, jvm, client, version_local, saved_at_local)?;
-                        Ok(SyncStatus::UploadSuccess("dropbox"))
-                    }
-                }
+                        Self::upload_all(&filename_clone, client_clone, version_local, saved_at_local)
+                            .and_then(|_| {
+                                ok(SyncStatus::UploadSuccess("dropbox"))
+                            })
+                    }))
             }
         }
     }
 
-    fn upload_all(filename: &str, jvm: &Jvm, client: &Instance, version_local: Option<i64>, saved_at_local: Option<i64>) -> errors::Result<()> {
-        Self::upload(filename, jvm, client)?;
-        create_version_file_locally(version_local, saved_at_local)?;
-        Self::upload(".version", jvm, client)?;
-        let _ = file_handler::delete_file(".version");
-        Ok(())
+    fn upload_all(filename: &str, client: ReqwestClient, version_local: Option<i64>, saved_at_local: Option<i64>) -> impl Future<Item=ReqwestClient, Error=RustKeylockError> {
+        Self::upload(filename, client)
+            .and_then(move |client| {
+                create_version_file_locally(version_local, saved_at_local).map(|_| client)
+            })
+            .and_then(|client| Self::upload(".version", client))
+            .and_then(|client| {
+                let _ = file_handler::delete_file(".version");
+                ok(client)
+            })
     }
 
     fn send_to_channel(res: errors::Result<SyncStatus>, tx: Sender<errors::Result<SyncStatus>>) {
         match res {
-            Ok(ref r) => debug!("Nextcloud Async Task sends to the channel {:?}", r),
-            Err(ref error) => error!("Nextcloud Async Tasks reported error: {:?}", error),
+            Ok(ref r) => debug!("Dropbox Async Task sends to the channel {:?}", r),
+            Err(ref error) => error!("Dropbox Async Tasks reported error: {:?}", error),
         };
 
 
@@ -262,7 +269,7 @@ impl Synchronizer {
                 // ignore
             }
             Err(error) => {
-                error!("Error while the Nextcloud synchronizer attempted to send the status to the channel: {:?}.", error);
+                error!("Error while the Dropbox synchronizer attempted to send the status to the channel: {:?}.", error);
             }
         }
     }
@@ -275,7 +282,7 @@ impl super::AsyncTask for Synchronizer {
         let cloned_tx_ok = self.tx.clone();
         let cloned_tx_err = self.tx.clone();
 
-        let f = result(self.do_execute())
+        let f = self.do_execute()
             .map(move |sync_status| {
                 // Return true to continue the task only if the SyncStatus was None.
                 // In all the other cases we need to stop the task in order to allow the user to take an action.
@@ -289,9 +296,8 @@ impl super::AsyncTask for Synchronizer {
     }
 }
 
-fn parse_version_file(pb: &PathBuf) -> errors::Result<ServerVersionData> {
-    let v_content = fs::read_to_string(&pb)?;
-    let v: Vec<String> = v_content.split(",")
+fn parse_version_str(s: &str) -> errors::Result<ServerVersionData> {
+    let v: Vec<String> = s.split(",")
         .map(|entry| {
             let s = entry.trim();
             s.to_string()
@@ -535,12 +541,9 @@ mod dropbox_tests {
     use hyper::{Client, Method, Request};
     use hyper::rt::{self, Future};
 
-    use crate::file_handler;
-
     use super::*;
-    use j4rs::JvmBuilder;
 
-    //        #[test]
+    //    #[test]
 //    #[ignore]
     fn _invoke() {
         let (tx, _rx) = mpsc::channel();
@@ -555,37 +558,11 @@ mod dropbox_tests {
         s.do_execute().unwrap();
     }
 
-    //    #[test]
-//    #[ignore]
-    fn _dummy() {
-        let token = env::var("DBX_TOKEN").unwrap();
-        let jvm = JvmBuilder::new().build().unwrap();
-
-        let request_config = jvm.create_instance(
-            "com.dropbox.core.DbxRequestConfig",
-            &[InvocationArg::from("rkl-operations")],
-        ).unwrap();
-        let dbx_client = jvm.create_instance(
-            "com.dropbox.core.v2.DbxClientV2",
-            &[InvocationArg::from(request_config), InvocationArg::from(token.clone())],
-        ).unwrap();
-
-        let filename = "tmp_dummy";
-        let _ = file_handler::save_bytes(filename, "123,321".as_bytes(), false);
-
-        Synchronizer::upload(filename, &jvm, &dbx_client).unwrap();
-        let _ = file_handler::delete_file(filename);
-    }
-
     #[test]
-    fn test_parse_version_file() {
-        let filename = "tmp_version";
-        let _ = file_handler::save_bytes(filename, "123,321".as_bytes(), false);
-        let pb = file_handler::default_toml_path(filename);
-        let sv = parse_version_file(&pb).unwrap();
+    fn test_parse_version_str() {
+        let sv = parse_version_str("123,321").unwrap();
         assert!(sv.version == "123");
         assert!(sv.last_modified == "321");
-        let _ = file_handler::delete_file(&filename);
     }
 
     #[test]

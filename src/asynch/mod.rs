@@ -19,10 +19,11 @@ use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread;
 use std::time::{self, Duration, Instant, SystemTime};
 
-use actix_rt::System;
-use awc::Client;
-use futures::lazy;
+use http::{HeaderMap, HeaderValue};
+use http::header::HeaderName;
 use log::*;
+use reqwest;
+use reqwest::r#async::{Client as OfficialReqwestClient, Response};
 use tokio::prelude::*;
 use tokio::prelude::future::{Loop, loop_fn, ok};
 use tokio::timer::Delay;
@@ -34,8 +35,7 @@ use crate::Entry;
 
 use super::{Editor, Menu, MessageSeverity, Props, UserOption, UserSelection};
 use super::api::UiCommand;
-use super::errors;
-use actix_service::ServiceExt;
+use super::errors::{self, debug_error_string, RustKeylockError};
 
 pub mod nextcloud;
 pub mod dropbox;
@@ -111,7 +111,7 @@ impl AsyncTaskHandle {
             Ok(_) => Ok(()),
             Err(error) => {
                 warn!("Could not stop async task... {:?}", error);
-                Err(errors::RustKeylockError::from(error))
+                Err(RustKeylockError::from(error))
             }
         }
     }
@@ -121,6 +121,15 @@ impl AsyncTaskHandle {
 pub(crate) struct ServerVersionData {
     version: String,
     last_modified: String,
+}
+
+impl Default for ServerVersionData {
+    fn default() -> Self {
+        ServerVersionData {
+            version: "0".to_string(),
+            last_modified: "0".to_string(),
+        }
+    }
 }
 
 #[derive(PartialEq, Debug)]
@@ -478,67 +487,168 @@ pub(crate) enum SyncStatus {
     None,
 }
 
-pub(crate) trait RklHttpClient {
+pub(crate) trait RklHttpSyncClient {
     type RES_TYPE;
     fn header(&mut self, k: &str, v: &str);
-    fn get(&mut self, uri: &str);
-    fn post(&mut self, uri: &str, body: &[u8]);
-    fn result(self) -> errors::Result<Self::RES_TYPE>;
+    fn get(&mut self, uri: &str, additional_headers: &[(&str, &str)]) -> errors::Result<Self::RES_TYPE>;
+    fn post(&mut self, uri: &str, additional_headers: &[(&str, &str)], body: Vec<u8>) -> errors::Result<Self::RES_TYPE>;
 }
 
-pub(crate) struct ActixWebClient {
-    headers: Vec<(String, String)>,
-    client: Client,
-    res: Option<String>,
+pub(crate) trait RklHttpAsyncClient: Send + Clone {
+    type RES_TYPE;
+    fn header(&mut self, k: &str, v: &str);
+    fn get(&mut self, uri: &str, additional_headers: &[(&str, &str)]) -> Box<dyn Future<Item=Self::RES_TYPE, Error=RustKeylockError> + Send>;
+    fn post(&mut self, uri: &str, additional_headers: &[(&str, &str)], body: Vec<u8>) -> Box<dyn Future<Item=Self::RES_TYPE, Error=RustKeylockError> + Send>;
 }
 
-impl ActixWebClient {
-    fn new() -> ActixWebClient {
-        let client = Client::default();
-        let headers = Vec::new();
-        let res = None;
-        ActixWebClient { headers, client, res }
+#[derive(Debug, Clone)]
+pub(crate) struct ReqwestClient {
+    headers: HeaderMap,
+    client: OfficialReqwestClient,
+}
+
+impl ReqwestClient {
+    fn new() -> ReqwestClient {
+        let client = OfficialReqwestClient::new();
+        let headers = HeaderMap::new();
+        ReqwestClient { headers, client }
+    }
+
+    fn validate_response(resp: Response) -> errors::Result<Response> {
+        if resp.status().is_client_error() || resp.status().is_server_error() {
+            Err(RustKeylockError::HttpError(format!("Error during HTTP request: {}", resp.status().to_string())))
+        } else {
+            Ok(resp)
+        }
+    }
+
+    fn get_body(response: Response) -> impl Future<Item=Vec<u8>, Error=RustKeylockError> {
+        // Create a Future from the Stream of the Body
+        response.into_body().concat2()
+            .map_err(|error| RustKeylockError::SyncError(debug_error_string(error)))
+            .map(move |chunk| {
+                let body: Vec<u8> = chunk.to_vec();
+                body
+            })
     }
 }
 
-impl RklHttpClient for ActixWebClient {
-    type RES_TYPE = String;
+impl RklHttpAsyncClient for ReqwestClient {
+    type RES_TYPE = Vec<u8>;
 
     fn header(&mut self, k: &str, v: &str) {
-        self.headers.push((k.to_owned(), v.to_owned()));
-    }
-
-    fn get(&mut self, uri: &str) {
-        System::new("req").block_on(lazy(|| {
-            self.client.get(uri)
-                .send()
-                .map_err(|_| Ok(()))
-                .and_then(|mut response| {
-                    response.body().map(move |body_out| {
-                        (response, body_out)
-                    })
-                  .map_err(|error| Err(errors::RustKeylockError::HttpError(format!("Payload error: {:?}", error))))
-                })
-                .and_then(|(response, body)| {
-                    println!("Response: {:?}, Body: {:?}", response, body);
-                    Ok(())
-                })
-                .map_err(|_| ())
+        self.headers.insert(HeaderName::from_str(k).unwrap_or_else(|error| {
+            error!("{:?}", error);
+            HeaderName::from_static("")
+        }), HeaderValue::from_str(v).unwrap_or_else(|error| {
+            error!("{:?}", error);
+            HeaderValue::from_static("")
         }));
     }
 
-    fn post(&mut self, uri: &str, body: &[u8]) {
-        unimplemented!()
+    fn get(&mut self, uri: &str, additional_headers: &[(&str, &str)]) -> Box<dyn Future<Item=Vec<u8>, Error=RustKeylockError> + Send> {
+        let mut builder = self.client
+            .get(uri)
+            .headers(self.headers.clone());
+        for (k, v) in additional_headers {
+            builder = builder.header(HeaderName::from_str(k).unwrap_or_else(|error| {
+                error!("{:?}", error);
+                HeaderName::from_static("")
+            }), HeaderValue::from_str(v).unwrap_or_else(|error| {
+                error!("{:?}", error);
+                HeaderValue::from_static("")
+            }));
+        }
+        Box::new(builder.send()
+            .from_err()
+            .and_then(Self::validate_response)
+            .and_then(Self::get_body))
     }
 
-    fn result(self) -> errors::Result<Self::RES_TYPE> {
-        match self.res {
-            Some(r) => Ok(r),
-            None => Err(errors::RustKeylockError::HttpError("".to_string())),
+    fn post(&mut self, uri: &str, additional_headers: &[(&str, &str)], body: Vec<u8>) -> Box<dyn Future<Item=Vec<u8>, Error=RustKeylockError> + Send> {
+        let mut builder = self.client
+            .post(uri)
+            .headers(self.headers.clone())
+            .body(body);
+        for (k, v) in additional_headers {
+            builder = builder.header(HeaderName::from_str(k).unwrap_or_else(|error| {
+                error!("{:?}", error);
+                HeaderName::from_static("")
+            }), HeaderValue::from_str(v).unwrap_or_else(|error| {
+                error!("{:?}", error);
+                HeaderValue::from_static("")
+            }));
         }
+        Box::new(builder.send()
+            .from_err()
+            .and_then(Self::validate_response)
+            .and_then(Self::get_body))
     }
 }
+/*
+impl RklHttpSyncClient for ReqwestClient {
+    type RES_TYPE = Vec<u8>;
 
+    fn header(&mut self, k: &str, v: &str) {
+        self.headers.insert(HeaderName::from_str(k).unwrap_or_else(|error| {
+            error!("{:?}", error);
+            HeaderName::from_static("")
+        }), HeaderValue::from_str(v).unwrap_or_else(|error| {
+            error!("{:?}", error);
+            HeaderValue::from_static("")
+        }));
+    }
+
+    fn get(&mut self, uri: &str, additional_headers: &[(&str, &str)]) -> errors::Result<Vec<u8>> {
+        let mut builder = self.client
+            .get(uri)
+            .headers(self.headers.clone());
+        for (k, v) in additional_headers {
+            builder = builder.header(HeaderName::from_str(k).unwrap_or_else(|error| {
+                error!("{:?}", error);
+                HeaderName::from_static("")
+            }), HeaderValue::from_str(v).unwrap_or_else(|error| {
+                error!("{:?}", error);
+                HeaderValue::from_static("")
+            }));
+        }
+        let response = builder.send()?;
+        Self::validate_response(&response)?;
+
+        let mut to_return = Vec::new();
+
+        for b in response.bytes() {
+            to_return.push(b?);
+        }
+
+        Ok(to_return)
+    }
+
+    fn post(&mut self, uri: &str, additional_headers: &[(&str, &str)], body: Vec<u8>) -> errors::Result<Vec<u8>> {
+        let mut builder = self.client
+            .post(uri)
+            .headers(self.headers.clone())
+            .body(body);
+        for (k, v) in additional_headers {
+            builder = builder.header(HeaderName::from_str(k).unwrap_or_else(|error| {
+                error!("{:?}", error);
+                HeaderName::from_static("")
+            }), HeaderValue::from_str(v).unwrap_or_else(|error| {
+                error!("{:?}", error);
+                HeaderValue::from_static("")
+            }));
+        }
+        let response = builder.send()?;
+        Self::validate_response(&response)?;
+        let mut to_return = Vec::new();
+
+        for b in response.bytes() {
+            to_return.push(b?);
+        }
+
+        Ok(to_return)
+    }
+}*/
 
 #[cfg(test)]
 mod async_tests {
@@ -555,13 +665,6 @@ mod async_tests {
     use super::*;
     use super::super::{Editor, MessageSeverity, UiCommand, UserOption, UserSelection};
     use super::super::errors;
-
-    #[test]
-    #[ignore]
-    fn dummy() {
-        let mut client = ActixWebClient::new();
-        client.get("https://www.rust-lang.org");
-    }
 
     #[test]
     fn facade_show_change_password() {

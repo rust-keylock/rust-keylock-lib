@@ -14,9 +14,8 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
 
-use j4rs::Jvm;
-#[cfg(target_os = "android")]
-use j4rs::JvmBuilder;
+use serde_json::map::Map as SerdeMap;
+use serde_json::value::Value as SerdeValue;
 
 use crate::errors;
 
@@ -24,17 +23,46 @@ pub(crate) fn to_result<T>(opt: Option<T>) -> errors::Result<T> {
     opt.ok_or(errors::RustKeylockError::GeneralError("Value was not found".to_string()))
 }
 
-#[cfg(not(target_os = "android"))]
-pub(crate) fn create_jvm() -> errors::Result<Jvm> {
-    Ok(Jvm::new(&[], None)?)
+#[allow(dead_code)]
+pub(crate) fn retrieve_value(path: &str, map: &SerdeMap<String, SerdeValue>) -> Option<String> {
+    let paths: Vec<String> = path
+        .rsplit("/")
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+    do_retrieve_value(paths, map)
 }
 
-#[cfg(target_os = "android")]
-pub(crate) fn create_jvm() -> errors::Result<Jvm> {
-    Ok(JvmBuilder::new()
-        .detach_thread_on_drop(false)
-        .with_no_implicit_classpath()
-        .build()?)
+fn do_retrieve_value(paths: Vec<String>, map: &SerdeMap<String, SerdeValue>) -> Option<String> {
+    let mut paths = paths;
+    match paths.pop() {
+        None => None,
+        Some(path) => {
+            match map.get(&path) {
+                None => None,
+                Some(v) => {
+                    match v {
+                        SerdeValue::Object(inner_map) => do_retrieve_value(paths, inner_map),
+                        SerdeValue::Array(arr) => {
+                            let index = paths.pop()
+                                .unwrap_or("-1".to_string())
+                                .parse::<i32>()
+                                .unwrap_or(-1);
+                            if index >= 0 {
+                                arr.get(index as usize)
+                                    .and_then(|v| v.as_object()
+                                        .and_then(|inner_map| do_retrieve_value(paths, inner_map)))
+                            } else {
+                                None
+                            }
+                        }
+                        SerdeValue::String(s) => Some(s.to_owned()),
+                        other => Some(other.to_string()),
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -47,5 +75,71 @@ mod utils_unit_tests {
         assert!(to_result(Some(1)).is_ok());
         assert!(to_result(Some("123".to_string())).is_ok());
         assert!(to_result(none).is_err());
+    }
+
+    #[test]
+    fn retrieve_value_from_inside_list() {
+        let json = r#"{
+          "is_deleted" : false,
+          "entries" : [ {
+            "name" : ".version",
+            "path_lower" : "/.version",
+            "path_display" : "/.version",
+            "id" : "id:rYxtlrWJLTAAAAAAAAAAQg",
+            "client_modified" : "2019-07-25T05:49:16Z",
+            "server_modified" : "2019-07-25T05:49:16Z",
+            "rev" : "0158e7afc77f4b1000000013338a710",
+            "size" : 13,
+            "is_downloadable" : true,
+            "content_hash" : "19ccaf95189fe3af15e096f727d406c434d55dd87912bb5134655730d89dbc68"
+          } ]
+        }"#;
+        let map: SerdeMap<String, SerdeValue> = serde_json::from_str(&json).unwrap();
+
+        assert!(retrieve_value("/entries/0/rev", &map).unwrap() == "0158e7afc77f4b1000000013338a710")
+    }
+
+    #[test]
+    fn retrieve_boolean_value() {
+        let json = r#"{
+          "is_deleted" : false,
+          "entries" : [ {
+            "name" : ".version",
+            "path_lower" : "/.version",
+            "path_display" : "/.version",
+            "id" : "id:rYxtlrWJLTAAAAAAAAAAQg",
+            "client_modified" : "2019-07-25T05:49:16Z",
+            "server_modified" : "2019-07-25T05:49:16Z",
+            "rev" : "0158e7afc77f4b1000000013338a710",
+            "size" : 13,
+            "is_downloadable" : true,
+            "content_hash" : "19ccaf95189fe3af15e096f727d406c434d55dd87912bb5134655730d89dbc68"
+          } ]
+        }"#;
+        let map: SerdeMap<String, SerdeValue> = serde_json::from_str(&json).unwrap();
+
+        assert!(retrieve_value("is_deleted", &map).unwrap() == "false")
+    }
+
+    #[test]
+    fn retrieve_number_value() {
+        let json = r#"{
+          "is_deleted" : false,
+          "entries" : [ {
+            "name" : ".version",
+            "path_lower" : "/.version",
+            "path_display" : "/.version",
+            "id" : "id:rYxtlrWJLTAAAAAAAAAAQg",
+            "client_modified" : "2019-07-25T05:49:16Z",
+            "server_modified" : "2019-07-25T05:49:16Z",
+            "rev" : "0158e7afc77f4b1000000013338a710",
+            "size" : 13,
+            "is_downloadable" : true,
+            "content_hash" : "19ccaf95189fe3af15e096f727d406c434d55dd87912bb5134655730d89dbc68"
+          } ]
+        }"#;
+        let map: SerdeMap<String, SerdeValue> = serde_json::from_str(&json).unwrap();
+
+        assert!(retrieve_value("/entries/0/size", &map).unwrap() == "13")
     }
 }

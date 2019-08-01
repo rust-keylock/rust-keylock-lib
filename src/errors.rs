@@ -30,7 +30,8 @@ use stream_cipher::LoopError;
 use url;
 use tokio;
 use futures::Canceled;
-use j4rs;
+use reqwest;
+use serde_json;
 
 pub type Result<T> = result::Result<T, RustKeylockError>;
 
@@ -171,8 +172,20 @@ impl From<tokio::timer::timeout::Error<Canceled>> for RustKeylockError {
     }
 }
 
-impl From<j4rs::errors::J4RsError> for RustKeylockError {
-    fn from(err: j4rs::errors::J4RsError) -> RustKeylockError {
-        RustKeylockError::GeneralError(format!("{:?}", err))
+impl From<reqwest::Error> for RustKeylockError {
+    fn from(err: reqwest::Error) -> RustKeylockError {
+        RustKeylockError::HttpError(format!("{:?}", err))
+    }
+}
+
+impl From<serde_json::error::Error> for RustKeylockError {
+    fn from(err: serde_json::error::Error) -> RustKeylockError {
+        RustKeylockError::ParseError(format!("{:?}", err))
+    }
+}
+
+impl From<std::str::Utf8Error> for RustKeylockError {
+    fn from(err: std::str::Utf8Error) -> RustKeylockError {
+        RustKeylockError::ParseError(format!("{:?}", err))
     }
 }
