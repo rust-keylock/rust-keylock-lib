@@ -42,6 +42,8 @@ pub mod dropbox;
 
 pub const ASYNC_EDITOR_PARK_TIMEOUT: Duration = time::Duration::from_millis(10);
 
+pub(crate) type BoxedRklHttpAsyncClient = Box<dyn RklHttpAsyncClient<RES_TYPE=Vec<u8>>>;
+
 /// Executes a task in a new thread
 pub fn execute_task(task: Box<AsyncTask>, every: time::Duration) -> AsyncTaskHandle {
     let (tx_loop_control, rx_loop_control): (Sender<bool>, Receiver<bool>) = mpsc::channel();
@@ -487,14 +489,8 @@ pub(crate) enum SyncStatus {
     None,
 }
 
-pub(crate) trait RklHttpSyncClient {
-    type RES_TYPE;
-    fn header(&mut self, k: &str, v: &str);
-    fn get(&mut self, uri: &str, additional_headers: &[(&str, &str)]) -> errors::Result<Self::RES_TYPE>;
-    fn post(&mut self, uri: &str, additional_headers: &[(&str, &str)], body: Vec<u8>) -> errors::Result<Self::RES_TYPE>;
-}
-
-pub(crate) trait RklHttpAsyncClient: Send + Clone {
+/// The trait to be implemented by HTTP clients. Used for synchronization with dropbox, nextcloud etc.
+pub(crate) trait RklHttpAsyncClient: Send {
     type RES_TYPE;
     fn header(&mut self, k: &str, v: &str);
     fn get(&mut self, uri: &str, additional_headers: &[(&str, &str)]) -> Box<dyn Future<Item=Self::RES_TYPE, Error=RustKeylockError> + Send>;
@@ -507,8 +503,14 @@ pub(crate) struct ReqwestClient {
     client: OfficialReqwestClient,
 }
 
+impl Default for ReqwestClient {
+    fn default() -> Self {
+        ReqwestClient::new()
+    }
+}
+
 impl ReqwestClient {
-    fn new() -> ReqwestClient {
+    pub(crate) fn new() -> ReqwestClient {
         let client = OfficialReqwestClient::new();
         let headers = HeaderMap::new();
         ReqwestClient { headers, client }
@@ -585,70 +587,33 @@ impl RklHttpAsyncClient for ReqwestClient {
             .and_then(Self::get_body))
     }
 }
-/*
-impl RklHttpSyncClient for ReqwestClient {
-    type RES_TYPE = Vec<u8>;
 
-    fn header(&mut self, k: &str, v: &str) {
-        self.headers.insert(HeaderName::from_str(k).unwrap_or_else(|error| {
-            error!("{:?}", error);
-            HeaderName::from_static("")
-        }), HeaderValue::from_str(v).unwrap_or_else(|error| {
-            error!("{:?}", error);
-            HeaderValue::from_static("")
-        }));
+/// The trait to be implemented by HTTP client factories. Provides the needed abstraction that makes the RklHttpAsyncClients testable.
+pub(crate) trait RklHttpAsyncFactory: Send {
+    type CLIENT_RES_TYPE;
+    fn init_factory(&mut self);
+    fn create(&self) -> Box<dyn RklHttpAsyncClient<RES_TYPE=Self::CLIENT_RES_TYPE>>;
+}
+
+pub(crate) struct ReqwestClientFactory {}
+
+impl ReqwestClientFactory {
+    pub(crate) fn new() -> ReqwestClientFactory {
+        ReqwestClientFactory {}
+    }
+}
+
+impl RklHttpAsyncFactory for ReqwestClientFactory {
+    type CLIENT_RES_TYPE = Vec<u8>;
+
+    fn init_factory(&mut self) {
+        // Nothing needed yet
     }
 
-    fn get(&mut self, uri: &str, additional_headers: &[(&str, &str)]) -> errors::Result<Vec<u8>> {
-        let mut builder = self.client
-            .get(uri)
-            .headers(self.headers.clone());
-        for (k, v) in additional_headers {
-            builder = builder.header(HeaderName::from_str(k).unwrap_or_else(|error| {
-                error!("{:?}", error);
-                HeaderName::from_static("")
-            }), HeaderValue::from_str(v).unwrap_or_else(|error| {
-                error!("{:?}", error);
-                HeaderValue::from_static("")
-            }));
-        }
-        let response = builder.send()?;
-        Self::validate_response(&response)?;
-
-        let mut to_return = Vec::new();
-
-        for b in response.bytes() {
-            to_return.push(b?);
-        }
-
-        Ok(to_return)
+    fn create(&self) -> Box<RklHttpAsyncClient<RES_TYPE=Self::CLIENT_RES_TYPE>> {
+        Box::new(ReqwestClient::default())
     }
-
-    fn post(&mut self, uri: &str, additional_headers: &[(&str, &str)], body: Vec<u8>) -> errors::Result<Vec<u8>> {
-        let mut builder = self.client
-            .post(uri)
-            .headers(self.headers.clone())
-            .body(body);
-        for (k, v) in additional_headers {
-            builder = builder.header(HeaderName::from_str(k).unwrap_or_else(|error| {
-                error!("{:?}", error);
-                HeaderName::from_static("")
-            }), HeaderValue::from_str(v).unwrap_or_else(|error| {
-                error!("{:?}", error);
-                HeaderValue::from_static("")
-            }));
-        }
-        let response = builder.send()?;
-        Self::validate_response(&response)?;
-        let mut to_return = Vec::new();
-
-        for b in response.bytes() {
-            to_return.push(b?);
-        }
-
-        Ok(to_return)
-    }
-}*/
+}
 
 #[cfg(test)]
 mod async_tests {

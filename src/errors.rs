@@ -18,7 +18,7 @@ use base64::DecodeError;
 use http;
 use hyper;
 use native_tls;
-use std::{fmt, result, time};
+use std::{fmt, result, time, sync};
 use std::error::Error;
 use std::fmt::Debug;
 use std::io;
@@ -187,5 +187,11 @@ impl From<serde_json::error::Error> for RustKeylockError {
 impl From<std::str::Utf8Error> for RustKeylockError {
     fn from(err: std::str::Utf8Error) -> RustKeylockError {
         RustKeylockError::ParseError(format!("{:?}", err))
+    }
+}
+
+impl <T> From<sync::PoisonError<T>> for RustKeylockError {
+    fn from(err: sync::PoisonError<T>) -> RustKeylockError {
+        RustKeylockError::GeneralError(format!("{:?}", err))
     }
 }

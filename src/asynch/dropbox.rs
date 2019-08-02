@@ -36,13 +36,15 @@ use toml;
 use toml::value::Table;
 use url::Url;
 
-use crate::asynch::{self, ReqwestClient, RklHttpAsyncClient, ServerVersionData, SynchronizerAction, SyncStatus};
+use crate::asynch::{self, BoxedRklHttpAsyncClient, RklHttpAsyncFactory, ServerVersionData, SynchronizerAction, SyncStatus};
 use crate::datacrypt::{create_random, EntryPasswordCryptor};
 use crate::errors;
 use crate::errors::RustKeylockError;
 use crate::file_handler;
 use crate::SystemConfiguration;
 use crate::utils;
+
+type ArcMutexRklHttpAsyncClient = Arc<Mutex<BoxedRklHttpAsyncClient>>;
 
 const APP_KEY: &str = "7git6ovjwtdbfvm";
 const HTTP_GET_RESPONSE_BODY: &str = r#"
@@ -106,13 +108,16 @@ pub(crate) struct Synchronizer {
     version_local: Option<i64>,
     /// The version that was set during the last sync
     last_sync_version: Option<i64>,
+    /// The factory that creates HTTP clients
+    client_factory: Box<dyn RklHttpAsyncFactory<CLIENT_RES_TYPE=Vec<u8>>>,
 }
 
 impl Synchronizer {
     pub(crate) fn new(dbc: &DropboxConfiguration,
                       sys_conf: &SystemConfiguration,
                       tx: Sender<errors::Result<SyncStatus>>,
-                      f: &str)
+                      f: &str,
+                      client_factory: Box<dyn RklHttpAsyncFactory<CLIENT_RES_TYPE=Vec<u8>>>)
                       -> errors::Result<Synchronizer> {
         let s = Synchronizer {
             conf: dbc.clone(),
@@ -121,6 +126,7 @@ impl Synchronizer {
             saved_at_local: sys_conf.saved_at,
             version_local: sys_conf.version,
             last_sync_version: sys_conf.last_sync_version,
+            client_factory,
         };
         Ok(s)
     }
@@ -135,15 +141,16 @@ impl Synchronizer {
         let saved_at_local = self.saved_at_local.clone();
         let version_local = self.version_local.clone();
         let last_sync_version = self.last_sync_version.clone();
+        let mut client = self.client_factory.create();
         result(self.use_token())
             .and_then(move |token| {
-                let mut client = ReqwestClient::new();
                 client.header("Authorization", &format!("Bearer {}", token));
-                ok(client)
+                ok(Arc::new(Mutex::new(client)))
             })
             .and_then(move |client| {
-                Self::get_version(client)
-                    .map(move |(sv, client)| (
+                let c = Arc::clone(&client);
+                Self::get_version(c)
+                    .map(move |sv| (
                         sv,
                         client,
                         file_name,
@@ -153,16 +160,15 @@ impl Synchronizer {
             })
             .and_then(|(server_version, client, file_name, saved_at_local, version_local, last_sync_version)| {
                 asynch::synchronizer_action(&server_version, &file_name, &saved_at_local, &version_local, &last_sync_version)
-                    .map(|sa| (sa, client, file_name, version_local, saved_at_local))
+                    .map(move |sa| (sa, client, file_name, version_local, saved_at_local))
             })
             .and_then(|(synchronizer_action, client, file_name, version_local, saved_at_local)| {
                 Self::parse_synchronizer_action(synchronizer_action, &file_name, client, version_local, saved_at_local)
             })
     }
 
-    fn get_version(client: ReqwestClient) -> impl Future<Item=(ServerVersionData, ReqwestClient), Error=RustKeylockError> {
-        let mut client = client;
-        let client_clone = client.clone();
+    fn get_version(client: ArcMutexRklHttpAsyncClient) -> impl Future<Item=ServerVersionData, Error=RustKeylockError> {
+        let mut client = client.lock().expect("Locking the client during get_version");
         client.post(
             "https://content.dropboxapi.com/2/files/download",
             &[("Dropbox-API-Arg", r#"{"path": "/.version"}"#)],
@@ -171,12 +177,12 @@ impl Synchronizer {
                 let s = std::str::from_utf8(bytes.as_ref())?;
                 parse_version_str(s)
             })
-            .and_then(|version_data| ok((version_data, client)))
-            .or_else(|_| ok((ServerVersionData::default(), client_clone)))
+            .or_else(|_| ok(ServerVersionData::default()))
+            .and_then(|version_data| ok(version_data))
     }
 
-    fn download(filename: &str, client: ReqwestClient) -> impl Future<Item=(String, ReqwestClient), Error=RustKeylockError> {
-        let mut client = client;
+    fn download(filename: &str, client: ArcMutexRklHttpAsyncClient) -> impl Future<Item=String, Error=RustKeylockError> {
+        let mut client = client.lock().expect("Locking the client during download");
         let tmp_file_name = format!("tmp_{}", filename);
 
         client.post(
@@ -185,13 +191,14 @@ impl Synchronizer {
             Vec::new())
             .and_then(|bytes| {
                 file_handler::save_bytes(&tmp_file_name, &bytes, false)
-                    .and_then(|_| Ok(tmp_file_name))
+                    .map(|_| tmp_file_name)
             })
-            .map(|tmp_file_name| (tmp_file_name, client))
+            .and_then(|tmp_file_name| {
+                ok(tmp_file_name)
+            })
     }
 
-    fn upload(filename: &str, client: ReqwestClient) -> impl Future<Item=ReqwestClient, Error=RustKeylockError> {
-        let mut client = client;
+    fn upload(filename: &str, client: ArcMutexRklHttpAsyncClient) -> impl Future<Item=(), Error=RustKeylockError> {
         let filename_string = filename.to_string();
         result(file_handler::get_file(filename))
             .and_then(|mut file| {
@@ -199,24 +206,24 @@ impl Synchronizer {
                 result(file.read_to_end(&mut post_body))
                     .from_err()
                     .and_then(move |_| {
+                        let mut client = client.lock().expect("Locking the client during upload");
                         client.post(
                             "https://content.dropboxapi.com/2/files/upload",
                             &[
                                 ("Dropbox-API-Arg", &format!(r#"{{"path":"/{}","mode":"overwrite"}}"#, filename_string)),
                                 ("Content-Type", "application/octet-stream"),
                             ],
-                            post_body).map(|_| client)
+                            post_body).map(|_| ())
                     })
             })
-            .and_then(|c| ok(c))
     }
 
-    fn parse_synchronizer_action(sa: SynchronizerAction, filename: &str, client: ReqwestClient, version_local: Option<i64>, saved_at_local: Option<i64>) -> Box<dyn Future<Item=SyncStatus, Error=RustKeylockError> + Send> {
+    fn parse_synchronizer_action(sa: SynchronizerAction, filename: &str, client: ArcMutexRklHttpAsyncClient, version_local: Option<i64>, saved_at_local: Option<i64>) -> Box<dyn Future<Item=SyncStatus, Error=RustKeylockError> + Send> {
         match sa {
             SynchronizerAction::Download => {
                 info!("Downloading file from the server");
                 Box::new(Self::download(filename, client)
-                    .and_then(|(tmp_file_name, _)| Ok(SyncStatus::NewAvailable("dropbox", tmp_file_name))))
+                    .and_then(|tmp_file_name| ok(SyncStatus::NewAvailable("dropbox", tmp_file_name))))
             }
             SynchronizerAction::Ignore => {
                 debug!("No sync is needed");
@@ -229,14 +236,14 @@ impl Synchronizer {
             }
             SynchronizerAction::DownloadMergeAndUpload => {
                 let filename_clone = filename.to_string();
-                let client_clone = client.clone();
+                let client2 = Arc::clone(&client);
                 Box::new(Self::download(filename, client)
-                    .and_then(|(tmp_file_name, _)| {
+                    .and_then(|tmp_file_name| {
                         ok(SyncStatus::NewToMerge("dropbox", tmp_file_name))
                     })
                     .or_else(move |_| {
                         info!("Could not download from the server and do the merge. The files do not exist. Uploading...");
-                        Self::upload_all(&filename_clone, client_clone, version_local, saved_at_local)
+                        Self::upload_all(&filename_clone, client2, version_local, saved_at_local)
                             .and_then(|_| {
                                 ok(SyncStatus::UploadSuccess("dropbox"))
                             })
@@ -245,15 +252,16 @@ impl Synchronizer {
         }
     }
 
-    fn upload_all(filename: &str, client: ReqwestClient, version_local: Option<i64>, saved_at_local: Option<i64>) -> impl Future<Item=ReqwestClient, Error=RustKeylockError> {
+    fn upload_all(filename: &str, client: ArcMutexRklHttpAsyncClient, version_local: Option<i64>, saved_at_local: Option<i64>) -> impl Future<Item=(), Error=RustKeylockError> {
+        let client2 = Arc::clone(&client);
         Self::upload(filename, client)
-            .and_then(move |client| {
-                create_version_file_locally(version_local, saved_at_local).map(|_| client)
+            .and_then(move |_| {
+                create_version_file_locally(version_local, saved_at_local)
             })
-            .and_then(|client| Self::upload(".version", client))
-            .and_then(|client| {
+            .and_then(|_| Self::upload(".version", client2))
+            .and_then(|_| {
                 let _ = file_handler::delete_file(".version");
-                ok(client)
+                ok(())
             })
     }
 
@@ -542,6 +550,7 @@ mod dropbox_tests {
     use hyper::rt::{self, Future};
 
     use super::*;
+    use crate::asynch::ReqwestClientFactory;
 
     //    #[test]
 //    #[ignore]
@@ -553,9 +562,10 @@ mod dropbox_tests {
             &DropboxConfiguration::new(env::var("DBX_TOKEN").unwrap().to_string()).unwrap(),
             &sc,
             tx,
-            ".sec").unwrap();
+            ".sec",
+            Box::new(ReqwestClientFactory::new())).unwrap();
 
-        s.do_execute().unwrap();
+        s.do_execute();
     }
 
     #[test]

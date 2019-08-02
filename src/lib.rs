@@ -53,6 +53,7 @@ pub use file_handler::default_rustkeylock_location;
 
 use crate::asynch::dropbox::DropboxConfiguration;
 use crate::asynch::nextcloud::NextcloudConfiguration;
+use crate::asynch::ReqwestClientFactory;
 
 use self::api::{
     Props,
@@ -853,7 +854,13 @@ fn spawn_dropbox_async_task(filename: &str,
     // Create a new channel
     let (tx, rx) = mpsc::channel();
     let every = time::Duration::from_millis(10000);
-    let dbx = dropbox::Synchronizer::new(&configuration.dropbox, &configuration.system, tx, filename).unwrap();
+    let dbx = dropbox::Synchronizer::new(
+        &configuration.dropbox,
+        &configuration.system,
+        tx,
+        filename,
+        Box::new(ReqwestClientFactory::new()),
+    ).unwrap();
     (asynch::execute_task(Box::new(dbx), every), rx)
 }
 
