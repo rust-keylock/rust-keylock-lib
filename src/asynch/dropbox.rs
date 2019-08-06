@@ -541,32 +541,18 @@ fn retrieve_token_and_state_from_post_body(post_body: &str) -> errors::Result<(S
 
 #[cfg(test)]
 mod dropbox_tests {
-    use std::env;
+    use std::collections::HashMap;
     use std::sync::mpsc;
+    use std::sync::mpsc::Receiver;
     use std::thread;
     use std::time;
 
     use hyper::{Client, Method, Request};
     use hyper::rt::{self, Future};
 
+    use crate::asynch::RklHttpAsyncClient;
+
     use super::*;
-    use crate::asynch::ReqwestClientFactory;
-
-    //    #[test]
-//    #[ignore]
-    fn _invoke() {
-        let (tx, _rx) = mpsc::channel();
-
-        let sc = SystemConfiguration::new(Some(11), Some(11), None);
-        let s = Synchronizer::new(
-            &DropboxConfiguration::new(env::var("DBX_TOKEN").unwrap().to_string()).unwrap(),
-            &sc,
-            tx,
-            ".sec",
-            Box::new(ReqwestClientFactory::new())).unwrap();
-
-        s.do_execute();
-    }
 
     #[test]
     fn test_parse_version_str() {
@@ -720,5 +706,185 @@ mod dropbox_tests {
         let token = "thisisatoken";
         let dbx = DropboxConfiguration::new(token.to_string()).unwrap();
         assert!(dbx.decrypted_token().unwrap() == token);
+    }
+
+    #[test]
+    fn download() {
+        let (tx, rx): (Sender<errors::Result<String>>, Receiver<errors::Result<String>>) = mpsc::channel();
+        let tx_clone = tx.clone();
+
+        let mut client = TestHttpClient::new();
+        client.header("Authorization", "Bearer thisisatoken");
+
+        let mut validation_headers = HashMap::new();
+        validation_headers.insert("Dropbox-API-Arg".to_string(), format!(r#"{{"path": "/afile"}}"#));
+        validation_headers.insert("Authorization".to_string(), "Bearer thisisatoken".to_string());
+
+        client.add_validation_step(TestHttpClientValidationStep {
+            uri: Some("https://content.dropboxapi.com/2/files/download".to_string()),
+            response: Vec::from("tmp_afile"),
+            headers: validation_headers,
+        });
+
+        tokio::run(Synchronizer::download("afile", client.to_arc())
+            .map(move |tmp_file_name| {
+                let _ = tx.send(Ok(tmp_file_name));
+            })
+            .map_err(move |error| {
+                let _ = tx_clone.send(Err(error));
+            }));
+
+        rx.recv_timeout(time::Duration::from_millis(10000)).unwrap().unwrap();
+    }
+
+    #[test]
+    fn upload() {
+        let (tx, rx): (Sender<errors::Result<()>>, Receiver<errors::Result<()>>) = mpsc::channel();
+        let tx_clone = tx.clone();
+
+        let mut client = TestHttpClient::new();
+        client.header("Authorization", "Bearer thisisatoken");
+
+        let mut validation_headers = HashMap::new();
+        validation_headers.insert("Authorization".to_string(), "Bearer thisisatoken".to_string());
+        validation_headers.insert("Dropbox-API-Arg".to_string(), format!(r#"{{"path":"/afile","mode":"overwrite"}}"#));
+        validation_headers.insert("Content-Type".to_string(), "application/octet-stream".to_string());
+
+        client.add_validation_step(TestHttpClientValidationStep {
+            uri: Some("https://content.dropboxapi.com/2/files/upload".to_string()),
+            response: Vec::from("tmp_afile"),
+            headers: validation_headers,
+        });
+
+        file_handler::save_bytes("afile", "123".as_bytes(), false).unwrap();
+
+        tokio::run(Synchronizer::upload("afile", client.to_arc())
+            .map(move |_| {
+                let _ = tx.send(Ok(()));
+            })
+            .map_err(move |error| {
+                let _ = tx_clone.send(Err(error));
+            }));
+
+        rx.recv_timeout(time::Duration::from_millis(10000)).unwrap().unwrap();
+        let _ = file_handler::delete_file("afile");
+    }
+
+    #[test]
+    fn get_version() {
+        let (tx, rx): (Sender<errors::Result<ServerVersionData>>, Receiver<errors::Result<ServerVersionData>>) = mpsc::channel();
+        let tx_clone = tx.clone();
+
+        let mut client = TestHttpClient::new();
+        client.header("Authorization", "Bearer thisisatoken");
+
+        let mut validation_headers = HashMap::new();
+        validation_headers.insert("Authorization".to_string(), "Bearer thisisatoken".to_string());
+        validation_headers.insert("Dropbox-API-Arg".to_string(), r#"{"path": "/.version"}"#.to_string());
+
+        client.add_validation_step(TestHttpClientValidationStep {
+            uri: Some("https://content.dropboxapi.com/2/files/download".to_string()),
+            response: Vec::from("1,2"),
+            headers: validation_headers,
+        });
+
+
+        tokio::run(Synchronizer::get_version(client.to_arc())
+            .map(move |svd| {
+                let _ = tx.send(Ok(svd));
+            })
+            .map_err(move |error| {
+                let _ = tx_clone.send(Err(error));
+            }));
+
+        let svd = rx.recv_timeout(time::Duration::from_millis(10000)).unwrap().unwrap();
+        assert!(svd.version == "1");
+        assert!(svd.last_modified == "2");
+    }
+
+    #[derive(Debug, Clone)]
+    struct TestHttpClientValidationStep {
+        headers: HashMap<String, String>,
+        response: Vec<u8>,
+        uri: Option<String>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct TestHttpClient {
+        headers: HashMap<String, String>,
+        validation_steps: Vec<TestHttpClientValidationStep>,
+    }
+
+    impl TestHttpClient {
+        fn to_arc(self) -> Arc<Mutex<Box<dyn RklHttpAsyncClient<RES_TYPE=Vec<u8>>>>> {
+            Arc::new(Mutex::new(Box::new(self)))
+        }
+
+        fn new() -> TestHttpClient {
+            TestHttpClient {
+                headers: HashMap::new(),
+                validation_steps: Vec::new(),
+            }
+        }
+
+        fn add_validation_step(&mut self, validation_step: TestHttpClientValidationStep) {
+            self.validation_steps.push(validation_step);
+        }
+
+        fn validate_headers(current: &HashMap<String, String>, correct: &HashMap<String, String>) -> errors::Result<()> {
+            if current == correct {
+                Ok(())
+            } else {
+                Err(RustKeylockError::GeneralError(format!("Headers validation failed. Should be {:?} but was {:?}", correct, current)))
+            }
+        }
+
+        fn validate_uris(current: &str, correct: &Option<String>) -> errors::Result<()> {
+            if correct.is_some() {
+                if current == correct.as_ref().unwrap() {
+                    Ok(())
+                } else {
+                    Err(RustKeylockError::GeneralError(format!("URIs validation failed. Should be {:?} but was {:?}", correct, current)))
+                }
+            } else {
+                Ok(())
+            }
+        }
+
+        fn handle_request(&mut self, uri: &str, additional_headers: &[(&str, &str)]) -> Box<dyn Future<Item=Vec<u8>, Error=RustKeylockError> + Send> {
+            let mut current_headers = self.headers.clone();
+            let current_uri = uri.to_owned();
+            for (additional_k, additional_v) in additional_headers {
+                current_headers.insert(additional_k.to_string(), additional_v.to_string());
+            }
+            let headers_and_responses_result = self.validation_steps.pop().ok_or(RustKeylockError::GeneralError("There are no available responses".to_string()));
+            Box::new(
+                result(headers_and_responses_result)
+                    .and_then(move |validation_step| {
+                        let response_to_send: Vec<u8> = validation_step.response.iter().cloned().collect();
+                        Self::validate_headers(&current_headers, &validation_step.headers)
+                            .and_then(|_| Self::validate_uris(&current_uri, &validation_step.uri))
+                            .map(|_| response_to_send)
+                    })
+                    .and_then(|response_to_send| {
+                        ok(response_to_send)
+                    }))
+        }
+    }
+
+    impl RklHttpAsyncClient for TestHttpClient {
+        type RES_TYPE = Vec<u8>;
+
+        fn header(&mut self, k: &str, v: &str) {
+            self.headers.insert(k.to_string(), v.to_string());
+        }
+
+        fn get(&mut self, uri: &str, additional_headers: &[(&str, &str)]) -> Box<dyn Future<Item=Vec<u8>, Error=RustKeylockError> + Send> {
+            self.handle_request(uri, additional_headers)
+        }
+
+        fn post(&mut self, uri: &str, additional_headers: &[(&str, &str)], _body: Vec<u8>) -> Box<dyn Future<Item=Vec<u8>, Error=RustKeylockError> + Send> {
+            self.handle_request(uri, additional_headers)
+        }
     }
 }
