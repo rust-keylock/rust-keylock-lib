@@ -717,16 +717,16 @@ mod dropbox_tests {
         client.header("Authorization", "Bearer thisisatoken");
 
         let mut validation_headers = HashMap::new();
-        validation_headers.insert("Dropbox-API-Arg".to_string(), format!(r#"{{"path": "/afile"}}"#));
+        validation_headers.insert("Dropbox-API-Arg".to_string(), format!(r#"{{"path": "/afile_dld"}}"#));
         validation_headers.insert("Authorization".to_string(), "Bearer thisisatoken".to_string());
 
         client.add_validation_step(TestHttpClientValidationStep {
             uri: Some("https://content.dropboxapi.com/2/files/download".to_string()),
-            response: Vec::from("tmp_afile"),
+            response: Vec::from("tmp_afile_dld"),
             headers: validation_headers,
         });
 
-        tokio::run(Synchronizer::download("afile", client.to_arc())
+        tokio::run(Synchronizer::download("afile_dld", client.to_arc())
             .map(move |tmp_file_name| {
                 let _ = tx.send(Ok(tmp_file_name));
             })
@@ -747,18 +747,18 @@ mod dropbox_tests {
 
         let mut validation_headers = HashMap::new();
         validation_headers.insert("Authorization".to_string(), "Bearer thisisatoken".to_string());
-        validation_headers.insert("Dropbox-API-Arg".to_string(), format!(r#"{{"path":"/afile","mode":"overwrite"}}"#));
+        validation_headers.insert("Dropbox-API-Arg".to_string(), format!(r#"{{"path":"/afile_upld","mode":"overwrite"}}"#));
         validation_headers.insert("Content-Type".to_string(), "application/octet-stream".to_string());
 
         client.add_validation_step(TestHttpClientValidationStep {
             uri: Some("https://content.dropboxapi.com/2/files/upload".to_string()),
-            response: Vec::from("tmp_afile"),
+            response: Vec::from("tmp_afile_upld"),
             headers: validation_headers,
         });
 
-        file_handler::save_bytes("afile", "123".as_bytes(), false).unwrap();
+        file_handler::save_bytes("afile_upld", "123".as_bytes(), false).unwrap();
 
-        tokio::run(Synchronizer::upload("afile", client.to_arc())
+        tokio::run(Synchronizer::upload("afile_upld", client.to_arc())
             .map(move |_| {
                 let _ = tx.send(Ok(()));
             })
@@ -767,7 +767,7 @@ mod dropbox_tests {
             }));
 
         rx.recv_timeout(time::Duration::from_millis(10000)).unwrap().unwrap();
-        let _ = file_handler::delete_file("afile");
+        let _ = file_handler::delete_file("afile_upld");
     }
 
     #[test]
@@ -800,6 +800,157 @@ mod dropbox_tests {
         let svd = rx.recv_timeout(time::Duration::from_millis(10000)).unwrap().unwrap();
         assert!(svd.version == "1");
         assert!(svd.last_modified == "2");
+    }
+
+    #[test]
+    fn parse_synchronizer_action_download() {
+        let (tx, rx): (Sender<errors::Result<SyncStatus>>, Receiver<errors::Result<SyncStatus>>) = mpsc::channel();
+        let tx_clone = tx.clone();
+
+        let mut client = AlwaysSuccessfulHttpClient::new();
+
+        client.add_response(Vec::from("irrelevant"));
+
+        tokio::run(Synchronizer::parse_synchronizer_action(SynchronizerAction::Download, "afile_sa_dld", client.to_arc(), Some(1), Some(2))
+            .map(move |sync_status| {
+                let _ = tx.send(Ok(sync_status));
+            })
+            .map_err(move |error| {
+                let _ = tx_clone.send(Err(error));
+            }));
+
+        match rx.recv_timeout(time::Duration::from_millis(10000)).unwrap().unwrap() {
+            SyncStatus::NewAvailable(from, filename) => {
+                assert!(from == "dropbox");
+                assert!(filename == "tmp_afile_sa_dld");
+            }
+            other => panic!("Unexpected SyncStatus: {:?}", other),
+        };
+        let _ = file_handler::delete_file("afile_sa_dld");
+    }
+
+    #[test]
+    fn parse_synchronizer_action_ignore() {
+        let (tx, rx): (Sender<errors::Result<SyncStatus>>, Receiver<errors::Result<SyncStatus>>) = mpsc::channel();
+        let tx_clone = tx.clone();
+
+        let mut client = AlwaysSuccessfulHttpClient::new();
+
+        client.add_response(Vec::from("irrelevant"));
+
+        tokio::run(Synchronizer::parse_synchronizer_action(SynchronizerAction::Ignore, "afile_sa_ign", client.to_arc(), Some(1), Some(2))
+            .map(move |sync_status| {
+                let _ = tx.send(Ok(sync_status));
+            })
+            .map_err(move |error| {
+                let _ = tx_clone.send(Err(error));
+            }));
+
+        match rx.recv_timeout(time::Duration::from_millis(10000)).unwrap().unwrap() {
+            SyncStatus::None => assert!(true),
+            other => panic!("Unexpected SyncStatus: {:?}", other),
+        };
+        let _ = file_handler::delete_file("afile_sa_ign");
+    }
+
+    #[test]
+    fn parse_synchronizer_action_upload() {
+        file_handler::save_bytes("afile_upload", "123".as_bytes(), false).unwrap();
+        file_handler::save_bytes(".version", "123,321".as_bytes(), false).unwrap();
+        let (tx, rx): (Sender<errors::Result<SyncStatus>>, Receiver<errors::Result<SyncStatus>>) = mpsc::channel();
+        let tx_clone = tx.clone();
+
+        let mut client = AlwaysSuccessfulHttpClient::new();
+
+        // We need two responses because the upload_all is called, which makes 2 requests for upload.
+        // One for the .sec file and one for the .version file.
+        client.add_response(Vec::from("irrelevant"));
+        client.add_response(Vec::from("irrelevant"));
+
+        tokio::run(Synchronizer::parse_synchronizer_action(SynchronizerAction::Upload, "afile_upload", client.to_arc(), Some(1), Some(2))
+            .map(move |sync_status| {
+                let _ = tx.send(Ok(sync_status));
+            })
+            .map_err(move |error| {
+                let _ = tx_clone.send(Err(error));
+            }));
+
+        match rx.recv_timeout(time::Duration::from_millis(10000)).unwrap().unwrap() {
+            SyncStatus::UploadSuccess(from) => assert!(from == "dropbox"),
+            other => panic!("Unexpected SyncStatus: {:?}", other),
+        };
+        let _ = file_handler::delete_file("afile_upload");
+        let _ = file_handler::delete_file(".version");
+    }
+
+    #[test]
+    fn parse_synchronizer_action_download_merge_and_upload() {
+        let (tx, rx): (Sender<errors::Result<SyncStatus>>, Receiver<errors::Result<SyncStatus>>) = mpsc::channel();
+        let tx_clone = tx.clone();
+
+        let mut client = AlwaysSuccessfulHttpClient::new();
+
+        client.add_response(Vec::from("irrelevant"));
+
+        tokio::run(Synchronizer::parse_synchronizer_action(SynchronizerAction::DownloadMergeAndUpload, "afile_dmu", client.to_arc(), Some(1), Some(2))
+            .map(move |sync_status| {
+                let _ = tx.send(Ok(sync_status));
+            })
+            .map_err(move |error| {
+                let _ = tx_clone.send(Err(error));
+            }));
+
+        match rx.recv_timeout(time::Duration::from_millis(10000)).unwrap().unwrap() {
+            SyncStatus::NewToMerge(from, filename) => {
+                assert!(from == "dropbox");
+                assert!(filename == "tmp_afile_dmu");
+            }
+            other => panic!("Unexpected SyncStatus: {:?}", other),
+        };
+        let _ = file_handler::delete_file("afile_dmu");
+    }
+
+    struct AlwaysSuccessfulHttpClient {
+        responses: Vec<Vec<u8>>,
+    }
+
+    impl AlwaysSuccessfulHttpClient {
+        fn new() -> AlwaysSuccessfulHttpClient {
+            AlwaysSuccessfulHttpClient {
+                responses: Vec::new(),
+            }
+        }
+
+        fn to_arc(self) -> Arc<Mutex<Box<dyn RklHttpAsyncClient<RES_TYPE=Vec<u8>>>>> {
+            Arc::new(Mutex::new(Box::new(self)))
+        }
+
+        fn add_response(&mut self, response: Vec<u8>) {
+            self.responses.push(response);
+        }
+
+        fn handle_request(&mut self) -> Box<dyn Future<Item=Vec<u8>, Error=RustKeylockError> + Send> {
+            let response_result = self.responses.pop().ok_or(RustKeylockError::GeneralError("There are no available responses".to_string()));
+            Box::new(
+                result(response_result)
+                    .and_then(|response_to_send| {
+                        ok(response_to_send)
+                    }))
+        }
+    }
+
+    impl RklHttpAsyncClient for AlwaysSuccessfulHttpClient {
+        type RES_TYPE = Vec<u8>;
+
+        fn header(&mut self, _: &str, _: &str) {}
+
+        fn get(&mut self, _: &str, _: &[(&str, &str)]) -> Box<dyn Future<Item=Vec<u8>, Error=RustKeylockError> + Send> {
+            self.handle_request()
+        }
+
+        fn post(&mut self, _: &str, _: &[(&str, &str)], _: Vec<u8>) -> Box<dyn Future<Item=Vec<u8>, Error=RustKeylockError> + Send> {
+            self.handle_request()
+        }
     }
 
     #[derive(Debug, Clone)]
