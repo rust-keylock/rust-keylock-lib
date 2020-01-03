@@ -18,21 +18,23 @@
 use std::cmp::PartialEq;
 use std::fmt::Debug;
 use std::iter::repeat;
-use bcrypt::bcrypt;
-use base64;
+use std::thread;
+use std::thread::JoinHandle;
+
 use aes_ctr::Aes256Ctr;
 use aes_ctr::stream_cipher::generic_array::GenericArray;
+use base64;
 use ctr::stream_cipher::{NewStreamCipher, SyncStreamCipher};
 use hkdf::Hkdf;
 use rand::{Rng, RngCore};
 use rand::rngs::OsRng;
 use sha2::Sha256;
 use sha3::{Digest, Sha3_512};
-use std::thread;
+
+use bcrypt::bcrypt;
 
 use super::errors::{self, RustKeylockError};
 use super::protected::RklSecret;
-use std::thread::JoinHandle;
 
 const NUMBER_OF_SALT_KEY_PAIRS: usize = 10;
 
@@ -89,7 +91,7 @@ impl BcryptAes {
 
         let info = b"rust-keylock";
 
-        let hk = Hkdf::<Sha256>::extract(Some(&salt), &ikm);
+        let hk = Hkdf::<Sha256>::new(Some(&salt), &ikm);
         let mut okm: Vec<u8> = repeat(0u8).take(output_bytes_size as usize).collect();
         hk.expand(info, &mut okm).unwrap();
 
@@ -223,8 +225,7 @@ impl Cryptor for BcryptAes {
         let iv = create_random(16);
         // Choose randomly one of the salt-key pairs
         let idx = {
-            let mut rng = OsRng::new().ok().unwrap();
-            rng.gen_range(0, NUMBER_OF_SALT_KEY_PAIRS)
+            OsRng.gen_range(0, NUMBER_OF_SALT_KEY_PAIRS)
         };
         let salt_key_pair = &self.salt_key_pairs[idx];
 
@@ -392,8 +393,7 @@ impl Hasher for Sha3Keccak512 {
 /// Creates a pseudo-random array of bytes with the given size
 pub fn create_random(size: usize) -> Vec<u8> {
     let mut random: Vec<u8> = repeat(0u8).take(size).collect();
-    let mut rng = OsRng::new().ok().unwrap();
-    rng.fill_bytes(&mut random);
+    OsRng.fill_bytes(&mut random);
     random
 }
 

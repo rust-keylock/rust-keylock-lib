@@ -45,7 +45,7 @@ pub const ASYNC_EDITOR_PARK_TIMEOUT: Duration = time::Duration::from_millis(10);
 pub(crate) type BoxedRklHttpAsyncClient = Box<dyn RklHttpAsyncClient<RES_TYPE=Vec<u8>>>;
 
 /// Executes a task in a new thread
-pub fn execute_task(task: Box<AsyncTask>, every: time::Duration) -> AsyncTaskHandle {
+pub fn execute_task(task: Box<dyn AsyncTask>, every: time::Duration) -> AsyncTaskHandle {
     let (tx_loop_control, rx_loop_control): (Sender<bool>, Receiver<bool>) = mpsc::channel();
 
     let mut task = task;
@@ -610,7 +610,7 @@ impl RklHttpAsyncFactory for ReqwestClientFactory {
         // Nothing needed yet
     }
 
-    fn create(&self) -> Box<RklHttpAsyncClient<RES_TYPE=Self::CLIENT_RES_TYPE>> {
+    fn create(&self) -> Box<dyn RklHttpAsyncClient<RES_TYPE=Self::CLIENT_RES_TYPE>> {
         Box::new(ReqwestClient::default())
     }
 }

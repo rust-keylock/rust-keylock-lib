@@ -23,8 +23,8 @@ use log::*;
 use crate::{Editor, errors};
 use crate::api::{Menu, MessageSeverity, UserOption, UserSelection};
 
-pub(crate) fn add_to_clipboard(content: String, editor: &Editor) -> UserSelection {
-    let res = match ClipboardProvider::new() as Result<ClipboardContext, Box<std::error::Error>> {
+pub(crate) fn add_to_clipboard(content: String, editor: &dyn Editor) -> UserSelection {
+    let res = match ClipboardProvider::new() as Result<ClipboardContext, Box<dyn std::error::Error>> {
         Ok(mut ctx) => {
             ctx.set_contents(content).map_err(|error| errors::RustKeylockError::GeneralError(error.description().to_string()))
         }
@@ -61,7 +61,7 @@ mod selection_handling_unit_tests {
         let content = String::from("This is content");
         let u = super::add_to_clipboard(content.clone(), &TestEditor::new());
         assert!(u == UserSelection::GoTo(Menu::Current));
-        match ClipboardProvider::new() as Result<ClipboardContext, Box<std::error::Error>> {
+        match ClipboardProvider::new() as Result<ClipboardContext, Box<dyn std::error::Error>> {
             Ok(mut ctx) => {
                 let clip_res = ctx.get_contents();
                 assert!(clip_res.is_ok());

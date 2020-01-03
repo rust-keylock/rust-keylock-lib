@@ -325,7 +325,7 @@ impl CoreLogicHandler {
     fn new(editor: AsyncEditorFacade, props: Props) -> CoreLogicHandler {
         let mut editor = editor;
         // Holds the UserSelections
-        let mut user_selection;
+        let user_selection;
 
         // Keeps the sensitive data
         let mut safe = Safe::new();
@@ -760,7 +760,7 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
                                      filename: &str,
                                      safe: &mut Safe,
                                      configuration: &mut RklConfiguration,
-                                     editor: &Editor,
+                                     editor: &dyn Editor,
                                      props: &Props)
                                      -> (UserSelection, datacrypt::BcryptAes) {
     let user_selection: UserSelection;
@@ -1280,7 +1280,7 @@ mod unit_tests {
 
         super::execute(editor);
 
-        match ClipboardProvider::new() as Result<ClipboardContext, Box<std::error::Error>> {
+        match ClipboardProvider::new() as Result<ClipboardContext, Box<dyn std::error::Error>> {
             Ok(mut ctx) => {
                 let clip_res = ctx.get_contents();
                 assert!(clip_res.is_ok());

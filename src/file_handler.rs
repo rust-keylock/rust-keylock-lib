@@ -122,7 +122,7 @@ pub(crate) fn file_exists(file: &PathBuf) -> bool {
 
 /// Loads a toml file with the specified name
 /// If the file does not exist, it is created.
-pub(crate) fn load(filename: &str, cryptor: &Cryptor, use_default_location: bool) -> Result<RklContent, RustKeylockError> {
+pub(crate) fn load(filename: &str, cryptor: &dyn Cryptor, use_default_location: bool) -> Result<RklContent, RustKeylockError> {
     debug!("Loading {}", filename);
     let full_path = if use_default_location {
         default_toml_path(filename)
@@ -292,7 +292,7 @@ pub(crate) fn load_properties(filename: &str) -> Result<Props, RustKeylockError>
 }
 
 /// Attempts to recover a toml file
-pub(crate) fn recover(filename: &str, cryptor: &Cryptor) -> Result<Vec<Entry>, RustKeylockError> {
+pub(crate) fn recover(filename: &str, cryptor: &dyn Cryptor) -> Result<Vec<Entry>, RustKeylockError> {
     info!("Trying to recover {}", filename);
     let full_path = default_toml_path(filename);
     info!("Full path of file to recover {:?}", full_path);
@@ -438,7 +438,7 @@ fn retrieve_dropbox_conf(table: &Table) -> Result<DropboxConfiguration, RustKeyl
 }
 
 /// Loads a file that contains a toml String and returns this String
-fn load_existing_file(file_path: &PathBuf, cryptor_opt: Option<&Cryptor>) -> errors::Result<String> {
+fn load_existing_file(file_path: &PathBuf, cryptor_opt: Option<&dyn Cryptor>) -> errors::Result<String> {
     let bytes = {
         match File::open(file_path) {
             Ok(file) => {
@@ -490,7 +490,7 @@ fn load_existing_file(file_path: &PathBuf, cryptor_opt: Option<&Cryptor>) -> err
 }
 
 /// Saves the specified entries to a toml file with the specified name
-pub(crate) fn save(rkl_content: RklContent, filename: &str, cryptor: &Cryptor, use_default_location: bool) -> errors::Result<()> {
+pub(crate) fn save(rkl_content: RklContent, filename: &str, cryptor: &dyn Cryptor, use_default_location: bool) -> errors::Result<()> {
     info!("Saving rust-keylock content in {}", filename);
     let path_buf = if use_default_location {
         default_toml_path(filename)
