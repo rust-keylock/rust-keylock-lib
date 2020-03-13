@@ -15,7 +15,6 @@
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
 
 use std;
-use std::error::Error;
 
 use clipboard::{ClipboardContext, ClipboardProvider};
 use log::*;
@@ -26,10 +25,10 @@ use crate::api::{Menu, MessageSeverity, UserOption, UserSelection};
 pub(crate) fn add_to_clipboard(content: String, editor: &dyn Editor) -> UserSelection {
     let res = match ClipboardProvider::new() as Result<ClipboardContext, Box<dyn std::error::Error>> {
         Ok(mut ctx) => {
-            ctx.set_contents(content).map_err(|error| errors::RustKeylockError::GeneralError(error.description().to_string()))
+            ctx.set_contents(content).map_err(|error| errors::RustKeylockError::GeneralError(error.to_string()))
         }
         Err(error) => {
-            Err(errors::RustKeylockError::GeneralError(error.description().to_string()))
+            Err(errors::RustKeylockError::GeneralError(error.to_string()))
         }
     };
     match res {
@@ -38,7 +37,7 @@ pub(crate) fn add_to_clipboard(content: String, editor: &dyn Editor) -> UserSele
         }
         Err(error) => {
             error!("Could not copy: {:?}", error);
-            let error_message = format!("Could not copy... Reason: {}", error.description());
+            let error_message = format!("Could not copy... Reason: {}", error);
             let _ = editor.show_message(&error_message, vec![UserOption::ok()], MessageSeverity::Error);
         }
     };

@@ -39,7 +39,6 @@ extern crate toml;
 extern crate xml;
 
 use std::collections::HashMap;
-use std::error::Error;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread;
@@ -102,7 +101,7 @@ pub fn execute_async(editor: Box<dyn AsyncEditor>) {
             let props = match file_handler::load_properties(PROPS_FILENAME) {
                 Ok(m) => m,
                 Err(error) => {
-                    error!("Could not load properties. Using defaults. The error was: {}", error.description());
+                    error!("Could not load properties. Using defaults. The error was: {}", error);
                     Props::default()
                 }
             };
@@ -217,7 +216,7 @@ pub fn execute(editor: Box<dyn Editor>) {
             let props = match file_handler::load_properties(PROPS_FILENAME) {
                 Ok(m) => m,
                 Err(error) => {
-                    error!("Could not load properties. Using defaults. The error was: {}", error.description());
+                    error!("Could not load properties. Using defaults. The error was: {}", error);
                     Props::default()
                 }
             };
@@ -291,7 +290,7 @@ pub fn execute(editor: Box<dyn Editor>) {
                 }
             }
             Err(error) => {
-                error!("Error while receiving command from spawned execution: {:?}", error.description());
+                error!("Error while receiving command from spawned execution: {:?}", error);
                 break;
             }
         }
@@ -717,8 +716,8 @@ Warning: Saving will discard all the entries that could not be recovered.
                         }
                     }
                     Err(error) => {
-                        error!("Error while retrieving Dropbox Authentication token: {} ({:?})", error.description(), error);
-                        let _ = s.editor.show_message(&format!("Error while retrieving Dropbox Authentication token: {}", error.description()), vec![UserOption::ok()], MessageSeverity::Error);
+                        error!("Error while retrieving Dropbox Authentication token: {} ({:?})", error, error);
+                        let _ = s.editor.show_message(&format!("Error while retrieving Dropbox Authentication token: {}", error), vec![UserOption::ok()], MessageSeverity::Error);
                         UserSelection::GoTo(Menu::ShowConfiguration)
                     }
                 }
@@ -789,7 +788,7 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
                         }
                         // In all the other cases, notify the User and retry
                         _ => {
-                            error!("{}", error.description());
+                            error!("{}", error);
                             let s =
                                 editor.show_message("Wrong password or number! Please make sure that both the password and number that you \
                                                    provide are correct.",

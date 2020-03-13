@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
 
-use std::error::Error;
 use std::io::Read;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
@@ -109,7 +108,7 @@ pub(crate) struct Synchronizer {
     /// The version that was set during the last sync
     last_sync_version: Option<i64>,
     /// The factory that creates HTTP clients
-    client_factory: Box<dyn RklHttpAsyncFactory<CLIENT_RES_TYPE=Vec<u8>>>,
+    client_factory: Box<dyn RklHttpAsyncFactory<ClientResType=Vec<u8>>>,
 }
 
 impl Synchronizer {
@@ -117,7 +116,7 @@ impl Synchronizer {
                       sys_conf: &SystemConfiguration,
                       tx: Sender<errors::Result<SyncStatus>>,
                       f: &str,
-                      client_factory: Box<dyn RklHttpAsyncFactory<CLIENT_RES_TYPE=Vec<u8>>>)
+                      client_factory: Box<dyn RklHttpAsyncFactory<ClientResType=Vec<u8>>>)
                       -> errors::Result<Synchronizer> {
         let s = Synchronizer {
             conf: dbc.clone(),
@@ -369,7 +368,7 @@ impl DropboxConfiguration {
     /// Returns true is the configuration contains the needed values to operate correctly
     pub fn is_filled(&self) -> bool {
         let res = self.decrypted_token();
-        (res.is_ok() && res.unwrap() != "")
+        res.is_ok() && res.unwrap() != ""
     }
 }
 
@@ -418,7 +417,7 @@ pub(crate) fn retrieve_token(url_string: String) -> errors::Result<String> {
                             let tx = shared_tx_2.lock().unwrap();
                             let state = &shared_state_2.to_string();
                             let _ = String::from_utf8(v)
-                                .map_err(|error| RustKeylockError::GeneralError(format!("Could not retrieve the request body: {}", error.description())))
+                                .map_err(|error| RustKeylockError::GeneralError(format!("Could not retrieve the request body: {}", error)))
                                 .map(|bdy| {
                                     let fragment = bdy.replace("tkninput=%23", "");
                                     percent_decode(fragment.as_bytes())
@@ -921,7 +920,7 @@ mod dropbox_tests {
             }
         }
 
-        fn to_arc(self) -> Arc<Mutex<Box<dyn RklHttpAsyncClient<RES_TYPE=Vec<u8>>>>> {
+        fn to_arc(self) -> Arc<Mutex<Box<dyn RklHttpAsyncClient<ResType=Vec<u8>>>>> {
             Arc::new(Mutex::new(Box::new(self)))
         }
 
@@ -940,7 +939,7 @@ mod dropbox_tests {
     }
 
     impl RklHttpAsyncClient for AlwaysSuccessfulHttpClient {
-        type RES_TYPE = Vec<u8>;
+        type ResType = Vec<u8>;
 
         fn header(&mut self, _: &str, _: &str) {}
 
@@ -967,7 +966,7 @@ mod dropbox_tests {
     }
 
     impl TestHttpClient {
-        fn to_arc(self) -> Arc<Mutex<Box<dyn RklHttpAsyncClient<RES_TYPE=Vec<u8>>>>> {
+        fn to_arc(self) -> Arc<Mutex<Box<dyn RklHttpAsyncClient<ResType=Vec<u8>>>>> {
             Arc::new(Mutex::new(Box::new(self)))
         }
 
@@ -1024,7 +1023,7 @@ mod dropbox_tests {
     }
 
     impl RklHttpAsyncClient for TestHttpClient {
-        type RES_TYPE = Vec<u8>;
+        type ResType = Vec<u8>;
 
         fn header(&mut self, k: &str, v: &str) {
             self.headers.insert(k.to_string(), v.to_string());

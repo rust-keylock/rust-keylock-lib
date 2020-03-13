@@ -42,7 +42,7 @@ pub mod dropbox;
 
 pub const ASYNC_EDITOR_PARK_TIMEOUT: Duration = time::Duration::from_millis(10);
 
-pub(crate) type BoxedRklHttpAsyncClient = Box<dyn RklHttpAsyncClient<RES_TYPE=Vec<u8>>>;
+pub(crate) type BoxedRklHttpAsyncClient = Box<dyn RklHttpAsyncClient<ResType=Vec<u8>>>;
 
 /// Executes a task in a new thread
 pub fn execute_task(task: Box<dyn AsyncTask>, every: time::Duration) -> AsyncTaskHandle {
@@ -491,10 +491,10 @@ pub(crate) enum SyncStatus {
 
 /// The trait to be implemented by HTTP clients. Used for synchronization with dropbox, nextcloud etc.
 pub(crate) trait RklHttpAsyncClient: Send {
-    type RES_TYPE;
+    type ResType;
     fn header(&mut self, k: &str, v: &str);
-    fn get(&mut self, uri: &str, additional_headers: &[(&str, &str)]) -> Box<dyn Future<Item=Self::RES_TYPE, Error=RustKeylockError> + Send>;
-    fn post(&mut self, uri: &str, additional_headers: &[(&str, &str)], body: Vec<u8>) -> Box<dyn Future<Item=Self::RES_TYPE, Error=RustKeylockError> + Send>;
+    fn get(&mut self, uri: &str, additional_headers: &[(&str, &str)]) -> Box<dyn Future<Item=Self::ResType, Error=RustKeylockError> + Send>;
+    fn post(&mut self, uri: &str, additional_headers: &[(&str, &str)], body: Vec<u8>) -> Box<dyn Future<Item=Self::ResType, Error=RustKeylockError> + Send>;
 }
 
 #[derive(Debug, Clone)]
@@ -536,7 +536,7 @@ impl ReqwestClient {
 }
 
 impl RklHttpAsyncClient for ReqwestClient {
-    type RES_TYPE = Vec<u8>;
+    type ResType = Vec<u8>;
 
     fn header(&mut self, k: &str, v: &str) {
         self.headers.insert(HeaderName::from_str(k).unwrap_or_else(|error| {
@@ -590,9 +590,9 @@ impl RklHttpAsyncClient for ReqwestClient {
 
 /// The trait to be implemented by HTTP client factories. Provides the needed abstraction that makes the RklHttpAsyncClients testable.
 pub(crate) trait RklHttpAsyncFactory: Send {
-    type CLIENT_RES_TYPE;
+    type ClientResType;
     fn init_factory(&mut self);
-    fn create(&self) -> Box<dyn RklHttpAsyncClient<RES_TYPE=Self::CLIENT_RES_TYPE>>;
+    fn create(&self) -> Box<dyn RklHttpAsyncClient<ResType=Self::ClientResType>>;
 }
 
 pub(crate) struct ReqwestClientFactory {}
@@ -604,13 +604,13 @@ impl ReqwestClientFactory {
 }
 
 impl RklHttpAsyncFactory for ReqwestClientFactory {
-    type CLIENT_RES_TYPE = Vec<u8>;
+    type ClientResType = Vec<u8>;
 
     fn init_factory(&mut self) {
         // Nothing needed yet
     }
 
-    fn create(&self) -> Box<dyn RklHttpAsyncClient<RES_TYPE=Self::CLIENT_RES_TYPE>> {
+    fn create(&self) -> Box<dyn RklHttpAsyncClient<ResType=Self::ClientResType>> {
         Box::new(ReqwestClient::default())
     }
 }
