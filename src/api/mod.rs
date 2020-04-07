@@ -350,8 +350,9 @@ pub enum Menu {
     Main,
     /// The User should be presented with a list of all the saved password `Entries`, filtered by the string provided as argument
     EntriesList(String),
-    /// The User should create a new `Entry`
-    NewEntry,
+    /// The User should create a new `Entry`. The optional Entry argument is an initial entry from which the User could start.
+    /// It may contain a system-generated passphrase etc.
+    NewEntry(Option<Entry>),
     /// The User should be presented with a selected `Entry`.
     ///
     /// The index of the `Entry` inside the `Entries` list is provided.
@@ -415,6 +416,9 @@ pub enum UserSelection {
     UpdateConfiguration(AllConfigurations),
     /// The user copies content to the clipboard.
     AddToClipboard(String),
+    /// The user wants to generate a passphrase for en `Entry`.
+    /// Option<usize> is None if the entry for which the passphrase will be generated is new.
+    GeneratePassphrase(Option<usize>, Entry),
 }
 
 impl UserSelection {
@@ -436,6 +440,7 @@ impl UserSelection {
             UserSelection::UserOption(_) => 10,
             UserSelection::UpdateConfiguration(_) => 11,
             UserSelection::AddToClipboard(_) => 12,
+            UserSelection::GeneratePassphrase(_, _) => 13,
         }
     }
 }

@@ -37,6 +37,7 @@ extern crate secstr;
 extern crate sha3;
 extern crate toml;
 extern crate xml;
+extern crate rs_password_utils;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -441,9 +442,9 @@ impl CoreLogicHandler {
                 s.safe.set_filter(filter.clone());
                 s.editor.show_entries(s.safe.get_entries().to_vec(), s.safe.get_filter())
             }
-            UserSelection::GoTo(Menu::NewEntry) => {
+            UserSelection::GoTo(Menu::NewEntry(opt)) => {
                 debug!("UserSelection::GoTo(Menu::NewEntry)");
-                s.editor.show_menu(&Menu::NewEntry)
+                s.editor.show_menu(&Menu::NewEntry(opt))
             }
             UserSelection::GoTo(Menu::ShowEntry(index)) => {
                 debug!("UserSelection::GoTo(Menu::ShowEntry(index))");
@@ -736,6 +737,14 @@ Warning: Saving will discard all the entries that could not be recovered.
                         let _ = s.editor.show_message("Could not obtain the Dropbox token. Please see the logs for more details.", vec![UserOption::ok()], MessageSeverity::Error);
                         UserSelection::GoTo(Menu::ShowConfiguration)
                     }
+                }
+            }
+            UserSelection::GeneratePassphrase(index_opt, mut entry) => {
+                debug!("UserSelection::GoTo(Menu::GeneratePassphrase)");
+                entry.pass = rs_password_utils::dice::generate(5);
+                match index_opt {
+                    Some(index) => s.editor.show_entry(entry, index, EntryPresentationType::Edit),
+                    None => s.editor.show_menu(&Menu::NewEntry(Some(entry))),
                 }
             }
             UserSelection::GoTo(Menu::Current) => {
@@ -1068,7 +1077,7 @@ mod unit_tests {
             // Login
             UserSelection::ProvidedPassword("123".to_string(), 0),
             // Add an entry
-            UserSelection::GoTo(Menu::NewEntry),
+            UserSelection::GoTo(Menu::NewEntry(None)),
             UserSelection::NewEntry(Entry::new("n".to_owned(), "url".to_owned(), "u".to_owned(), "p".to_owned(), "s".to_owned())),
             // Save
             UserSelection::GoTo(Menu::Save(false)),
