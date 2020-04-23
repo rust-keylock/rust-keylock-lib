@@ -347,7 +347,7 @@ impl CoreLogicHandler {
             };
 
             // Take the provided password and do the initialization
-            let (us, cr) = handle_provided_password_for_init(provided_password, FILENAME, &mut safe, &mut configuration, &editor, &props);
+            let (us, cr) = handle_provided_password_for_init(provided_password, FILENAME, &mut safe, &mut configuration, &editor);
             // If a valid nextcloud configuration is in place, spawn the background async execution
             if configuration.nextcloud.is_filled() {
                 let (handle, nextcloud_sync_status_rx) = spawn_nextcloud_async_task(FILENAME, &configuration, &async_task_handles);
@@ -367,7 +367,7 @@ impl CoreLogicHandler {
 
         CoreLogicHandler {
             editor,
-            props,
+            props: props,
             user_selection,
             safe,
             configuration,
@@ -397,8 +397,7 @@ impl CoreLogicHandler {
                     FILENAME,
                     &mut s.safe,
                     &mut s.configuration,
-                    &s.editor,
-                    &s.props);
+                    &s.editor);
                 if update_last_sync_version {
                     s.configuration.update_system_last_sync();
                     let rkl_content = RklContent::from((&s.safe, &s.configuration.nextcloud, &s.configuration.dropbox, &s.configuration.system));
@@ -434,7 +433,7 @@ impl CoreLogicHandler {
             }
             UserSelection::ProvidedPassword(pwd, salt_pos) => {
                 debug!("UserSelection::GoTo(Menu::ProvidedPassword)");
-                s.cryptor = file_handler::create_bcryptor(FILENAME, pwd, salt_pos, true, true, s.props.legacy_handling(), s.props.bcrypt_cost_v8()).unwrap();
+                s.cryptor = file_handler::create_bcryptor(FILENAME, pwd, salt_pos, true, true).unwrap();
                 UserSelection::GoTo(Menu::Main)
             }
             UserSelection::GoTo(Menu::EntriesList(filter)) => {
@@ -501,18 +500,6 @@ impl CoreLogicHandler {
                             error!("Could not save... {:?}", error);
                         }
                     };
-                    if s.props.legacy_handling() || s.props.bcrypt_cost_v8() {
-                        info!("Changing handling from legacy to current");
-                        s.props.set_legacy_handling(false);
-                        s.props.set_bcrypt_cost_v8(false);
-                        match file_handler::save_props(&s.props, PROPS_FILENAME) {
-                            Ok(_) => { /* Ignore */ }
-                            Err(error) => {
-                                let _ = s.editor.show_message("Could not update the properties file to non-legacy...", vec![UserOption::ok()], MessageSeverity::Error);
-                                error!("Could not update the properties file to non-legacy... {:?}", error);
-                            }
-                        };
-                    }
                     if update_last_sync_version {
                         UserSelection::GoTo(Menu::Current)
                     } else {
@@ -639,7 +626,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                 match us {
                     UserSelection::ImportFrom(path, pwd, salt_pos) |
                     UserSelection::ImportFromDefaultLocation(path, pwd, salt_pos) => {
-                        let cr = file_handler::create_bcryptor(&path, pwd, salt_pos, false, import_from_default_location, s.props.legacy_handling(), s.props.bcrypt_cost_v8()).unwrap();
+                        let cr = file_handler::create_bcryptor(&path, pwd, salt_pos, false, import_from_default_location).unwrap();
                         debug!("UserSelection::ImportFrom(path, pwd, salt_pos)");
 
                         match file_handler::load(&path, &cr, import_from_default_location) {
@@ -741,7 +728,7 @@ Warning: Saving will discard all the entries that could not be recovered.
             }
             UserSelection::GeneratePassphrase(index_opt, mut entry) => {
                 debug!("UserSelection::GoTo(Menu::GeneratePassphrase)");
-                entry.pass = rs_password_utils::dice::generate(5);
+                entry.pass = rs_password_utils::dice::generate(s.props.generated_passphrases_words_count() as usize);
                 match index_opt {
                     Some(index) => s.editor.show_entry(entry, index, EntryPresentationType::Edit),
                     None => s.editor.show_menu(&Menu::NewEntry(Some(entry))),
@@ -768,14 +755,13 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
                                      filename: &str,
                                      safe: &mut Safe,
                                      configuration: &mut RklConfiguration,
-                                     editor: &dyn Editor,
-                                     props: &Props)
+                                     editor: &dyn Editor)
                                      -> (UserSelection, datacrypt::BcryptAes) {
     let user_selection: UserSelection;
     match provided_password {
         UserSelection::ProvidedPassword(pwd, salt_pos) => {
             // New Cryptor here
-            let cr = file_handler::create_bcryptor(filename, pwd.clone(), salt_pos, false, true, props.legacy_handling(), props.bcrypt_cost_v8()).unwrap();
+            let cr = file_handler::create_bcryptor(filename, pwd.clone(), salt_pos, false, true).unwrap();
             // Try to decrypt and load the Entries
             let retrieved_entries = match file_handler::load(filename, &cr, true) {
                 // Success, go to the List of entries
@@ -821,7 +807,7 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
         }
         UserSelection::GoTo(Menu::Exit) => {
             debug!("UserSelection::GoTo(Menu::Exit) was called before providing credentials");
-            let cr = file_handler::create_bcryptor(filename, "dummy".to_string(), 33, false, true, props.legacy_handling(), props.bcrypt_cost_v8()).unwrap();
+            let cr = file_handler::create_bcryptor(filename, "dummy".to_string(), 33, false, true).unwrap();
             let exit_selection = UserSelection::GoTo(Menu::ForceExit);
             (exit_selection, cr)
         }

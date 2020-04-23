@@ -267,73 +267,54 @@ pub enum EntryPresentationType {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Props {
     /// Inactivity timeout seconds
-    idle_timeout_seconds: i64,
-    /// Fallback to pre v0.8.0 handling
-    legacy_handling: bool,
-    bcrypt_cost_v8: bool,
+    idle_timeout_seconds: isize,
+    /// The count of the words that comprise the generated passphraases
+    generated_passphrases_words_count: isize,
 }
 
 impl Default for Props {
     fn default() -> Self {
         Props {
             idle_timeout_seconds: 1800,
-            legacy_handling: false,
-            bcrypt_cost_v8: false,
+            generated_passphrases_words_count: 5,
         }
     }
 }
 
 impl Props {
-    pub(crate) fn new(idle_timeout_seconds: i64, legacy_handling: bool, bcrypt_cost_v8: bool) -> Props {
+    pub(crate) fn new(idle_timeout_seconds: isize, generated_passphrases_words_count: isize) -> Props {
         Props {
             idle_timeout_seconds,
-            legacy_handling,
-            bcrypt_cost_v8,
+            generated_passphrases_words_count,
         }
     }
 
     pub fn from_table(table: &Table) -> Result<Props, errors::RustKeylockError> {
-        let idle_timeout_seconds = table.get("idle_timeout_seconds").and_then(|value| value.as_integer().and_then(Some));
-        let legacy_handling = table.get("legacy_handling").and_then(|value| value.as_bool().and_then(Some));
-        let bcrypt_cost_v8 = table.get("bcrypt_cost_v8").and_then(|value| value.as_bool().and_then(Some));
+        let idle_timeout_seconds = table.get("idle_timeout_seconds")
+            .and_then(|value| value.as_integer().and_then(|v| Some(v as isize)))
+            .unwrap_or_else(|| Props::default().idle_timeout_seconds());
+        let generated_passphrases_words_count = table.get("generated_passphrases_words_count")
+            .and_then(|value| value.as_integer().and_then(|v| Some(v as isize)))
+            .unwrap_or_else(|| Props::default().generated_passphrases_words_count());
 
-        match (idle_timeout_seconds, legacy_handling, bcrypt_cost_v8) {
-            (Some(s), Some(l), Some(cv8)) => Ok(Self::new(s, l, cv8)),
-            (Some(s), None, Some(cv8)) => Ok(Self::new(s, true, cv8)),
-            (Some(s), Some(l), None) => Ok(Self::new(s, l, true)),
-            (Some(s), None, None) => Ok(Self::new(s, true, true)),
-            (_, _, _) => Err(errors::RustKeylockError::ParseError(toml::ser::to_string(&table).unwrap_or_else(|_| "Cannot serialize toml".to_string()))),
-        }
+        Ok(Self::new(idle_timeout_seconds, generated_passphrases_words_count))
     }
 
     #[allow(dead_code)]
     pub fn to_table(&self) -> Table {
         let mut table = Table::new();
-        table.insert("idle_timeout_seconds".to_string(), toml::Value::Integer(self.idle_timeout_seconds));
-        table.insert("legacy_handling".to_string(), toml::Value::Boolean(self.legacy_handling));
-        table.insert("bcrypt_cost_v8".to_string(), toml::Value::Boolean(self.bcrypt_cost_v8));
+        table.insert("idle_timeout_seconds".to_string(), toml::Value::Integer(self.idle_timeout_seconds as i64));
+        table.insert("generated_passphrases_words_count".to_string(), toml::Value::Integer(self.generated_passphrases_words_count as i64));
 
         table
     }
 
-    pub fn idle_timeout_seconds(&self) -> i64 {
+    pub fn idle_timeout_seconds(&self) -> isize {
         self.idle_timeout_seconds
     }
 
-    pub fn legacy_handling(&self) -> bool {
-        self.legacy_handling
-    }
-
-    pub fn set_legacy_handling(&mut self, lh: bool) {
-        self.legacy_handling = lh
-    }
-
-    pub fn bcrypt_cost_v8(&self) -> bool {
-        self.bcrypt_cost_v8
-    }
-
-    pub fn set_bcrypt_cost_v8(&mut self, bcv8: bool) {
-        self.bcrypt_cost_v8 = bcv8
+    pub fn generated_passphrases_words_count(&self) -> isize {
+        self.generated_passphrases_words_count
     }
 }
 
@@ -757,8 +738,7 @@ mod api_unit_tests {
     fn props_from_table_success() {
         let toml = r#"
         idle_timeout_seconds = 33
-        legacy_handling = false
-        bcrypt_cost_v8 = false
+        generated_passphrases_words_count = 5
         "#;
 
         let value = toml.parse::<toml::value::Value>().unwrap();
@@ -767,40 +747,32 @@ mod api_unit_tests {
         assert!(props_opt.is_ok());
         let props = props_opt.unwrap();
         assert!(props.idle_timeout_seconds() == 33);
-        assert!(!props.legacy_handling());
+        assert!(props.generated_passphrases_words_count() == 5);
     }
 
     #[test]
-    fn props_from_table_success_no_legacy_exists() {
-        let toml = r#"
+    fn props_from_table_not_all_elements() {
+        let toml1 = r#"
         idle_timeout_seconds = 33
         "#;
+        let value1 = toml1.parse::<toml::value::Value>().unwrap();
+        let table1 = value1.as_table().unwrap();
+        let props_opt1 = super::Props::from_table(&table1);
+        assert!(props_opt1.is_ok());
+        let props1 = props_opt1.unwrap();
+        assert!(props1.idle_timeout_seconds() == 33);
+        assert!(props1.generated_passphrases_words_count() == 5);
 
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
-        let props_opt = super::Props::from_table(&table);
-        assert!(props_opt.is_ok());
-        let props = props_opt.unwrap();
-        assert!(props.idle_timeout_seconds() == 33);
-        assert!(props.legacy_handling());
-        assert!(props.bcrypt_cost_v8());
-    }
-
-    #[test]
-    fn props_from_table_success_legacy_exists_cost_v8_does_not_exist() {
-        let toml = r#"
-        idle_timeout_seconds = 33
-        legacy_handling = false
+        let toml2 = r#"
+        generated_passphrases_words_count = 5
         "#;
-
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
-        let props_opt = super::Props::from_table(&table);
-        assert!(props_opt.is_ok());
-        let props = props_opt.unwrap();
-        assert!(props.idle_timeout_seconds() == 33);
-        assert!(!props.legacy_handling());
-        assert!(props.bcrypt_cost_v8());
+        let value2 = toml2.parse::<toml::value::Value>().unwrap();
+        let table2 = value2.as_table().unwrap();
+        let props_opt2 = super::Props::from_table(&table2);
+        assert!(props_opt2.is_ok());
+        let props2 = props_opt2.unwrap();
+        assert!(props2.idle_timeout_seconds() == 1800);
+        assert!(props2.generated_passphrases_words_count() == 5);
     }
 
     #[test]
@@ -810,7 +782,7 @@ mod api_unit_tests {
         let value = toml.parse::<toml::value::Value>().unwrap();
         let table = value.as_table().unwrap();
         let props_opt = super::Props::from_table(&table);
-        assert!(props_opt.is_err());
+        assert!(props_opt.is_ok());
     }
 
     #[test]
@@ -820,15 +792,14 @@ mod api_unit_tests {
         let value = toml.parse::<toml::value::Value>().unwrap();
         let table = value.as_table().unwrap();
         let props_opt = super::Props::from_table(&table);
-        assert!(props_opt.is_err());
+        assert!(props_opt.is_ok());
     }
 
     #[test]
     fn props_to_table() {
         let toml = r#"
         idle_timeout_seconds = 33
-        legacy_handling = false
-        bcrypt_cost_v8 = false
+        generated_passphrases_words_count = 5
         "#;
 
         let value = toml.parse::<toml::value::Value>().unwrap();

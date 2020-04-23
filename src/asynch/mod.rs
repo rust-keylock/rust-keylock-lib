@@ -455,11 +455,11 @@ impl Editor for AsyncEditorFacade {
     }
 }
 
-fn timeout_check(last_action_time: &SystemTime, timeout_seconds: i64) -> Option<()> {
+fn timeout_check(last_action_time: &SystemTime, timeout_seconds: isize) -> Option<()> {
     match last_action_time.elapsed() {
         Ok(elapsed) => {
             let elapsed_seconds = elapsed.as_secs();
-            if elapsed_seconds as i64 > timeout_seconds {
+            if elapsed_seconds as isize > timeout_seconds {
                 warn!("Idle time of {} seconds elapsed! Locking...", timeout_seconds);
                 Some(())
             } else {

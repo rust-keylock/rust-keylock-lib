@@ -73,18 +73,8 @@ pub struct BcryptAes {
 
 impl BcryptAes {
     /// Creates a key using the bcrypt algorithm with the help of hkdf.
-    fn create_key(input: &[u8], salt: &[u8], cost: u32, legacy_handling: bool, output_bytes_size: i32) -> Vec<u8> {
+    fn create_key(input: &[u8], salt: &[u8], cost: u32, output_bytes_size: i32) -> Vec<u8> {
         let mut key: Vec<u8> = Vec::new();
-
-        // TODO: Delete this legacy handling in the next release.
-        if legacy_handling {
-            let mut legacy_key: Vec<u8> = repeat(0u8).take(24).collect();
-            bcrypt(cost, &salt, input, &mut legacy_key);
-            let mut append_to_key: Vec<u8> = repeat(0u8).take(8).collect();
-            legacy_key.append(&mut append_to_key);
-
-            key.append(&mut legacy_key)
-        }
 
         let mut ikm: Vec<u8> = repeat(0u8).take(24).collect();
         bcrypt(cost, &salt, input, &mut ikm);
@@ -102,18 +92,16 @@ impl BcryptAes {
     /// Creates a new BcryptAes struct, using:
     ///
     /// * The user's password
-    /// * Salt for the bcrypt algorithm,
+    /// * Salt for the bcrypt algorithm
     /// * Cost for the bcrypt algorithm
     /// * iv for AES
+    /// * The position of the salt
     /// * hash for Sha3Keccak512 hashing
-    // TODO: The cost can be removed from the arguments. It should be taken from the const BCRYPT_COST.
     pub fn new(password: String,
                salt: Vec<u8>,
-               cost: u32,
                iv: Vec<u8>,
                salt_position: usize,
-               hash_bytes: Vec<u8>,
-               legacy_handling: bool)
+               hash_bytes: Vec<u8>, )
                -> BcryptAes {
         let mut salt_key_pairs = Vec::new();
         let handles: Vec<JoinHandle<(Vec<u8>, RklSecret)>> = (0..NUMBER_OF_SALT_KEY_PAIRS + 1)
@@ -124,13 +112,13 @@ impl BcryptAes {
                     if i == 0 {
                         // Create bcrypt password for the current encrypted data
                         // Ask for 64 bytes bcrypt key. Use 32 bytes for data encryption and 32 bytes for hash encryption.
-                        let key = BcryptAes::create_key(cp.as_bytes(), &cs, cost, legacy_handling, 64);
+                        let key = BcryptAes::create_key(cp.as_bytes(), &cs, BCRYPT_COST, 64);
                         (cs, RklSecret::new(key))
                     } else {
                         // Create some new salt-key pairs to use them for encryption
                         // Ask for 64 bytes bcrypt key. Use 32 bytes for data encryption and 32 bytes for hash encryption.
                         let s = create_random(16);
-                        let k = BcryptAes::create_key(cp.as_bytes(), &s, BCRYPT_COST, false, 64);
+                        let k = BcryptAes::create_key(cp.as_bytes(), &s, BCRYPT_COST, 64);
                         (s, RklSecret::new(k))
                     }
                 });
@@ -905,7 +893,7 @@ mod test_crypt {
         bytes.append(&mut tmp);
 
         // Create the cryptor
-        let cryptor = super::BcryptAes::new("password".to_string(), iv, 1, salt, 33, hash, false);
+        let cryptor = super::BcryptAes::new("password".to_string(), salt, iv, 1, hash);
         let result = cryptor.decrypt(&bytes);
         assert!(result.is_err());
         match result.err() {
@@ -919,7 +907,7 @@ mod test_crypt {
         let iv = super::create_random(16);
         let salt = super::create_random(16);
         let hash = super::create_random(64);
-        let cryptor = super::BcryptAes::new("password".to_string(), iv, 1, salt.clone(), 33, hash, false);
+        let cryptor = super::BcryptAes::new("password".to_string(), salt.clone(), iv, 1, hash);
         assert!(cryptor.salt_key_pairs.len() == super::NUMBER_OF_SALT_KEY_PAIRS);
         for skp in cryptor.salt_key_pairs {
             assert!(&skp.0 != &salt);
@@ -929,33 +917,16 @@ mod test_crypt {
 
     #[test]
     fn bcrypt_key_creation() {
-        let legacy_key = super::BcryptAes::create_key("123".as_bytes(), "saltsaltsaltsalt".as_bytes(), 3, true, 32);
-        // 32 bytes legacy + 32 bytes new as defined by the output_bytes_size argument.
-        assert!(legacy_key.len() == 64);
-        let legacy_key_1: Vec<u8> = legacy_key.clone()
-            .into_iter()
-            .take(32)
-            .collect();
-        let legacy_key_2: Vec<u8> = legacy_key.clone()
-            .into_iter()
-            .skip(32)
-            .take(32)
-            .collect();
-        let zeros: Vec<u8> = legacy_key_1.into_iter().skip(24).take(8).collect();
-        assert!(zeros == vec![0, 0, 0, 0, 0, 0, 0, 0]);
-        let last_8_bytes: Vec<u8> = legacy_key_2.into_iter().skip(24).take(8).collect();
-        assert!(last_8_bytes != vec![0, 0, 0, 0, 0, 0, 0, 0]);
-
-        let small_key = super::BcryptAes::create_key("123".as_bytes(), "saltsaltsaltsalt".as_bytes(), 3, false, 12);
+        let small_key = super::BcryptAes::create_key("123".as_bytes(), "saltsaltsaltsalt".as_bytes(), 3, 12);
         assert!(small_key.len() == 12);
 
-        let key = super::BcryptAes::create_key("123".as_bytes(), "saltsaltsaltsalt".as_bytes(), 3, false, 32);
+        let key = super::BcryptAes::create_key("123".as_bytes(), "saltsaltsaltsalt".as_bytes(), 3, 32);
         assert!(key.len() == 32);
 
         // Verify consistent creation
-        let key: Vec<u8> = super::BcryptAes::create_key("123".as_bytes(), "saltsaltsaltsalt".as_bytes(), 3, false, 64);
+        let key: Vec<u8> = super::BcryptAes::create_key("123".as_bytes(), "saltsaltsaltsalt".as_bytes(), 3, 64);
         for _ in 0..20 {
-            assert!(&super::BcryptAes::create_key("123".as_bytes(), "saltsaltsaltsalt".as_bytes(), 3, false, 64) == &key);
+            assert!(&super::BcryptAes::create_key("123".as_bytes(), "saltsaltsaltsalt".as_bytes(), 3, 64) == &key);
         }
     }
 }
