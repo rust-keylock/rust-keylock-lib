@@ -33,11 +33,11 @@ extern crate log;
 extern crate native_tls;
 extern crate openssl_probe;
 extern crate rand;
+extern crate rs_password_utils;
 extern crate secstr;
 extern crate sha3;
 extern crate toml;
 extern crate xml;
-extern crate rs_password_utils;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -733,6 +733,39 @@ Warning: Saving will discard all the entries that could not be recovered.
                     Some(index) => s.editor.show_entry(entry, index, EntryPresentationType::Edit),
                     None => s.editor.show_menu(&Menu::NewEntry(Some(entry))),
                 }
+            }
+            UserSelection::CheckPasswords => {
+                debug!("UserSelection::CheckPasswords");
+                let mut pwned: Vec<String> = Vec::new();
+                for index in 0..s.safe.get_entries().len() {
+                    let entry = s.safe.get_entry_decrypted(index);
+                    let pwned_res = rs_password_utils::pwned::blocking::is_pwned(&entry.pass);
+                    if pwned_res.is_ok() {
+                        if pwned_res.unwrap() {
+                            pwned.push(entry.name);
+                        }
+                    } else {
+                        let message = format!("Error while checking passwords: {}", pwned_res.unwrap_err());
+                        error!("{}", message);
+                        let _ = s.editor.show_message(&message,
+                                                      vec![UserOption::ok()],
+                                                      MessageSeverity::Error);
+                    }
+                }
+                if !pwned.is_empty() {
+                    let message = format!("The following entries have leaked passwords! Please change them immediately! {}", pwned.join(","));
+                    info!("{}", message);
+                    let _ = s.editor.show_message(&message,
+                                                  vec![UserOption::ok()],
+                                                  MessageSeverity::Warn);
+                } else {
+                    let message = format!("The passwords of all entries look ok!");
+                    debug!("{}", message);
+                    let _ = s.editor.show_message(&message,
+                                                  vec![UserOption::ok()],
+                                                  MessageSeverity::Info);
+                }
+                s.editor.show_menu(&Menu::Current)
             }
             UserSelection::GoTo(Menu::Current) => {
                 debug!("UserSelection::GoTo(Menu::Current)");

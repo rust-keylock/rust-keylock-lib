@@ -400,6 +400,8 @@ pub enum UserSelection {
     /// The user wants to generate a passphrase for en `Entry`.
     /// Option<usize> is None if the entry for which the passphrase will be generated is new.
     GeneratePassphrase(Option<usize>, Entry),
+    /// The user wants to check the passwords status quality.
+    CheckPasswords,
 }
 
 impl UserSelection {
@@ -422,6 +424,7 @@ impl UserSelection {
             UserSelection::UpdateConfiguration(_) => 11,
             UserSelection::AddToClipboard(_) => 12,
             UserSelection::GeneratePassphrase(_, _) => 13,
+            UserSelection::CheckPasswords => 14,
         }
     }
 }
