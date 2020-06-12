@@ -753,7 +753,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                     }
                 }
                 if !pwned.is_empty() {
-                    let message = format!("The following entries have leaked passwords! Please change them immediately! {}", pwned.join(","));
+                    let message = format!("The following entries have leaked passwords: {}! Please change them immediately!", pwned.join(","));
                     info!("{}", message);
                     let _ = s.editor.show_message(&message,
                                                   vec![UserOption::ok()],
