@@ -45,7 +45,7 @@ dirs = "2.0"
 tokio = "0.1"
 reqwest = "0.9"
 serde_json = "1.0"
-rs-password-utils = {git = "https://gitlab.com/astonbitecode/rs-password-utils"}
+rs-password-utils = "0.1"
 
 [dependencies.toml]
 version = "0.5"
