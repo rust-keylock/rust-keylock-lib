@@ -746,7 +746,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                         }
                     } else {
                         let message = format!("Error while checking passwords: {}", pwned_res.unwrap_err());
-                        error!("{}", message);
+                        error!("Error while checking the passwords.");
                         let _ = s.editor.show_message(&message,
                                                       vec![UserOption::ok()],
                                                       MessageSeverity::Error);
@@ -765,7 +765,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                                                   vec![UserOption::ok()],
                                                   MessageSeverity::Info);
                 }
-                s.editor.show_menu(&Menu::Current)
+                UserSelection::GoTo(Menu::EntriesList("".to_string()))
             }
             UserSelection::GoTo(Menu::Current) => {
                 debug!("UserSelection::GoTo(Menu::Current)");
