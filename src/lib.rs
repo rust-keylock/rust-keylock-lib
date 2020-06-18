@@ -736,35 +736,7 @@ Warning: Saving will discard all the entries that could not be recovered.
             }
             UserSelection::CheckPasswords => {
                 debug!("UserSelection::CheckPasswords");
-                let mut pwned: Vec<String> = Vec::new();
-                for index in 0..s.safe.get_entries().len() {
-                    let entry = s.safe.get_entry_decrypted(index);
-                    let pwned_res = rs_password_utils::pwned::blocking::is_pwned(&entry.pass);
-                    if pwned_res.is_ok() {
-                        if pwned_res.unwrap() {
-                            pwned.push(entry.name);
-                        }
-                    } else {
-                        let message = format!("Error while checking passwords: {}", pwned_res.unwrap_err());
-                        error!("Error while checking the passwords.");
-                        let _ = s.editor.show_message(&message,
-                                                      vec![UserOption::ok()],
-                                                      MessageSeverity::Error);
-                    }
-                }
-                if !pwned.is_empty() {
-                    let message = format!("The following entries have leaked passwords: {}! Please change them immediately!", pwned.join(","));
-                    info!("{}", message);
-                    let _ = s.editor.show_message(&message,
-                                                  vec![UserOption::ok()],
-                                                  MessageSeverity::Warn);
-                } else {
-                    let message = format!("The passwords of all entries look ok!");
-                    debug!("{}", message);
-                    let _ = s.editor.show_message(&message,
-                                                  vec![UserOption::ok()],
-                                                  MessageSeverity::Info);
-                }
+                handle_check_passwords(&s.safe, &s.editor);
                 UserSelection::GoTo(Menu::EntriesList("".to_string()))
             }
             UserSelection::GoTo(Menu::Current) => {
@@ -781,6 +753,46 @@ Warning: Saving will discard all the entries that could not be recovered.
         };
 
         ok((s, stop))
+    }
+}
+
+fn handle_check_passwords(safe: &Safe, editor: &dyn Editor) {
+    let mut pwned: Option<Vec<String>> = None;
+    for index in 0..safe.get_entries().len() {
+        let entry = safe.get_entry_decrypted(index);
+        let pwned_res = rs_password_utils::pwned::blocking::is_pwned(&entry.pass);
+        if pwned_res.is_ok() {
+            if pwned.is_none() {
+                pwned = Some(Vec::new());
+            }
+            if pwned_res.unwrap() {
+                pwned.as_mut().unwrap().push(entry.name);
+            }
+        } else {
+            error!("Error while checking passwords: {}", pwned_res.unwrap_err());
+            pwned = None;
+            break;
+        }
+    }
+    if pwned.is_none() && !safe.get_entries().is_empty() {
+        let _ = editor.show_message("Error while checking passwords health. Please see the logs for more details.",
+                                      vec![UserOption::ok()],
+                                      MessageSeverity::Error);
+    } else if pwned.is_some() {
+        if !pwned.as_ref().unwrap().is_empty() {
+            let message = format!("The following entries have leaked passwords: {}! Please change them immediately!",
+                                  pwned.unwrap().join(","));
+            info!("{}", message);
+            let _ = editor.show_message(&message,
+                                          vec![UserOption::ok()],
+                                          MessageSeverity::Warn);
+        } else {
+            let message = format!("The passwords of the entries look ok!");
+            debug!("{}", message);
+            let _ = editor.show_message(&message,
+                                          vec![UserOption::ok()],
+                                          MessageSeverity::Info);
+        }
     }
 }
 
