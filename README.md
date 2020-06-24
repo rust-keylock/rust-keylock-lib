@@ -29,6 +29,8 @@ The project has not yet received any formal / official security reviews. Use it 
  * During runtime, the passwords are kept encrypted in memory
  * During runtime, the encryption keys are stored in safe, non-swappable memory
  * Upon saving, the encryption keys change, even if the user master password remains the same. This results to different encrypted products, even if the data that is being encrypted is the same.
+ * Passphrases generation using [Diceware](https://theworld.com/~reinhold/diceware.html).
+ * Passwords health check against [pwned passwords list](https://www.troyhunt.com/ive-just-launched-pwned-passwords-version-2/), leveraging the [k-anonimity API](https://blog.cloudflare.com/validating-leaked-passwords-with-k-anonymity/).
 
 ### Data Availability
 
@@ -38,7 +40,6 @@ The project has not yet received any formal / official security reviews. Use it 
  * Automatic local backups
  
 ### Application Portability
-
 
  * [Shell implementation](https://github.com/rust-keylock/rust-keylock-shell).
  * [JavaFX implementation](https://github.com/rust-keylock/rust-keylock-ui).
