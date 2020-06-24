@@ -18,6 +18,9 @@ use std::iter::FromIterator;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use log::*;
+#[cfg(test)]
+use mockall::{automock, predicate::*};
+use rs_password_utils;
 use toml;
 use toml::value::Table;
 
@@ -631,6 +634,25 @@ pub(crate) enum UiCommand {
     ShowConfiguration(NextcloudConfiguration, DropboxConfiguration),
     Exit(bool),
     ShowMessage(String, Vec<UserOption>, MessageSeverity),
+}
+
+#[cfg_attr(test, automock)]
+pub(crate) trait PasswordChecker {
+    fn is_unsafe(&self, password: &str) -> errors::Result<bool>;
+}
+
+pub(crate) struct RklPasswordChecker {}
+
+impl Default for RklPasswordChecker {
+    fn default() -> Self {
+        RklPasswordChecker {}
+    }
+}
+
+impl PasswordChecker for RklPasswordChecker {
+    fn is_unsafe(&self, password: &str) -> errors::Result<bool> {
+        Ok(rs_password_utils::pwned::blocking::is_pwned(password)?)
+    }
 }
 
 #[cfg(test)]

@@ -32,6 +32,7 @@ use tokio;
 use futures::Canceled;
 use reqwest;
 use serde_json;
+use rs_password_utils;
 
 pub type Result<T> = result::Result<T, RustKeylockError>;
 
@@ -192,6 +193,12 @@ impl From<std::str::Utf8Error> for RustKeylockError {
 
 impl <T> From<sync::PoisonError<T>> for RustKeylockError {
     fn from(err: sync::PoisonError<T>) -> RustKeylockError {
+        RustKeylockError::GeneralError(format!("{:?}", err))
+    }
+}
+
+impl From<rs_password_utils::PasswordUtilsError> for RustKeylockError {
+    fn from(err: rs_password_utils::PasswordUtilsError) -> RustKeylockError {
         RustKeylockError::GeneralError(format!("{:?}", err))
     }
 }

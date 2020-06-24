@@ -54,3 +54,4 @@ features = ["preserve_order"]
 
 [dev-dependencies]
 lazy_static = "1.2"
+mockall = "0.7"
