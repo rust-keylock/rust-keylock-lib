@@ -1,6 +1,6 @@
 [package]
 name = "rust_keylock"
-version = "0.12.0"
+version = "0.13.0"
 authors = ["aston <astonbitecode@gmail.com>"]
 description = "A password manager with goals to be Secure, Simple to use, Portable and Extensible"
 keywords = ["password", "manager", "safe", "encryption", "key"]
@@ -20,13 +20,13 @@ name = "rust_keylock"
 crate-type = ["rlib", "dylib"]
 
 [dependencies]
-ctr = "0.3"
-aes-ctr = "0.3"
-sha2 = "0.8"
-sha3 = "0.8"
-hkdf = "0.8"
-stream-cipher = "0.3"
-bcrypt = "0.7"
+ctr = "0.4"
+aes-ctr = "0.4"
+sha2 = "0.9"
+sha3 = "0.9"
+hkdf = "0.9"
+stream-cipher = "0.6"
+bcrypt = "0.8"
 base64 = "0.12"
 rand = "0.7"
 log = "0.4"
@@ -41,7 +41,7 @@ native-tls = "0.2"
 xml-rs = "0.8"
 openssl-probe = "0.1"
 clipboard = "0.5"
-dirs = "2.0"
+dirs = "3.0"
 tokio = "0.1"
 reqwest = "0.9"
 serde_json = "1.0"

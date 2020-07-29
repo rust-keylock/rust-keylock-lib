@@ -365,15 +365,15 @@ impl Default for Sha3Keccak512 {
 impl Hasher for Sha3Keccak512 {
     fn validate_hash(&self, data: &[u8], hash: &[u8]) -> bool {
         let mut hasher = Sha3_512::default();
-        hasher.input(data);
-        let data_hash = hasher.result();
+        hasher.update(data);
+        let data_hash = hasher.finalize();
         data_hash.as_slice() == hash
     }
 
     fn calculate_hash(&self, data: &[u8]) -> Vec<u8> {
         let mut hasher = Sha3_512::default();
-        hasher.input(data);
-        let data_hash = hasher.result();
+        hasher.update(data);
+        let data_hash = hasher.finalize();
         Vec::from(data_hash.as_slice())
     }
 }
