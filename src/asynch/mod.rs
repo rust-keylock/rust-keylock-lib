@@ -17,16 +17,14 @@
 use std::str::FromStr;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread;
-use std::time::{self, Duration, Instant, SystemTime};
+use std::time::{self, Duration, SystemTime};
 
+use async_trait::async_trait;
 use http::{HeaderMap, HeaderValue};
 use http::header::HeaderName;
 use log::*;
 use reqwest;
-use reqwest::r#async::{Client as OfficialReqwestClient, Response};
-use tokio::prelude::*;
-use tokio::prelude::future::{Loop, loop_fn, ok};
-use tokio::timer::Delay;
+use reqwest::{Client as OfficialReqwestClient, Response};
 
 use crate::api::EntryPresentationType;
 use crate::asynch::dropbox::DropboxConfiguration;
@@ -35,7 +33,9 @@ use crate::Entry;
 
 use super::{Editor, Menu, MessageSeverity, Props, UserOption, UserSelection};
 use super::api::UiCommand;
-use super::errors::{self, debug_error_string, RustKeylockError};
+use super::errors::{self, RustKeylockError};
+
+use tokio::time::delay_for;
 
 pub mod nextcloud;
 pub mod dropbox;
@@ -51,47 +51,38 @@ pub fn execute_task(task: Box<dyn AsyncTask>, every: time::Duration) -> AsyncTas
     let mut task = task;
     task.init();
 
-    let loop_future = loop_fn((task, every, rx_loop_control), |(task, every, rx_loop_control)| {
-        Delay::new(Instant::now() + every)
-            .map_err(|_| ())
-            .and_then(move |_| {
-                task.execute().and_then(|cont| ok((cont, task)))
-            })
-            .and_then(move |tup| {
-                let (cont, task) = tup;
-                let mut stop = false;
-
-                match rx_loop_control.try_recv() {
-                    Ok(stop_received) => {
-                        if stop_received {
-                            debug!("Stopping async task...");
-                            stop = true;
-                        }
-                    }
-                    Err(TryRecvError::Disconnected) => { /* ignore (maybe a debug to show that the handle got disconnected?) */ }
-                    Err(TryRecvError::Empty) => { /* ignore */ }
+    tokio::spawn(async move {
+        loop {
+            let f = task.execute();
+            let cont = f.await;
+            let force_stop = match rx_loop_control.try_recv() {
+                Ok(stop_received) => {
+                    stop_received
                 }
-
-                if stop || !cont {
-                    Ok(Loop::Break((task, every, rx_loop_control)))
-                } else {
-                    Ok(Loop::Continue((task, every, rx_loop_control)))
+                Err(TryRecvError::Disconnected) => {
+                    warn!("The rx_loop_control has been disconnected. Stopping async task.");
+                    true
                 }
-            })
-    }).map(|_| ()).map_err(|_| ());
-
-    tokio::spawn(loop_future);
+                Err(TryRecvError::Empty) => { false }
+            };
+            if !cont || force_stop {
+                break;
+            }
+            delay_for(every).await;
+        }
+    });
 
     AsyncTaskHandle::new(tx_loop_control)
 }
 
 /// Defines a task that runs asynchronously in the background.
+#[async_trait]
 pub trait AsyncTask: Send {
     /// Initializes a task
     fn init(&mut self);
     /// Executes the task
     /// When the returned boolean is true, the task will run again. When false, the task will be stopped.
-    fn execute(&self) -> Box<dyn Future<Item=bool, Error=()> + Send>;
+    async fn execute(&self) -> bool;
 }
 
 /// A handle to a created AsyncTask
@@ -318,7 +309,9 @@ impl AsyncEditorFacade {
                         Err(_) => None,
                     }
                 }
-                _ => None,
+                _ => {
+                    None
+                }
             }
         })
     }
@@ -427,13 +420,13 @@ impl Editor for AsyncEditorFacade {
         self.receive()
     }
 
-    fn show_configuration(&self, nextcloud: NextcloudConfiguration, dropbox: DropboxConfiguration) -> UserSelection {
-        self.send(UiCommand::ShowConfiguration(nextcloud, dropbox));
+    fn exit(&self, contents_changed: bool) -> UserSelection {
+        self.send(UiCommand::Exit(contents_changed));
         self.receive()
     }
 
-    fn exit(&self, contents_changed: bool) -> UserSelection {
-        self.send(UiCommand::Exit(contents_changed));
+    fn show_configuration(&self, nextcloud: NextcloudConfiguration, dropbox: DropboxConfiguration) -> UserSelection {
+        self.send(UiCommand::ShowConfiguration(nextcloud, dropbox));
         self.receive()
     }
 
@@ -490,11 +483,12 @@ pub(crate) enum SyncStatus {
 }
 
 /// The trait to be implemented by HTTP clients. Used for synchronization with dropbox, nextcloud etc.
+#[async_trait]
 pub(crate) trait RklHttpAsyncClient: Send {
     type ResType;
     fn header(&mut self, k: &str, v: &str);
-    fn get(&mut self, uri: &str, additional_headers: &[(&str, &str)]) -> Box<dyn Future<Item=Self::ResType, Error=RustKeylockError> + Send>;
-    fn post(&mut self, uri: &str, additional_headers: &[(&str, &str)], body: Vec<u8>) -> Box<dyn Future<Item=Self::ResType, Error=RustKeylockError> + Send>;
+    async fn get(&mut self, uri: &str, additional_headers: &[(&str, &str)]) -> errors::Result<Self::ResType>;
+    async fn post(&mut self, uri: &str, additional_headers: &[(&str, &str)], body: Vec<u8>) -> errors::Result<Self::ResType>;
 }
 
 #[derive(Debug, Clone)]
@@ -524,17 +518,12 @@ impl ReqwestClient {
         }
     }
 
-    fn get_body(response: Response) -> impl Future<Item=Vec<u8>, Error=RustKeylockError> {
-        // Create a Future from the Stream of the Body
-        response.into_body().concat2()
-            .map_err(|error| RustKeylockError::SyncError(debug_error_string(error)))
-            .map(move |chunk| {
-                let body: Vec<u8> = chunk.to_vec();
-                body
-            })
+    async fn get_body(response: Response) -> errors::Result<Vec<u8>> {
+        Ok(response.bytes().await?.to_vec())
     }
 }
 
+#[async_trait]
 impl RklHttpAsyncClient for ReqwestClient {
     type ResType = Vec<u8>;
 
@@ -548,7 +537,7 @@ impl RklHttpAsyncClient for ReqwestClient {
         }));
     }
 
-    fn get(&mut self, uri: &str, additional_headers: &[(&str, &str)]) -> Box<dyn Future<Item=Vec<u8>, Error=RustKeylockError> + Send> {
+    async fn get(&mut self, uri: &str, additional_headers: &[(&str, &str)]) -> errors::Result<Vec<u8>> {
         let mut builder = self.client
             .get(uri)
             .headers(self.headers.clone());
@@ -561,13 +550,13 @@ impl RklHttpAsyncClient for ReqwestClient {
                 HeaderValue::from_static("")
             }));
         }
-        Box::new(builder.send()
-            .from_err()
-            .and_then(Self::validate_response)
-            .and_then(Self::get_body))
+
+        let resp = builder.send().await?;
+        let resp = Self::validate_response(resp)?;
+        Self::get_body(resp).await
     }
 
-    fn post(&mut self, uri: &str, additional_headers: &[(&str, &str)], body: Vec<u8>) -> Box<dyn Future<Item=Vec<u8>, Error=RustKeylockError> + Send> {
+    async fn post(&mut self, uri: &str, additional_headers: &[(&str, &str)], body: Vec<u8>) -> errors::Result<Vec<u8>> {
         let mut builder = self.client
             .post(uri)
             .headers(self.headers.clone())
@@ -581,15 +570,14 @@ impl RklHttpAsyncClient for ReqwestClient {
                 HeaderValue::from_static("")
             }));
         }
-        Box::new(builder.send()
-            .from_err()
-            .and_then(Self::validate_response)
-            .and_then(Self::get_body))
+        let resp = builder.send().await?;
+        let resp = Self::validate_response(resp)?;
+        Self::get_body(resp).await
     }
 }
 
 /// The trait to be implemented by HTTP client factories. Provides the needed abstraction that makes the RklHttpAsyncClients testable.
-pub(crate) trait RklHttpAsyncFactory: Send {
+pub(crate) trait RklHttpAsyncFactory: Send + Sync {
     type ClientResType;
     fn init_factory(&mut self);
     fn create(&self) -> Box<dyn RklHttpAsyncClient<ResType=Self::ClientResType>>;
@@ -618,18 +606,15 @@ impl RklHttpAsyncFactory for ReqwestClientFactory {
 #[cfg(test)]
 mod async_tests {
     use std::fs::{self, File};
-    use std::sync::mpsc::{self, Receiver, Sender};
-    use std::thread;
-    use std::time::{self, SystemTime};
-
-    use tokio::prelude::*;
-    use tokio::prelude::future::{lazy, ok};
+    use std::io::prelude::*;
+    use std::sync::mpsc;
+    use std::sync::mpsc::SyncSender;
+    use std::time::SystemTime;
 
     use crate::file_handler;
 
     use super::*;
     use super::super::{Editor, MessageSeverity, UiCommand, UserOption, UserSelection};
-    use super::super::errors;
 
     #[test]
     fn facade_show_change_password() {
@@ -713,15 +698,19 @@ mod async_tests {
 
     #[test]
     fn async_execution() {
-        let (tx, rx): (Sender<errors::Result<&'static str>>, Receiver<errors::Result<&'static str>>) = mpsc::channel();
+        let (tx, rx) = mpsc::sync_channel(10);
         let task = DummyTask { tx };
 
         thread::spawn(|| {
-            tokio::run(lazy(|| {
+            let mut rt = tokio::runtime::Runtime::new().unwrap();
+            let f = async {
                 let ten_millis = time::Duration::from_millis(10);
-                let _dummy = super::execute_task(Box::new(task), ten_millis);
-                Ok(())
-            }));
+                super::execute_task(Box::new(task), ten_millis)
+            };
+            // Keep AsyncTaskHandle and sleep in order for the channel that it contains not to be disconnected.
+            // If the channel gets disconnected, the AsyncTask will be stopped.
+            let _ath = rt.block_on(f);
+            thread::sleep(time::Duration::from_millis(60000));
         });
         std::thread::sleep(std::time::Duration::new(2, 0));
 
@@ -823,15 +812,16 @@ mod async_tests {
     }
 
     pub struct DummyTask {
-        tx: Sender<errors::Result<&'static str>>,
+        tx: SyncSender<errors::Result<&'static str>>,
     }
 
+    #[async_trait]
     impl super::AsyncTask for DummyTask {
         fn init(&mut self) {}
 
-        fn execute(&self) -> Box<dyn Future<Item=bool, Error=()> + Send> {
-            let _ = self.tx.send(Ok("dummy"));
-            Box::new(lazy(|| ok(true)))
+        async fn execute(&self) -> bool {
+            let _ = self.tx.clone().send(Ok("dummy"));
+            true
         }
     }
 

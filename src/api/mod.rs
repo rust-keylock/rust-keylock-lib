@@ -625,6 +625,7 @@ impl ToString for MessageSeverity {
 
 // Not need for boxing... The largest variant is the most frequent one.
 #[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
 pub(crate) enum UiCommand {
     ShowPasswordEnter,
     ShowChangePassword,

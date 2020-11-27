@@ -29,17 +29,17 @@ use toml;
 use ctr::stream_cipher::LoopError;
 use url;
 use tokio;
-use futures::Canceled;
+use futures::channel::oneshot::Canceled;
 use reqwest;
 use serde_json;
 use rs_password_utils;
 
 pub type Result<T> = result::Result<T, RustKeylockError>;
 
-pub fn debug_error_string<T>(error: T) -> String
-    where T: Error + Debug {
-    format!("{:?}", error)
-}
+// pub fn debug_error_string<T>(error: T) -> String
+//     where T: Error + Debug {
+//     format!("{:?}", error)
+// }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum RustKeylockError {
@@ -167,8 +167,8 @@ impl From<url::ParseError> for RustKeylockError {
     }
 }
 
-impl From<tokio::timer::timeout::Error<Canceled>> for RustKeylockError {
-    fn from(err: tokio::timer::timeout::Error<Canceled>) -> RustKeylockError {
+impl From<tokio::sync::mpsc::error::SendTimeoutError<Canceled>> for RustKeylockError {
+    fn from(err: tokio::sync::mpsc::error::SendTimeoutError<Canceled>) -> RustKeylockError {
         RustKeylockError::GeneralError(format!("{:?}", err))
     }
 }

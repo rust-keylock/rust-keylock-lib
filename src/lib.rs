@@ -20,6 +20,7 @@
 //!
 //! This library is the executor of the _rust-keylock_ logic. `Editor` references are used to interact with the _rust-keylock_ users.
 
+extern crate async_trait;
 extern crate base64;
 extern crate clipboard;
 extern crate dirs;
@@ -48,8 +49,6 @@ use std::time;
 use log::*;
 #[cfg(test)]
 use mockall::{automock, predicate::*};
-use tokio::prelude::*;
-use tokio::prelude::future::{FutureResult, lazy, Loop, loop_fn, ok};
 
 pub use file_handler::default_rustkeylock_location;
 
@@ -99,7 +98,7 @@ pub fn execute_async(editor: Box<dyn AsyncEditor>) {
     let mut ui_rx_vec = Vec::new();
 
     thread::spawn(move || {
-        tokio::run(lazy(|| {
+        tokio::runtime::Runtime::new().unwrap().spawn(async {
             openssl_probe::init_ssl_cert_env_vars();
             info!("Starting rust-keylock...");
             let props = match file_handler::load_properties(PROPS_FILENAME) {
@@ -111,23 +110,15 @@ pub fn execute_async(editor: Box<dyn AsyncEditor>) {
             };
 
             let editor_facade = asynch::AsyncEditorFacade::new(ui_rx, command_tx, props.clone());
-
-            let main_loop = loop_fn(CoreLogicHandler::new(editor_facade, props), |executor| {
-                executor.handle()
-                    .map_err(|_| ())
-                    .and_then(|(executor, stop)| {
-                        if stop {
-                            ok(Loop::Break(()))
-                        } else {
-                            ok(Loop::Continue(executor))
-                        }
-                    })
-            });
-
-            tokio::spawn(main_loop);
-
-            Ok(())
-        }));
+            let mut executor = CoreLogicHandler::new(editor_facade, props);
+            loop {
+                let (new_executor, stop) = executor.handle().await.unwrap();
+                executor = new_executor;
+                if stop {
+                    break;
+                }
+            }
+        });
     });
 
     // The select macro is a nightly feature and is going to be deprecated. Use polling until a better solution is found.
@@ -216,7 +207,7 @@ pub fn execute(editor: Box<dyn Editor>) {
     let (ui_tx, ui_rx) = mpsc::channel();
 
     thread::spawn(move || {
-        tokio::run(lazy(|| {
+        tokio::runtime::Runtime::new().unwrap().spawn(async {
             let props = match file_handler::load_properties(PROPS_FILENAME) {
                 Ok(m) => m,
                 Err(error) => {
@@ -226,23 +217,16 @@ pub fn execute(editor: Box<dyn Editor>) {
             };
 
             let editor_facade = asynch::AsyncEditorFacade::new(ui_rx, command_tx, props.clone());
+            let mut executor = CoreLogicHandler::new(editor_facade, props);
 
-            let main_loop = loop_fn(CoreLogicHandler::new(editor_facade, props), |executor| {
-                executor.handle()
-                    .map_err(|_| ())
-                    .and_then(|(executor, stop)| {
-                        if stop {
-                            ok(Loop::Break(()))
-                        } else {
-                            ok(Loop::Continue(executor))
-                        }
-                    })
-            });
-
-            tokio::spawn(main_loop);
-
-            ok(())
-        }));
+            loop {
+                let (new_executor, stop) = executor.handle().await.unwrap();
+                executor = new_executor;
+                if stop {
+                    break;
+                }
+            }
+        });
     });
 
     loop {
@@ -367,7 +351,6 @@ impl CoreLogicHandler {
             user_selection = us;
             cr
         };
-
         CoreLogicHandler {
             editor,
             props: props,
@@ -383,7 +366,7 @@ impl CoreLogicHandler {
     // This is the main function that handles all the user selections. Its complexity is expected to be big.
     // This may change in the future during a refactoring but is accepted for now.
     #[allow(clippy::cyclomatic_complexity)]
-    fn handle(self) -> FutureResult<(CoreLogicHandler, bool), ()> {
+    async fn handle(self) -> errors::Result<(CoreLogicHandler, bool)> {
         let mut stop = false;
         let mut s = self;
 
@@ -755,7 +738,7 @@ Warning: Saving will discard all the entries that could not be recovered.
             }
         };
 
-        ok((s, stop))
+        Ok((s, stop))
     }
 }
 
@@ -884,7 +867,7 @@ fn spawn_nextcloud_async_task(filename: &str,
 
     debug!("Spawning nextcloud async task");
     // Create a new channel
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::sync_channel(10);
     let every = time::Duration::from_millis(10000);
     let nc = nextcloud::Synchronizer::new(&configuration.nextcloud, &configuration.system, tx, filename).unwrap();
     (asynch::execute_task(Box::new(nc), every), rx)
@@ -901,7 +884,7 @@ fn spawn_dropbox_async_task(filename: &str,
 
     debug!("Spawning dropbox async task");
     // Create a new channel
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::sync_channel(10);
     let every = time::Duration::from_millis(10000);
     let dbx = dropbox::Synchronizer::new(
         &configuration.dropbox,
@@ -1091,7 +1074,6 @@ mod unit_tests {
     }
 
     #[test]
-//    #[ignore]
     // WARNING: Running this, will mess with the passwords that are stored in the $HOME/.rust-keylock directory
     fn execution_cases() {
         execute_try_pass();

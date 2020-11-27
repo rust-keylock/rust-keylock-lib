@@ -17,20 +17,21 @@
 use std::io::Read;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::{self, SyncSender};
 use std::thread;
 use std::time;
 
+use async_trait::async_trait;
 use base64;
-use futures::future::{ok, result};
-use futures::Stream;
-use futures::sync::oneshot;
+use futures::channel::oneshot;
+use std::convert::Infallible;
+use futures::TryFutureExt;
 use http::StatusCode;
 use hyper::{self, Body, Request, Response, Server};
-use hyper::rt::Future;
-use hyper::service::service_fn_ok;
+use hyper::server::conn::AddrStream;
+use hyper::service::{make_service_fn, service_fn};
 use log::*;
-use percent_encoding::{percent_decode, USERINFO_ENCODE_SET, utf8_percent_encode};
+use percent_encoding::{AsciiSet, CONTROLS, percent_decode, utf8_percent_encode};
 use toml;
 use toml::value::Table;
 use url::Url;
@@ -43,8 +44,7 @@ use crate::file_handler;
 use crate::SystemConfiguration;
 use crate::utils;
 
-type ArcMutexRklHttpAsyncClient = Arc<Mutex<BoxedRklHttpAsyncClient>>;
-
+const FRAGMENT: &AsciiSet = &CONTROLS.add(b'+').add(b'/');
 const APP_KEY: &str = "7git6ovjwtdbfvm";
 const HTTP_GET_RESPONSE_BODY: &str = r#"
 <!DOCTYPE html>
@@ -98,7 +98,7 @@ pub(crate) struct Synchronizer {
     /// The configuration needed for this synchronizer
     conf: DropboxConfiguration,
     /// The TX to notify about sync status
-    tx: Sender<errors::Result<SyncStatus>>,
+    tx: SyncSender<errors::Result<SyncStatus>>,
     /// The rust-keylock file name to synchronize
     file_name: String,
     /// The saved_at value read locally from the file
@@ -114,7 +114,7 @@ pub(crate) struct Synchronizer {
 impl Synchronizer {
     pub(crate) fn new(dbc: &DropboxConfiguration,
                       sys_conf: &SystemConfiguration,
-                      tx: Sender<errors::Result<SyncStatus>>,
+                      tx: SyncSender<errors::Result<SyncStatus>>,
                       f: &str,
                       client_factory: Box<dyn RklHttpAsyncFactory<ClientResType=Vec<u8>>>)
                       -> errors::Result<Synchronizer> {
@@ -135,136 +135,94 @@ impl Synchronizer {
         self.conf.decrypted_token()
     }
 
-    fn do_execute(&self) -> impl Future<Item=SyncStatus, Error=RustKeylockError> {
+    async fn do_execute(&self) -> errors::Result<SyncStatus> {
         let file_name = self.file_name.clone();
         let saved_at_local = self.saved_at_local.clone();
         let version_local = self.version_local.clone();
         let last_sync_version = self.last_sync_version.clone();
         let mut client = self.client_factory.create();
-        result(self.use_token())
-            .and_then(move |token| {
-                client.header("Authorization", &format!("Bearer {}", token));
-                ok(Arc::new(Mutex::new(client)))
-            })
-            .and_then(move |client| {
-                let c = Arc::clone(&client);
-                Self::get_version(c)
-                    .map(move |sv| (
-                        sv,
-                        client,
-                        file_name,
-                        saved_at_local,
-                        version_local,
-                        last_sync_version))
-            })
-            .and_then(|(server_version, client, file_name, saved_at_local, version_local, last_sync_version)| {
-                asynch::synchronizer_action(&server_version, &file_name, &saved_at_local, &version_local, &last_sync_version)
-                    .map(move |sa| (sa, client, file_name, version_local, saved_at_local))
-            })
-            .and_then(|(synchronizer_action, client, file_name, version_local, saved_at_local)| {
-                Self::parse_synchronizer_action(synchronizer_action, &file_name, client, version_local, saved_at_local)
-            })
+        let token = self.use_token()?;
+        client.header("Authorization", &format!("Bearer {}", token));
+        let server_version = Self::get_version(&mut client).await?;
+        let synchronizer_action = asynch::synchronizer_action(&server_version, &file_name, &saved_at_local, &version_local, &last_sync_version)?;
+        Self::parse_synchronizer_action(synchronizer_action, &file_name, &mut client, version_local, saved_at_local).await
     }
 
-    fn get_version(client: ArcMutexRklHttpAsyncClient) -> impl Future<Item=ServerVersionData, Error=RustKeylockError> {
-        let mut client = client.lock().expect("Locking the client during get_version");
-        client.post(
+    async fn get_version(client: &mut BoxedRklHttpAsyncClient) -> errors::Result<ServerVersionData> {
+        let bytes = client.post(
             "https://content.dropboxapi.com/2/files/download",
             &[("Dropbox-API-Arg", r#"{"path": "/.version"}"#)],
-            Vec::new())
-            .and_then(|bytes| {
-                let s = std::str::from_utf8(bytes.as_ref())?;
-                parse_version_str(s)
-            })
-            .or_else(|_| ok(ServerVersionData::default()))
-            .and_then(|version_data| ok(version_data))
+            Vec::new()).await?;
+        let s = std::str::from_utf8(bytes.as_ref())?;
+        let version_data = parse_version_str(s).unwrap_or(ServerVersionData::default());
+        Ok(version_data)
     }
 
-    fn download(filename: &str, client: ArcMutexRklHttpAsyncClient) -> impl Future<Item=String, Error=RustKeylockError> {
-        let mut client = client.lock().expect("Locking the client during download");
+    async fn download(filename: &str, client: &mut BoxedRklHttpAsyncClient) -> errors::Result<String> {
         let tmp_file_name = format!("tmp_{}", filename);
 
-        client.post(
+        let bytes = client.post(
             "https://content.dropboxapi.com/2/files/download",
             &[("Dropbox-API-Arg", &format!(r#"{{"path": "/{}"}}"#, filename))],
-            Vec::new())
-            .and_then(|bytes| {
-                file_handler::save_bytes(&tmp_file_name, &bytes, false)
-                    .map(|_| tmp_file_name)
-            })
-            .and_then(|tmp_file_name| {
-                ok(tmp_file_name)
-            })
+            Vec::new()).await?;
+        file_handler::save_bytes(&tmp_file_name, &bytes, false)?;
+        Ok(tmp_file_name)
     }
 
-    fn upload(filename: &str, client: ArcMutexRklHttpAsyncClient) -> impl Future<Item=(), Error=RustKeylockError> {
+    async fn upload(filename: &str, client: &mut BoxedRklHttpAsyncClient) -> errors::Result<()> {
         let filename_string = filename.to_string();
-        result(file_handler::get_file(filename))
-            .and_then(|mut file| {
-                let mut post_body: Vec<u8> = Vec::new();
-                result(file.read_to_end(&mut post_body))
-                    .from_err()
-                    .and_then(move |_| {
-                        let mut client = client.lock().expect("Locking the client during upload");
-                        client.post(
-                            "https://content.dropboxapi.com/2/files/upload",
-                            &[
-                                ("Dropbox-API-Arg", &format!(r#"{{"path":"/{}","mode":"overwrite"}}"#, filename_string)),
-                                ("Content-Type", "application/octet-stream"),
-                            ],
-                            post_body).map(|_| ())
-                    })
-            })
+        let mut file = file_handler::get_file(filename)?;
+        let mut post_body: Vec<u8> = Vec::new();
+        file.read_to_end(&mut post_body)?;
+        client.post(
+            "https://content.dropboxapi.com/2/files/upload",
+            &[
+                ("Dropbox-API-Arg", &format!(r#"{{"path":"/{}","mode":"overwrite"}}"#, filename_string)),
+                ("Content-Type", "application/octet-stream"),
+            ],
+            post_body).await?;
+
+        Ok(())
     }
 
-    fn parse_synchronizer_action(sa: SynchronizerAction, filename: &str, client: ArcMutexRklHttpAsyncClient, version_local: Option<i64>, saved_at_local: Option<i64>) -> Box<dyn Future<Item=SyncStatus, Error=RustKeylockError> + Send> {
+    async fn parse_synchronizer_action(sa: SynchronizerAction, filename: &str, client: &mut BoxedRklHttpAsyncClient, version_local: Option<i64>, saved_at_local: Option<i64>) -> errors::Result<SyncStatus> {
         match sa {
             SynchronizerAction::Download => {
                 info!("Downloading file from the server");
-                Box::new(Self::download(filename, client)
-                    .and_then(|tmp_file_name| ok(SyncStatus::NewAvailable("dropbox", tmp_file_name))))
+                let tmp_file_name = Self::download(filename, client).await?;
+                Ok(SyncStatus::NewAvailable("dropbox", tmp_file_name))
             }
             SynchronizerAction::Ignore => {
                 debug!("No sync is needed");
-                Box::new(ok(SyncStatus::None))
+                Ok(SyncStatus::None)
             }
             SynchronizerAction::Upload => {
                 info!("Uploading file on the server");
-                Box::new(Self::upload_all(filename, client, version_local, saved_at_local)
-                    .and_then(|_| ok(SyncStatus::UploadSuccess("dropbox"))))
+                Self::upload_all(filename, client, version_local, saved_at_local).await?;
+                Ok(SyncStatus::UploadSuccess("dropbox"))
             }
             SynchronizerAction::DownloadMergeAndUpload => {
                 let filename_clone = filename.to_string();
-                let client2 = Arc::clone(&client);
-                Box::new(Self::download(filename, client)
-                    .and_then(|tmp_file_name| {
-                        ok(SyncStatus::NewToMerge("dropbox", tmp_file_name))
-                    })
-                    .or_else(move |_| {
-                        info!("Could not download from the server and do the merge. The files do not exist. Uploading...");
-                        Self::upload_all(&filename_clone, client2, version_local, saved_at_local)
-                            .and_then(|_| {
-                                ok(SyncStatus::UploadSuccess("dropbox"))
-                            })
-                    }))
+                if let Ok(tmp_file_name) = Self::download(filename, client).await {
+                    Ok(SyncStatus::NewToMerge("dropbox", tmp_file_name))
+                } else {
+                    info!("Could not download from the server and do the merge. The files do not exist. Uploading...");
+                    Self::upload_all(&filename_clone, client, version_local, saved_at_local).await?;
+                    Ok(SyncStatus::UploadSuccess("dropbox"))
+                }
             }
         }
     }
 
-    fn upload_all(filename: &str, client: ArcMutexRklHttpAsyncClient, version_local: Option<i64>, saved_at_local: Option<i64>) -> impl Future<Item=(), Error=RustKeylockError> {
-        let client2 = Arc::clone(&client);
-        Self::upload(filename, client)
-            .and_then(move |_| {
-                create_version_file_locally(version_local, saved_at_local)
-            })
-            .and_then(|_| Self::upload(".version", client2))
-            .and_then(|_| {
-                let _ = file_handler::delete_file(".version");
-                ok(())
-            })
+    async fn upload_all(filename: &str, client: &mut BoxedRklHttpAsyncClient, version_local: Option<i64>, saved_at_local: Option<i64>) -> errors::Result<()> {
+        Self::upload(filename, client).await?;
+        create_version_file_locally(version_local, saved_at_local)?;
+        Self::upload(".version", client).await?;
+        file_handler::delete_file(".version")?;
+        Ok(())
     }
 
-    fn send_to_channel(res: errors::Result<SyncStatus>, tx: Sender<errors::Result<SyncStatus>>) {
+    fn send_to_channel(res: errors::Result<SyncStatus>, tx: SyncSender<errors::Result<SyncStatus>>) {
         match res {
             Ok(ref r) => debug!("Dropbox Async Task sends to the channel {:?}", r),
             Err(ref error) => error!("Dropbox Async Tasks reported error: {:?}", error),
@@ -282,24 +240,27 @@ impl Synchronizer {
     }
 }
 
+#[async_trait]
 impl super::AsyncTask for Synchronizer {
     fn init(&mut self) {}
 
-    fn execute(&self) -> Box<dyn Future<Item=bool, Error=()> + Send> {
+    async fn execute(&self) -> bool {
         let cloned_tx_ok = self.tx.clone();
         let cloned_tx_err = self.tx.clone();
 
-        let f = self.do_execute()
-            .map(move |sync_status| {
+        match self.do_execute().await {
+            Ok(sync_status) => {
                 // Return true to continue the task only if the SyncStatus was None.
                 // In all the other cases we need to stop the task in order to allow the user to take an action.
                 let to_ret = sync_status == SyncStatus::None;
                 Self::send_to_channel(Ok(sync_status), cloned_tx_ok);
                 to_ret
-            })
-            .map_err(move |error| Self::send_to_channel(Err(error), cloned_tx_err));
-
-        Box::new(f)
+            }
+            Err(error) => {
+                Self::send_to_channel(Err(error), cloned_tx_err);
+                false
+            }
+        }
     }
 }
 
@@ -345,7 +306,7 @@ impl DropboxConfiguration {
     pub fn dropbox_url() -> String {
         let random_bytes = create_random(128);
         let b64 = base64::encode(&random_bytes);
-        let random_string = utf8_percent_encode(&b64, USERINFO_ENCODE_SET).to_string();
+        let random_string = utf8_percent_encode(&b64, FRAGMENT).to_string();
         format!("https://www.dropbox.com/1/oauth2/authorize?client_id={}&response_type=token&redirect_uri=http://localhost:8899&state={}", APP_KEY, random_string)
     }
 
@@ -381,6 +342,11 @@ impl Default for DropboxConfiguration {
     }
 }
 
+
+async fn token_server_shutdown_signal(tx: futures::channel::oneshot::Receiver<()>) {
+    tx.into_future().await.unwrap()
+}
+
 pub(crate) fn retrieve_token(url_string: String) -> errors::Result<String> {
     debug!("Retrieving a token for dropbox");
     // Define the server shutdown handle
@@ -390,87 +356,91 @@ pub(crate) fn retrieve_token(url_string: String) -> errors::Result<String> {
 
     // Spawn the server in a different thread
     thread::spawn(move || {
-        // Get the port and state from the URL
-        let (port, state) = parse_url(url_string).unwrap();
-        // The tx to be shared between threads (used by the server function).
-        let tx_arc = Arc::new(Mutex::new(tx));
-        // The state to be shared between threads (used by the server function).
-        let state_arc = Arc::new(state);
-        // The server function
-        let s = move || {
-            let shared_tx = tx_arc.clone();
-            let shared_state = state_arc.clone();
-            service_fn_ok(move |req: Request<Body>| {
-                let mut resp_builder = Response::builder();
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let f = async {
+            // Get the port and state from the URL
+            let (port, state) = parse_url(url_string).unwrap();
+            // The tx to be shared between threads (used by the server function).
+            let tx_arc = Arc::new(Mutex::new(tx));
+            // The state to be shared between threads (used by the server function).
+            let state_arc = Arc::new(state);
+            // The server function
+            let make_svc = make_service_fn(move |_socket: &AddrStream| {
+                let shared_tx = tx_arc.clone();
+                let shared_state = state_arc.clone();
+                async move {
+                    let shared_tx = shared_tx.clone();
+                    let shared_state = shared_state.clone();
+                    Ok::<_, Infallible>({
+                        let shared_tx = shared_tx.clone();
+                        let shared_state = shared_state.clone();
+                        service_fn(move |req: Request<Body>| {
+                            let shared_tx = shared_tx.clone();
+                            let shared_state = shared_state.clone();
+                            async move {
+                                let shared_tx = shared_tx.clone();
+                                let shared_state = shared_state.clone();
+                                Ok::<_, Infallible>({
+                                    let resp_builder = Response::builder();
 
-                if req.method() == &hyper::Method::GET {
-                    // Something like http://localhost:8899/#access_token=blabla&token_type=bearer&state=blabla&uid=blabla&account_id=blabla
-                    resp_builder.status(StatusCode::OK);
-                    resp_builder.body(Body::from(HTTP_GET_RESPONSE_BODY)).unwrap()
-                } else if req.method() == &hyper::Method::POST {
-                    // The post body should be like:
-                    // tkninput=%23access_token%thisisatoken%26token_type%3Dbearer%26state%3DmiRHqBMRYjKMd089A4904USkjjrV7uh7mrrFaU1MrtXQPstDuf4ojC2bFQjkS83kslXrlhksomcopvFHV6e0BF7Ta6c4D1sDsOhYA864b6rwrqJlZzJZ%2B%252FpUeaQ4NvpP1tV%252FhCqUqdj5juK1h49x5DbCYNQMe54DeZe5XBPYl%2Bs%253D%26uid%3D1417302560%26account_id%3Ddbid%253AAAABRSgfZEneZO8ogIDXa0EH3BdpFWNRVc0
-                    let shared_tx_2 = shared_tx.clone();
-                    let shared_state_2 = shared_state.clone();
-                    let bdy = req_to_body(req)
-                        .and_then(move |v| {
-                            let tx = shared_tx_2.lock().unwrap();
-                            let state = &shared_state_2.to_string();
-                            let _ = String::from_utf8(v)
-                                .map_err(|error| RustKeylockError::GeneralError(format!("Could not retrieve the request body: {}", error)))
-                                .map(|bdy| {
-                                    let fragment = bdy.replace("tkninput=%23", "");
-                                    percent_decode(fragment.as_bytes())
-                                        .decode_utf8().unwrap()
-                                        .to_string()
-                                })
-                                .map(|fragment| {
-                                    retrieve_token_and_state_from_post_body(&fragment).unwrap()
-                                })
-                                .map(|m| {
-                                    let (found_token, found_state) = m;
-                                    let decoded_state = percent_decode(found_state.as_bytes())
-                                        .decode_utf8().unwrap()
-                                        .to_string();
+                                    if req.method() == &hyper::Method::GET {
+                                        // Something like http://localhost:8899/#access_token=blabla&token_type=bearer&state=blabla&uid=blabla&account_id=blabla
+                                        resp_builder.status(StatusCode::OK).body(Body::from(HTTP_GET_RESPONSE_BODY)).unwrap()
+                                    } else if req.method() == &hyper::Method::POST {
+                                        // The post body should be like:
+                                        // tkninput=%23access_token%thisisatoken%26token_type%3Dbearer%26state%3DmiRHqBMRYjKMd089A4904USkjjrV7uh7mrrFaU1MrtXQPstDuf4ojC2bFQjkS83kslXrlhksomcopvFHV6e0BF7Ta6c4D1sDsOhYA864b6rwrqJlZzJZ%2B%252FpUeaQ4NvpP1tV%252FhCqUqdj5juK1h49x5DbCYNQMe54DeZe5XBPYl%2Bs%253D%26uid%3D1417302560%26account_id%3Ddbid%253AAAABRSgfZEneZO8ogIDXa0EH3BdpFWNRVc0
+                                        // let shared_tx_2 = shared_tx.clone();
+                                        // let shared_state_2 = shared_state.clone();
+                                        let error_message = format!("Could not get the body of the request to {}. Using an empty body instead.", req.uri());
+                                        let v = req_to_body(req).await.unwrap_or_else(move |error| {
+                                            error!("{} {}", error_message, error);
+                                            Vec::new()
+                                        });
+                                        let bdy = String::from_utf8(v).unwrap();
+                                        let raw_fragment = bdy.replace("tkninput=%23", "");
+                                        let fragment = percent_decode(raw_fragment.as_bytes())
+                                            .decode_utf8().unwrap()
+                                            .to_string();
+                                        let (found_token, found_state) = retrieve_token_and_state_from_post_body(&fragment).unwrap();
+                                        let decoded_state = percent_decode(found_state.as_bytes())
+                                            .decode_utf8().unwrap()
+                                            .to_string();
 
-                                    if state == &decoded_state {
-                                        let _ = tx.send(Ok(found_token));
+                                        let tx = shared_tx.lock().unwrap();
+                                        if &shared_state.to_string() == &decoded_state {
+                                            let _ = tx.send(Ok(found_token));
+                                        } else {
+                                            let _ = tx.send(Err(RustKeylockError::GeneralError(format!("Invalid request state. Expected: {}, found: {}", &shared_state.to_string(), decoded_state))));
+                                        }
+
+                                        resp_builder.status(StatusCode::OK).body(Body::from(HTTP_POST_RESPONSE_BODY)).unwrap()
                                     } else {
-                                        let _ = tx.send(Err(RustKeylockError::GeneralError(format!("Invalid request state. Expected: {}, found: {}", state, decoded_state))));
+                                        let tx = shared_tx.lock().unwrap();
+                                        let _ = tx.send(Err(RustKeylockError::GeneralError("error".to_string())));
+                                        resp_builder.status(StatusCode::BAD_REQUEST).body(Body::empty()).unwrap()
                                     }
                                 })
-                                .map_err(|error| { let _ = tx.send(Err(error)); });
-
-                            ok(())
+                            }
                         })
-                        .map_err(|_| ());
-                    hyper::rt::spawn(bdy);
-                    resp_builder.status(StatusCode::OK);
-                    resp_builder.body(Body::from(HTTP_POST_RESPONSE_BODY)).unwrap()
-                } else {
-                    let tx = shared_tx.lock().unwrap();
-                    let _ = tx.send(Err(RustKeylockError::GeneralError("error".to_string())));
-                    resp_builder.status(StatusCode::BAD_REQUEST);
-                    resp_builder.body(Body::empty()).unwrap()
+                    })
                 }
-            })
+            });
+
+            // The server will run on the localhost
+            let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
+            // Bind the server
+            let server = Server::bind(&addr).serve(make_svc);
+            // Set the graceful shutdown handle
+            let graceful = server
+                .with_graceful_shutdown(token_server_shutdown_signal(rx_shutdown));
+            graceful.await.unwrap_or_else(|error| error!("HTTP Server Error during retrieving Dropbox token: {}", error));
         };
-
-        // The server will run on the localhost
-        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
-        // Bind the server
-        let server = Server::bind(&addr).serve(s);
-        // Set the graceful shutdown handle
-        let graceful = server
-            .with_graceful_shutdown(rx_shutdown)
-            .map_err(|err| error!("HTTP Server Error during retrieving Dropbox token: {}", err));
-
-        hyper::rt::run(graceful);
+        rt.block_on(f);
+        debug!("Temporary server stopped!");
     });
 
-
     debug!("Waiting for Dropbox Token...");
-    let rec = rx.recv_timeout(time::Duration::from_millis(60000))
+    let rec = rx.recv_timeout(time::Duration::from_millis(300000))
         .map_err(|error| RustKeylockError::from(error))
         .and_then(|rec_res| rec_res);
     debug!("Dropbox Token retrieved. Stopping temporary server...");
@@ -480,13 +450,8 @@ pub(crate) fn retrieve_token(url_string: String) -> errors::Result<String> {
     rec
 }
 
-fn req_to_body(req: Request<Body>) -> impl Future<Item=Vec<u8>, Error=RustKeylockError> {
-    req.into_body().concat2()
-        .map_err(|error| RustKeylockError::SyncError(errors::debug_error_string(error)))
-        .map(move |chunk| {
-            let body: Vec<u8> = chunk.to_vec();
-            body
-        })
+async fn req_to_body(req: Request<Body>) -> errors::Result<Vec<u8>> {
+    Ok(hyper::body::to_bytes(req.into_body()).await?.to_vec())
 }
 
 fn parse_url(url_string: String) -> errors::Result<(u16, String)> {
@@ -542,12 +507,11 @@ fn retrieve_token_and_state_from_post_body(post_body: &str) -> errors::Result<(S
 mod dropbox_tests {
     use std::collections::HashMap;
     use std::sync::mpsc;
-    use std::sync::mpsc::Receiver;
     use std::thread;
     use std::time;
 
+    use async_trait::async_trait;
     use hyper::{Client, Method, Request};
-    use hyper::rt::{self, Future};
 
     use crate::asynch::RklHttpAsyncClient;
 
@@ -575,6 +539,7 @@ mod dropbox_tests {
     }
 
     fn retrieval_success() {
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
         let (tx, rx) = mpsc::channel();
         // The state
         let state = "cyrNicoWwMP%2FVKd%2FwunLPVO6ZU+D4UwQQ9BDeckxJwL5vlQGDf4Kt2J49bfJ+V3qnI7TTtLq3PZRJY9Sn0p3S4EfYBNSPtdIHNWsSLoFz7u1FnVXbOdfjrjybKLusY4Eu+usJP+e86tnJi4lCDrYXy6O7hMZZmAvj1%2FmykZhgmQ";
@@ -590,28 +555,28 @@ mod dropbox_tests {
         thread::sleep(time::Duration::from_millis(1000));
 
         // Send the HTTP POST request
-        rt::run(rt::lazy(move || {
-            let client = Client::new();
-            let uri: hyper::Uri = "http://localhost:8899/".parse().unwrap();
-            let post_body = format!("tkninput=%23access_token%3DAHO6fSqhEBAAAAAAAAAAZeiCpsEkwQSDd4bgz3vOWTsx2RnZ1uQ2NyS5N315lGRq%26token_type%3Dbearer%26state%3D{}%26uid%3D1417302560%26account_id%3Ddbid%253AAAABRSgfZEneZO8ogIDXa0EH3BdpFWNRVc0", state);
-            let mut req = Request::new(Body::from(post_body));
-            *req.method_mut() = Method::POST;
-            *req.uri_mut() = uri.clone();
+        let client = Client::new();
+        let uri: hyper::Uri = "http://localhost:8899/".parse().unwrap();
+        let post_body = format!("tkninput=%23access_token%3DAHO6fSqhEBAAAAAAAAAAZeiCpsEkwQSDd4bgz3vOWTsx2RnZ1uQ2NyS5N315lGRq%26token_type%3Dbearer%26state%3D{}%26uid%3D1417302560%26account_id%3Ddbid%253AAAABRSgfZEneZO8ogIDXa0EH3BdpFWNRVc0", state);
+        let mut req = Request::new(Body::from(post_body));
+        *req.method_mut() = Method::POST;
+        *req.uri_mut() = uri.clone();
 
-            client.request(req)
-                .map(|res| {
-                    println!("POST Response OK: {:?}", res);
-                })
-                .map_err(|error| {
-                    println!("POST Response Error: {:?}", error);
-                })
-        }));
+        let response = rt.block_on(client.request(req));
+
+        if response.is_ok() {
+            println!("POST Response OK: {:?}", response.unwrap());
+        } else {
+            println!("POST Response Error: {:?}", response.unwrap_err());
+        }
+
         // Wait for the token from the retrieve_token function (it is spawned above)
         let res = rx.recv_timeout(time::Duration::from_millis(10000));
         assert!(res.unwrap().is_ok());
     }
 
     fn retrieval_failure() {
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
         let (tx, rx) = mpsc::channel();
         // The state
         let state = "astate";
@@ -627,23 +592,20 @@ mod dropbox_tests {
         thread::sleep(time::Duration::from_millis(1000));
 
         // Send the HTTP POST request
-        rt::run(rt::lazy(move || {
-            let client = Client::new();
-            let uri: hyper::Uri = "http://localhost:8899/".parse().unwrap();
-            let invalid_state = "anotherstate";
-            let post_body = format!("tkninput=%23access_token%3DAHO6fSqhEBAAAAAAAAAAZeiCpsEkwQSDd4bgz3vOWTsx2RnZ1uQ2NyS5N315lGRq%26token_type%3Dbearer%26state%3D{}%26uid%3D1417302560%26account_id%3Ddbid%253AAAABRSgfZEneZO8ogIDXa0EH3BdpFWNRVc0", invalid_state);
-            let mut req = Request::new(Body::from(post_body));
-            *req.method_mut() = Method::POST;
-            *req.uri_mut() = uri.clone();
+        let client = Client::new();
+        let uri: hyper::Uri = "http://localhost:8899/".parse().unwrap();
+        let invalid_state = "anotherstate";
+        let post_body = format!("tkninput=%23access_token%3DAHO6fSqhEBAAAAAAAAAAZeiCpsEkwQSDd4bgz3vOWTsx2RnZ1uQ2NyS5N315lGRq%26token_type%3Dbearer%26state%3D{}%26uid%3D1417302560%26account_id%3Ddbid%253AAAABRSgfZEneZO8ogIDXa0EH3BdpFWNRVc0", invalid_state);
+        let mut req = Request::new(Body::from(post_body));
+        *req.method_mut() = Method::POST;
+        *req.uri_mut() = uri.clone();
 
-            client.request(req)
-                .map(|res| {
-                    println!("POST Response OK: {:?}", res);
-                })
-                .map_err(|error| {
-                    println!("POST Response Error: {:?}", error);
-                })
-        }));
+        let response = rt.block_on(client.request(req));
+        if response.is_ok() {
+            println!("POST Response OK: {:?}", response.unwrap());
+        } else {
+            println!("POST Response Error: {:?}", response.unwrap_err());
+        }
         // Wait for the token from the retrieve_token function (it is spawned above)
         let res = rx.recv_timeout(time::Duration::from_millis(10000));
         assert!(res.unwrap().is_err());
@@ -666,8 +628,8 @@ mod dropbox_tests {
     #[test]
     fn dbx_configuration_to_table() {
         let toml = r#"
-                token = "thisisatoken"
-            "#;
+                        token = "thisisatoken"
+                    "#;
 
         let value = toml.parse::<toml::value::Value>().unwrap();
         let table = value.as_table().unwrap();
@@ -681,8 +643,8 @@ mod dropbox_tests {
     #[test]
     fn dbx_configuration_from_table_success() {
         let toml = r#"
-                token = "thisisatoken"
-            "#;
+                        token = "thisisatoken"
+                    "#;
 
         let value = toml.parse::<toml::value::Value>().unwrap();
         let table = value.as_table().unwrap();
@@ -709,10 +671,8 @@ mod dropbox_tests {
 
     #[test]
     fn download() {
-        let (tx, rx): (Sender<errors::Result<String>>, Receiver<errors::Result<String>>) = mpsc::channel();
-        let tx_clone = tx.clone();
-
-        let mut client = TestHttpClient::new();
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let mut client = Box::new(TestHttpClient::new());
         client.header("Authorization", "Bearer thisisatoken");
 
         let mut validation_headers = HashMap::new();
@@ -725,23 +685,15 @@ mod dropbox_tests {
             headers: validation_headers,
         });
 
-        tokio::run(Synchronizer::download("afile_dld", client.to_arc())
-            .map(move |tmp_file_name| {
-                let _ = tx.send(Ok(tmp_file_name));
-            })
-            .map_err(move |error| {
-                let _ = tx_clone.send(Err(error));
-            }));
-
-        rx.recv_timeout(time::Duration::from_millis(10000)).unwrap().unwrap();
+        let mut dyn_client = client as BoxedRklHttpAsyncClient;
+        let res = rt.block_on(Synchronizer::download("afile_dld", &mut dyn_client));
+        assert!(res.is_ok());
     }
 
     #[test]
     fn upload() {
-        let (tx, rx): (Sender<errors::Result<()>>, Receiver<errors::Result<()>>) = mpsc::channel();
-        let tx_clone = tx.clone();
-
-        let mut client = TestHttpClient::new();
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let mut client = Box::new(TestHttpClient::new());
         client.header("Authorization", "Bearer thisisatoken");
 
         let mut validation_headers = HashMap::new();
@@ -757,24 +709,15 @@ mod dropbox_tests {
 
         file_handler::save_bytes("afile_upld", "123".as_bytes(), false).unwrap();
 
-        tokio::run(Synchronizer::upload("afile_upld", client.to_arc())
-            .map(move |_| {
-                let _ = tx.send(Ok(()));
-            })
-            .map_err(move |error| {
-                let _ = tx_clone.send(Err(error));
-            }));
-
-        rx.recv_timeout(time::Duration::from_millis(10000)).unwrap().unwrap();
-        let _ = file_handler::delete_file("afile_upld");
+        let mut dyn_client = client as BoxedRklHttpAsyncClient;
+        let res = rt.block_on(Synchronizer::upload("afile_upld", &mut dyn_client));
+        assert!(res.is_ok());
     }
 
     #[test]
     fn get_version() {
-        let (tx, rx): (Sender<errors::Result<ServerVersionData>>, Receiver<errors::Result<ServerVersionData>>) = mpsc::channel();
-        let tx_clone = tx.clone();
-
-        let mut client = TestHttpClient::new();
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let mut client = Box::new(TestHttpClient::new());
         client.header("Authorization", "Bearer thisisatoken");
 
         let mut validation_headers = HashMap::new();
@@ -788,37 +731,26 @@ mod dropbox_tests {
         });
 
 
-        tokio::run(Synchronizer::get_version(client.to_arc())
-            .map(move |svd| {
-                let _ = tx.send(Ok(svd));
-            })
-            .map_err(move |error| {
-                let _ = tx_clone.send(Err(error));
-            }));
-
-        let svd = rx.recv_timeout(time::Duration::from_millis(10000)).unwrap().unwrap();
+        let mut dyn_client = client as BoxedRklHttpAsyncClient;
+        let res = rt.block_on(Synchronizer::get_version(&mut dyn_client));
+        assert!(res.is_ok());
+        let svd = res.unwrap();
         assert!(svd.version == "1");
         assert!(svd.last_modified == "2");
     }
 
     #[test]
     fn parse_synchronizer_action_download() {
-        let (tx, rx): (Sender<errors::Result<SyncStatus>>, Receiver<errors::Result<SyncStatus>>) = mpsc::channel();
-        let tx_clone = tx.clone();
-
-        let mut client = AlwaysSuccessfulHttpClient::new();
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let mut client = Box::new(AlwaysSuccessfulHttpClient::new());
 
         client.add_response(Vec::from("irrelevant"));
 
-        tokio::run(Synchronizer::parse_synchronizer_action(SynchronizerAction::Download, "afile_sa_dld", client.to_arc(), Some(1), Some(2))
-            .map(move |sync_status| {
-                let _ = tx.send(Ok(sync_status));
-            })
-            .map_err(move |error| {
-                let _ = tx_clone.send(Err(error));
-            }));
+        let mut dyn_client = client as BoxedRklHttpAsyncClient;
+        let res = rt.block_on(Synchronizer::parse_synchronizer_action(SynchronizerAction::Download, "afile_sa_dld", &mut dyn_client, Some(1), Some(2)));
+        assert!(res.is_ok());
 
-        match rx.recv_timeout(time::Duration::from_millis(10000)).unwrap().unwrap() {
+        match res.unwrap() {
             SyncStatus::NewAvailable(from, filename) => {
                 assert!(from == "dropbox");
                 assert!(filename == "tmp_afile_sa_dld");
@@ -830,22 +762,16 @@ mod dropbox_tests {
 
     #[test]
     fn parse_synchronizer_action_ignore() {
-        let (tx, rx): (Sender<errors::Result<SyncStatus>>, Receiver<errors::Result<SyncStatus>>) = mpsc::channel();
-        let tx_clone = tx.clone();
-
-        let mut client = AlwaysSuccessfulHttpClient::new();
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let mut client = Box::new(AlwaysSuccessfulHttpClient::new());
 
         client.add_response(Vec::from("irrelevant"));
 
-        tokio::run(Synchronizer::parse_synchronizer_action(SynchronizerAction::Ignore, "afile_sa_ign", client.to_arc(), Some(1), Some(2))
-            .map(move |sync_status| {
-                let _ = tx.send(Ok(sync_status));
-            })
-            .map_err(move |error| {
-                let _ = tx_clone.send(Err(error));
-            }));
+        let mut dyn_client = client as BoxedRklHttpAsyncClient;
+        let res = rt.block_on(Synchronizer::parse_synchronizer_action(SynchronizerAction::Ignore, "afile_sa_ign", &mut dyn_client, Some(1), Some(2)));
+        assert!(res.is_ok());
 
-        match rx.recv_timeout(time::Duration::from_millis(10000)).unwrap().unwrap() {
+        match res.unwrap() {
             SyncStatus::None => assert!(true),
             other => panic!("Unexpected SyncStatus: {:?}", other),
         };
@@ -854,27 +780,21 @@ mod dropbox_tests {
 
     #[test]
     fn parse_synchronizer_action_upload() {
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
         file_handler::save_bytes("afile_upload", "123".as_bytes(), false).unwrap();
         file_handler::save_bytes(".version", "123,321".as_bytes(), false).unwrap();
-        let (tx, rx): (Sender<errors::Result<SyncStatus>>, Receiver<errors::Result<SyncStatus>>) = mpsc::channel();
-        let tx_clone = tx.clone();
-
-        let mut client = AlwaysSuccessfulHttpClient::new();
+        let mut client = Box::new(AlwaysSuccessfulHttpClient::new());
 
         // We need two responses because the upload_all is called, which makes 2 requests for upload.
         // One for the .sec file and one for the .version file.
         client.add_response(Vec::from("irrelevant"));
         client.add_response(Vec::from("irrelevant"));
 
-        tokio::run(Synchronizer::parse_synchronizer_action(SynchronizerAction::Upload, "afile_upload", client.to_arc(), Some(1), Some(2))
-            .map(move |sync_status| {
-                let _ = tx.send(Ok(sync_status));
-            })
-            .map_err(move |error| {
-                let _ = tx_clone.send(Err(error));
-            }));
+        let mut dyn_client = client as BoxedRklHttpAsyncClient;
+        let res = rt.block_on(Synchronizer::parse_synchronizer_action(SynchronizerAction::Upload, "afile_upload", &mut dyn_client, Some(1), Some(2)));
+        assert!(res.is_ok());
 
-        match rx.recv_timeout(time::Duration::from_millis(10000)).unwrap().unwrap() {
+        match res.unwrap() {
             SyncStatus::UploadSuccess(from) => assert!(from == "dropbox"),
             other => panic!("Unexpected SyncStatus: {:?}", other),
         };
@@ -884,22 +804,15 @@ mod dropbox_tests {
 
     #[test]
     fn parse_synchronizer_action_download_merge_and_upload() {
-        let (tx, rx): (Sender<errors::Result<SyncStatus>>, Receiver<errors::Result<SyncStatus>>) = mpsc::channel();
-        let tx_clone = tx.clone();
-
-        let mut client = AlwaysSuccessfulHttpClient::new();
-
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let mut client = Box::new(AlwaysSuccessfulHttpClient::new());
         client.add_response(Vec::from("irrelevant"));
 
-        tokio::run(Synchronizer::parse_synchronizer_action(SynchronizerAction::DownloadMergeAndUpload, "afile_dmu", client.to_arc(), Some(1), Some(2))
-            .map(move |sync_status| {
-                let _ = tx.send(Ok(sync_status));
-            })
-            .map_err(move |error| {
-                let _ = tx_clone.send(Err(error));
-            }));
+        let mut dyn_client = client as BoxedRklHttpAsyncClient;
+        let res = rt.block_on(Synchronizer::parse_synchronizer_action(SynchronizerAction::DownloadMergeAndUpload, "afile_dmu", &mut dyn_client, Some(1), Some(2)));
+        assert!(res.is_ok());
 
-        match rx.recv_timeout(time::Duration::from_millis(10000)).unwrap().unwrap() {
+        match res.unwrap() {
             SyncStatus::NewToMerge(from, filename) => {
                 assert!(from == "dropbox");
                 assert!(filename == "tmp_afile_dmu");
@@ -920,35 +833,27 @@ mod dropbox_tests {
             }
         }
 
-        fn to_arc(self) -> Arc<Mutex<Box<dyn RklHttpAsyncClient<ResType=Vec<u8>>>>> {
-            Arc::new(Mutex::new(Box::new(self)))
-        }
-
         fn add_response(&mut self, response: Vec<u8>) {
             self.responses.push(response);
         }
 
-        fn handle_request(&mut self) -> Box<dyn Future<Item=Vec<u8>, Error=RustKeylockError> + Send> {
-            let response_result = self.responses.pop().ok_or(RustKeylockError::GeneralError("There are no available responses".to_string()));
-            Box::new(
-                result(response_result)
-                    .and_then(|response_to_send| {
-                        ok(response_to_send)
-                    }))
+        async fn handle_request(&mut self) -> errors::Result<Vec<u8>> {
+            self.responses.pop().ok_or(RustKeylockError::GeneralError("There are no available responses".to_string()))
         }
     }
 
+    #[async_trait]
     impl RklHttpAsyncClient for AlwaysSuccessfulHttpClient {
         type ResType = Vec<u8>;
 
         fn header(&mut self, _: &str, _: &str) {}
 
-        fn get(&mut self, _: &str, _: &[(&str, &str)]) -> Box<dyn Future<Item=Vec<u8>, Error=RustKeylockError> + Send> {
-            self.handle_request()
+        async fn get(&mut self, _: &str, _: &[(&str, &str)]) -> errors::Result<Vec<u8>> {
+            self.handle_request().await
         }
 
-        fn post(&mut self, _: &str, _: &[(&str, &str)], _: Vec<u8>) -> Box<dyn Future<Item=Vec<u8>, Error=RustKeylockError> + Send> {
-            self.handle_request()
+        async fn post(&mut self, _: &str, _: &[(&str, &str)], _: Vec<u8>) -> errors::Result<Vec<u8>> {
+            self.handle_request().await
         }
     }
 
@@ -966,10 +871,6 @@ mod dropbox_tests {
     }
 
     impl TestHttpClient {
-        fn to_arc(self) -> Arc<Mutex<Box<dyn RklHttpAsyncClient<ResType=Vec<u8>>>>> {
-            Arc::new(Mutex::new(Box::new(self)))
-        }
-
         fn new() -> TestHttpClient {
             TestHttpClient {
                 headers: HashMap::new(),
@@ -1001,27 +902,21 @@ mod dropbox_tests {
             }
         }
 
-        fn handle_request(&mut self, uri: &str, additional_headers: &[(&str, &str)]) -> Box<dyn Future<Item=Vec<u8>, Error=RustKeylockError> + Send> {
+        fn handle_request(&mut self, uri: &str, additional_headers: &[(&str, &str)]) -> errors::Result<Vec<u8>> {
             let mut current_headers = self.headers.clone();
             let current_uri = uri.to_owned();
             for (additional_k, additional_v) in additional_headers {
                 current_headers.insert(additional_k.to_string(), additional_v.to_string());
             }
-            let headers_and_responses_result = self.validation_steps.pop().ok_or(RustKeylockError::GeneralError("There are no available responses".to_string()));
-            Box::new(
-                result(headers_and_responses_result)
-                    .and_then(move |validation_step| {
-                        let response_to_send: Vec<u8> = validation_step.response.iter().cloned().collect();
-                        Self::validate_headers(&current_headers, &validation_step.headers)
-                            .and_then(|_| Self::validate_uris(&current_uri, &validation_step.uri))
-                            .map(|_| response_to_send)
-                    })
-                    .and_then(|response_to_send| {
-                        ok(response_to_send)
-                    }))
+            let validation_step = self.validation_steps.pop().ok_or(RustKeylockError::GeneralError("There are no available responses".to_string()))?;
+            let response_to_send: Vec<u8> = validation_step.response.iter().cloned().collect();
+            Self::validate_headers(&current_headers, &validation_step.headers)
+                .and_then(|_| Self::validate_uris(&current_uri, &validation_step.uri))
+                .map(|_| response_to_send)
         }
     }
 
+    #[async_trait]
     impl RklHttpAsyncClient for TestHttpClient {
         type ResType = Vec<u8>;
 
@@ -1029,11 +924,11 @@ mod dropbox_tests {
             self.headers.insert(k.to_string(), v.to_string());
         }
 
-        fn get(&mut self, uri: &str, additional_headers: &[(&str, &str)]) -> Box<dyn Future<Item=Vec<u8>, Error=RustKeylockError> + Send> {
+        async fn get(&mut self, uri: &str, additional_headers: &[(&str, &str)]) -> errors::Result<Vec<u8>> {
             self.handle_request(uri, additional_headers)
         }
 
-        fn post(&mut self, uri: &str, additional_headers: &[(&str, &str)], _body: Vec<u8>) -> Box<dyn Future<Item=Vec<u8>, Error=RustKeylockError> + Send> {
+        async fn post(&mut self, uri: &str, additional_headers: &[(&str, &str)], _body: Vec<u8>) -> errors::Result<Vec<u8>> {
             self.handle_request(uri, additional_headers)
         }
     }
