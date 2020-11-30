@@ -17,9 +17,8 @@
 use std::iter::FromIterator;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use async_trait::async_trait;
 use log::*;
-#[cfg(test)]
-use mockall::{automock, predicate::*};
 use rs_password_utils;
 use toml;
 use toml::value::Table;
@@ -603,8 +602,25 @@ impl<'a> From<&'a str> for UserOptionType {
     }
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub(crate) struct EditorShowMessageWrapper {
+    pub message: String,
+    pub user_options: Vec<UserOption>,
+    pub severity: MessageSeverity,
+}
+
+impl EditorShowMessageWrapper {
+    pub(crate) fn new(message: &str, user_options: Vec<UserOption>, severity: MessageSeverity) -> EditorShowMessageWrapper {
+        EditorShowMessageWrapper {
+            message: message.to_string(),
+            user_options,
+            severity,
+        }
+    }
+}
+
 /// Severity for the messages presented to the Users
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum MessageSeverity {
     Info,
     Warn,
@@ -637,9 +653,9 @@ pub(crate) enum UiCommand {
     ShowMessage(String, Vec<UserOption>, MessageSeverity),
 }
 
-#[cfg_attr(test, automock)]
+#[async_trait]
 pub(crate) trait PasswordChecker {
-    fn is_unsafe(&self, password: &str) -> errors::Result<bool>;
+    async fn is_unsafe(&self, password: &str) -> errors::Result<bool>;
 }
 
 pub(crate) struct RklPasswordChecker {}
@@ -650,9 +666,10 @@ impl Default for RklPasswordChecker {
     }
 }
 
+#[async_trait]
 impl PasswordChecker for RklPasswordChecker {
-    fn is_unsafe(&self, password: &str) -> errors::Result<bool> {
-        Ok(rs_password_utils::pwned::blocking::is_pwned(password)?)
+    async fn is_unsafe(&self, password: &str) -> errors::Result<bool> {
+        Ok(rs_password_utils::pwned::is_pwned(password).await?)
     }
 }
 

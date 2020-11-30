@@ -47,12 +47,10 @@ use std::thread;
 use std::time;
 
 use log::*;
-#[cfg(test)]
-use mockall::{automock, predicate::*};
 
 pub use file_handler::default_rustkeylock_location;
 
-use crate::api::{PasswordChecker, RklPasswordChecker};
+use crate::api::{PasswordChecker, RklPasswordChecker, EditorShowMessageWrapper};
 use crate::asynch::dropbox::DropboxConfiguration;
 use crate::asynch::nextcloud::NextcloudConfiguration;
 use crate::asynch::ReqwestClientFactory;
@@ -98,7 +96,7 @@ pub fn execute_async(editor: Box<dyn AsyncEditor>) {
     let mut ui_rx_vec = Vec::new();
 
     thread::spawn(move || {
-        tokio::runtime::Runtime::new().unwrap().spawn(async {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
             openssl_probe::init_ssl_cert_env_vars();
             info!("Starting rust-keylock...");
             let props = match file_handler::load_properties(PROPS_FILENAME) {
@@ -207,7 +205,7 @@ pub fn execute(editor: Box<dyn Editor>) {
     let (ui_tx, ui_rx) = mpsc::channel();
 
     thread::spawn(move || {
-        tokio::runtime::Runtime::new().unwrap().spawn(async {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
             let props = match file_handler::load_properties(PROPS_FILENAME) {
                 Ok(m) => m,
                 Err(error) => {
@@ -722,7 +720,8 @@ Warning: Saving will discard all the entries that could not be recovered.
             }
             UserSelection::CheckPasswords => {
                 debug!("UserSelection::CheckPasswords");
-                handle_check_passwords(&s.safe, &s.editor, &RklPasswordChecker::default());
+                let mr = handle_check_passwords(&s.safe, &RklPasswordChecker::default()).await;
+                let _ = s.editor.show_message(&mr.message, mr.user_options, mr.severity);
                 UserSelection::GoTo(Menu::EntriesList("".to_string()))
             }
             UserSelection::GoTo(Menu::Current) => {
@@ -742,12 +741,12 @@ Warning: Saving will discard all the entries that could not be recovered.
     }
 }
 
-fn handle_check_passwords<T, U>(safe: &Safe, editor: &T, password_checker: &U)
-    where T: Editor, U: PasswordChecker {
+async fn handle_check_passwords<T>(safe: &Safe, password_checker: &T) -> EditorShowMessageWrapper
+    where T: PasswordChecker {
     let mut pwned: Option<Vec<String>> = None;
     for index in 0..safe.get_entries().len() {
         let entry = safe.get_entry_decrypted(index);
-        let pwned_res = password_checker.is_unsafe(&entry.pass);
+        let pwned_res = password_checker.is_unsafe(&entry.pass).await;
         if pwned_res.is_ok() {
             if pwned.is_none() {
                 pwned = Some(Vec::new());
@@ -763,28 +762,28 @@ fn handle_check_passwords<T, U>(safe: &Safe, editor: &T, password_checker: &U)
     }
     if pwned.is_none() {
         if !safe.get_entries().is_empty() {
-            let _ = editor.show_message("Error while checking passwords health. Please see the logs for more details.",
-                                        vec![UserOption::ok()],
-                                        MessageSeverity::Error);
+            EditorShowMessageWrapper::new("Error while checking passwords health. Please see the logs for more details.",
+                                          vec![UserOption::ok()],
+                                          MessageSeverity::Error)
         } else {
-            let _ = editor.show_message("No entries to check",
-                                        vec![UserOption::ok()],
-                                        MessageSeverity::Info);
+            EditorShowMessageWrapper::new("No entries to check",
+                                          vec![UserOption::ok()],
+                                          MessageSeverity::Info)
         }
-    } else if pwned.is_some() {
+    } else {
         if !pwned.as_ref().unwrap().is_empty() {
             let message = format!("The following entries have leaked passwords: {}! Please change them immediately!",
                                   pwned.unwrap().join(","));
             info!("{}", message);
-            let _ = editor.show_message(&message,
-                                        vec![UserOption::ok()],
-                                        MessageSeverity::Warn);
+            EditorShowMessageWrapper::new(&message,
+                                          vec![UserOption::ok()],
+                                          MessageSeverity::Warn)
         } else {
             let message = format!("The passwords of the entries look ok!");
             debug!("{}", message);
-            let _ = editor.show_message(&message,
-                                        vec![UserOption::ok()],
-                                        MessageSeverity::Info);
+            EditorShowMessageWrapper::new(&message,
+                                          vec![UserOption::ok()],
+                                          MessageSeverity::Info)
         }
     }
 }
@@ -899,7 +898,6 @@ fn spawn_dropbox_async_task(filename: &str,
 /// Trait to be implemented by various different `Editor`s (Shell, Web, Android, other...).
 ///
 /// It drives the interaction with the Users
-#[cfg_attr(test, automock)]
 pub trait Editor {
     /// Shows the interface for entering a Password and a Number.
     fn show_password_enter(&self) -> UserSelection;
@@ -956,6 +954,8 @@ pub trait AsyncEditor {
 
 #[cfg(test)]
 mod unit_tests {
+    use async_trait::async_trait;
+
     use std::mem;
     use std::sync::mpsc::{self, Sender};
     use std::sync::Mutex;
@@ -967,7 +967,7 @@ mod unit_tests {
     use crate::EntryPresentationType;
 
     use super::*;
-    use super::api::{AllConfigurations, Entry, Menu, MockPasswordChecker, UserOption, UserSelection};
+    use super::api::{AllConfigurations, Entry, Menu, UserOption, UserSelection};
     use super::asynch::dropbox::DropboxConfiguration;
     use super::asynch::nextcloud::NextcloudConfiguration;
     use super::file_handler;
@@ -1027,23 +1027,40 @@ mod unit_tests {
         assert!(super::try_recv_from_vec(&mut v).is_none());
     }
 
-    #[test]
-    fn test_handle_check_passwords() {
+    struct AlwaysOkTruePasswordChecker {}
+
+    #[async_trait]
+    impl PasswordChecker for AlwaysOkTruePasswordChecker {
+        async fn is_unsafe(&self, _: &str) -> errors::Result<bool> {
+            Ok(true)
+        }
+    }
+
+    struct AlwaysOkFalsePasswordChecker {}
+
+    #[async_trait]
+    impl PasswordChecker for AlwaysOkFalsePasswordChecker {
+        async fn is_unsafe(&self, _: &str) -> errors::Result<bool> {
+            Ok(false)
+        }
+    }
+
+    struct AlwaysErrorPasswordChecker {}
+
+    #[async_trait]
+    impl PasswordChecker for AlwaysErrorPasswordChecker {
+        async fn is_unsafe(&self, _: &str) -> errors::Result<bool> {
+            Err(errors::RustKeylockError::GeneralError("".to_string()))
+        }
+    }
+
+    #[tokio::test(core_threads = 1)]
+    async fn test_handle_check_passwords() {
         let mut safe = Safe::default();
-        let mut editor_mock = MockEditor::new();
-        let mut checker_always_ok_true = MockPasswordChecker::new();
-        checker_always_ok_true.expect_is_unsafe().returning(|_| Ok(true));
-        let mut checker_always_ok_false = MockPasswordChecker::new();
-        checker_always_ok_false.expect_is_unsafe().returning(|_| Ok(false));
-        let mut checker_always_error = MockPasswordChecker::new();
-        checker_always_error.expect_is_unsafe().returning(|_| Err(errors::RustKeylockError::GeneralError("".to_string())));
 
         // No entries to check
-        editor_mock.expect_show_message()
-            .withf(move |s: &str, _, _| s == "No entries to check")
-            .times(1)
-            .returning(|_, _, _| UserSelection::UserOption(UserOption::ok()));
-        handle_check_passwords(&safe, &editor_mock, &checker_always_ok_true);
+        let smw = handle_check_passwords(&safe, &AlwaysOkTruePasswordChecker {}).await;
+        assert!(&smw.message == "No entries to check");
 
         // Entries Ok and healthy
         safe.add_entry(
@@ -1052,25 +1069,16 @@ mod unit_tests {
                        "user".to_string(),
                        "pass".to_string(),
                        "desc".to_string()));
-        editor_mock.expect_show_message()
-            .withf(move |s: &str, _, _| s == "The passwords of the entries look ok!")
-            .times(1)
-            .returning(|_, _, _| UserSelection::UserOption(UserOption::ok()));
-        handle_check_passwords(&safe, &editor_mock, &checker_always_ok_false);
+        let smw = handle_check_passwords(&safe, &AlwaysOkFalsePasswordChecker {}).await;
+        assert!(&smw.message == "The passwords of the entries look ok!");
 
         // Entries Ok but not healthy
-        editor_mock.expect_show_message()
-            .withf(move |s: &str, _, _| s.starts_with("The following entries have leaked passwords:"))
-            .times(1)
-            .returning(|_, _, _| UserSelection::UserOption(UserOption::ok()));
-        handle_check_passwords(&safe, &editor_mock, &checker_always_ok_true);
+        let smw = handle_check_passwords(&safe, &AlwaysOkTruePasswordChecker {}).await;
+        assert!(&smw.message == "The following entries have leaked passwords: name! Please change them immediately!");
 
         // Entries Error
-        editor_mock.expect_show_message()
-            .withf(move |s: &str, _, _| s.starts_with("Error while checking passwords health"))
-            .times(1)
-            .returning(|_, _, _| UserSelection::UserOption(UserOption::ok()));
-        handle_check_passwords(&safe, &editor_mock, &checker_always_error);
+        let smw = handle_check_passwords(&safe, &AlwaysErrorPasswordChecker {}).await;
+        assert!(&smw.message == "Error while checking passwords health. Please see the logs for more details.");
     }
 
     #[test]
