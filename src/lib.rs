@@ -971,6 +971,7 @@ mod unit_tests {
     use super::asynch::dropbox::DropboxConfiguration;
     use super::asynch::nextcloud::NextcloudConfiguration;
     use super::file_handler;
+    use crate::api::EntryMeta;
 
     #[test]
     fn try_recv_from_vec() {
@@ -1068,7 +1069,8 @@ mod unit_tests {
                        "url".to_string(),
                        "user".to_string(),
                        "pass".to_string(),
-                       "desc".to_string()));
+                       "desc".to_string(),
+                       EntryMeta::default()));
         let smw = handle_check_passwords(&safe, &AlwaysOkFalsePasswordChecker {}).await;
         assert!(&smw.message == "The passwords of the entries look ok!");
 
@@ -1122,7 +1124,7 @@ mod unit_tests {
             // Login
             UserSelection::ProvidedPassword("123".to_string(), 0),
             // Add an entry
-            UserSelection::NewEntry(Entry::new("11nn".to_owned(), "11url".to_owned(), "11un".to_owned(), "11pn".to_owned(), "11sn".to_owned())),
+            UserSelection::NewEntry(Entry::new("11nn".to_owned(), "11url".to_owned(), "11un".to_owned(), "11pn".to_owned(), "11sn".to_owned(), EntryMeta::default())),
             // Show the first entry
             UserSelection::GoTo(Menu::ShowEntry(0)),
             // Exit
@@ -1141,7 +1143,7 @@ mod unit_tests {
             UserSelection::ProvidedPassword("123".to_string(), 0),
             // Edit the first entry
             UserSelection::GoTo(Menu::EditEntry(0)),
-            UserSelection::ReplaceEntry(0, Entry::new("r".to_owned(), "url".to_owned(), "ru".to_owned(), "rp".to_owned(), "rs".to_owned())),
+            UserSelection::ReplaceEntry(0, Entry::new("r".to_owned(), "url".to_owned(), "ru".to_owned(), "rp".to_owned(), "rs".to_owned(),  EntryMeta::default())),
             // Exit
             UserSelection::GoTo(Menu::ForceExit)], tx));
 
@@ -1158,7 +1160,7 @@ mod unit_tests {
             UserSelection::ProvidedPassword("123".to_string(), 0),
             // Add an entry
             UserSelection::GoTo(Menu::NewEntry(None)),
-            UserSelection::NewEntry(Entry::new("n".to_owned(), "url".to_owned(), "u".to_owned(), "p".to_owned(), "s".to_owned())),
+            UserSelection::NewEntry(Entry::new("n".to_owned(), "url".to_owned(), "u".to_owned(), "p".to_owned(), "s".to_owned(),EntryMeta::default())),
             // Save
             UserSelection::GoTo(Menu::Save(false)),
             // Ack saved message
@@ -1178,7 +1180,7 @@ mod unit_tests {
             // Login
             UserSelection::ProvidedPassword("123".to_string(), 0),
             // Add an entry
-            UserSelection::NewEntry(Entry::new("11nn".to_owned(), "11url".to_owned(), "11un".to_owned(), "11pn".to_owned(), "11sn".to_owned())),
+            UserSelection::NewEntry(Entry::new("11nn".to_owned(), "11url".to_owned(), "11un".to_owned(), "11pn".to_owned(), "11sn".to_owned(), EntryMeta::default())),
             // Delete the first entry
             UserSelection::GoTo(Menu::DeleteEntry(0)),
             UserSelection::DeleteEntry(0),

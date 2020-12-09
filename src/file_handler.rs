@@ -554,6 +554,7 @@ mod test_file_handler {
     use super::super::asynch::dropbox::DropboxConfiguration;
     use super::super::asynch::nextcloud::NextcloudConfiguration;
     use super::super::datacrypt::NoCryptor;
+    use crate::api::EntryMeta;
 
     #[test]
     fn use_existing_file() {
@@ -580,6 +581,7 @@ mod test_file_handler {
             "user".to_string(),
             "pass".to_string(),
             "desc".to_string(),
+            EntryMeta::default(),
         ));
         let nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), true).unwrap();
         let dbx_conf = DropboxConfiguration::new("token".to_string()).unwrap();
@@ -607,6 +609,7 @@ mod test_file_handler {
             "user".to_string(),
             "pass".to_string(),
             "desc".to_string(),
+            EntryMeta::default(),
         )));
 
         assert!(new_nc_conf.server_url == "nc_url");
@@ -753,6 +756,7 @@ mod test_file_handler {
             "1".to_string(),
             "1".to_string(),
             "1".to_string(),
+            EntryMeta::default(),
         ));
         let nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), true).unwrap();
         let dbx_conf = DropboxConfiguration::new("token".to_string()).unwrap();
@@ -801,6 +805,7 @@ mod test_file_handler {
             "1_import".to_string(),
             "1_import".to_string(),
             "1_import".to_string(),
+            EntryMeta::default(),
         ));
         let nc_conf_import = NextcloudConfiguration::new(
             "nc_url_import".to_string(),
@@ -834,6 +839,7 @@ mod test_file_handler {
             "1".to_string(),
             "1".to_string(),
             "1".to_string(),
+            EntryMeta::default()
         ));
         let nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), false).unwrap();
         let dbx_conf = DropboxConfiguration::new("token".to_string()).unwrap();
@@ -960,6 +966,7 @@ mod test_file_handler {
             "user".to_string(),
             "pass".to_string(),
             "desc".to_string(),
+            EntryMeta::default()
         )];
         let nc_conf = NextcloudConfiguration::default();
         let dbx_conf = DropboxConfiguration::default();

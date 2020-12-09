@@ -155,6 +155,42 @@ impl Default for SystemConfiguration {
     }
 }
 
+/// Struct that defines meta-data for an entry.
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct EntryMeta {
+    /// True if the password is leaked.
+    leaked_password: bool
+}
+
+impl EntryMeta {
+    pub fn new(leaked_password: bool) -> EntryMeta {
+        EntryMeta { leaked_password }
+    }
+
+    pub fn from_table(table: &Table) -> Result<EntryMeta, errors::RustKeylockError> {
+        let leaked_password = table.get("leaked_password").and_then(|value| value.as_bool());
+        match leaked_password {
+            Some(lp) => Ok(Self::new(lp)),
+            _ => Err(errors::RustKeylockError::ParseError(toml::ser::to_string(&table).unwrap_or_else(|_| "Cannot dserialize toml for EntryMeta".to_string()))),
+        }
+    }
+
+    pub fn to_table(&self) -> Table {
+        let mut table = Table::new();
+        table.insert("leaked_password".to_string(), toml::Value::Boolean(self.leaked_password));
+
+        table
+    }
+}
+
+impl Default for EntryMeta {
+    fn default() -> Self {
+        EntryMeta {
+            leaked_password: false,
+        }
+    }
+}
+
 /// Struct that defines a password entry.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Entry {
@@ -170,19 +206,22 @@ pub struct Entry {
     pub pass: String,
     /// A description of the `Entry` (Optional)
     pub desc: String,
+    /// Meta-data for the Entry
+    pub meta: EntryMeta,
     /// Whether the Entry has encrypted elements (like password)
     pub encrypted: bool,
 }
 
 impl Entry {
     /// Creates a new `Entry` using the provided name, url, username, password and description
-    pub fn new(name: String, url: String, user: String, pass: String, desc: String) -> Entry {
+    pub fn new(name: String, url: String, user: String, pass: String, desc: String, meta: EntryMeta) -> Entry {
         Entry {
             name,
             url,
             user,
             pass,
             desc,
+            meta,
             encrypted: false,
         }
     }
@@ -195,6 +234,7 @@ impl Entry {
             user: "".to_string(),
             pass: "".to_string(),
             desc: "".to_string(),
+            meta: EntryMeta::default(),
             encrypted: false,
         }
     }
@@ -205,8 +245,12 @@ impl Entry {
         let user = table.get("user").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
         let pass = table.get("pass").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
         let desc = table.get("desc").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
+        let meta = table.get("meta").and_then(|value| {
+            value.as_table().map(|table| EntryMeta::from_table(table).unwrap_or_default())
+        }).unwrap_or_default();
+
         match (name, url, user, pass, desc) {
-            (Some(n), Some(ul), Some(u), Some(p), Some(d)) => Ok(Self::new(n, ul, u, p, d)),
+            (Some(n), Some(ul), Some(u), Some(p), Some(d)) => Ok(Self::new(n, ul, u, p, d, meta)),
             _ => Err(errors::RustKeylockError::ParseError(toml::ser::to_string(&table).unwrap_or_else(|_| "Cannot serialize toml".to_string()))),
         }
     }
@@ -236,6 +280,7 @@ impl Entry {
             user: self.user.clone(),
             pass: encrypted_password,
             desc: self.desc.clone(),
+            meta: self.meta.clone(),
             encrypted: encryption_succeeded,
         }
     }
@@ -249,7 +294,7 @@ impl Entry {
         } else {
             self.pass.clone()
         };
-        Entry::new(self.name.clone(), self.url.clone(), self.user.clone(), decrypted_password, self.desc.clone())
+        Entry::new(self.name.clone(), self.url.clone(), self.user.clone(), decrypted_password, self.desc.clone(), self.meta.clone())
     }
 }
 
@@ -677,13 +722,37 @@ impl PasswordChecker for RklPasswordChecker {
 mod api_unit_tests {
     use toml;
 
-    use crate::api::AllConfigurations;
+    use crate::api::{AllConfigurations, EntryMeta};
     use crate::datacrypt::EntryPasswordCryptor;
 
     use super::{Entry, Menu, UserOption, UserSelection};
 
     #[test]
     fn entry_from_table_success() {
+        let toml = r#"
+			name = "name1"
+			url = "url1"
+			user = "user1"
+			pass = "123"
+			desc = "some description"
+			meta = { leaked_password = true }
+		"#;
+
+        let value = toml.parse::<toml::value::Value>().unwrap();
+        let table = value.as_table().unwrap();
+        let entry_opt = Entry::from_table(&table);
+        assert!(entry_opt.is_ok());
+        let entry = entry_opt.unwrap();
+        assert!(entry.name == "name1");
+        assert!(entry.url == "url1");
+        assert!(entry.user == "user1");
+        assert!(entry.pass == "123");
+        assert!(entry.desc == "some description");
+        assert!(entry.meta.leaked_password)
+    }
+
+    #[test]
+    fn entry_from_table_success_no_meta() {
         let toml = r#"
 			name = "name1"
 			url = "url1"
@@ -702,6 +771,7 @@ mod api_unit_tests {
         assert!(entry.user == "user1");
         assert!(entry.pass == "123");
         assert!(entry.desc == "some description");
+        assert!(!entry.meta.leaked_password)
     }
 
     #[test]
@@ -758,7 +828,7 @@ mod api_unit_tests {
     #[test]
     fn entry_to_encrypted() {
         let cryptor = EntryPasswordCryptor::new();
-        let entry = super::Entry::new("name".to_string(), "url".to_string(), "user".to_string(), "pass".to_string(), "desc".to_string());
+        let entry = super::Entry::new("name".to_string(), "url".to_string(), "user".to_string(), "pass".to_string(), "desc".to_string(), EntryMeta::default());
         let enc_entry = entry.encrypted(&cryptor);
         assert!(enc_entry.name == entry.name);
         assert!(enc_entry.url == entry.url);
@@ -772,7 +842,7 @@ mod api_unit_tests {
     #[test]
     fn entry_to_encrypted_encryption_may_fail() {
         let cryptor = EntryPasswordCryptor::new();
-        let entry = super::Entry::new("name".to_string(), "url".to_string(), "user".to_string(), "pass".to_string(), "desc".to_string());
+        let entry = super::Entry::new("name".to_string(), "url".to_string(), "user".to_string(), "pass".to_string(), "desc".to_string(), EntryMeta::default());
         let dec_entry = entry.decrypted(&cryptor);
         assert!(dec_entry.pass == entry.pass);
     }

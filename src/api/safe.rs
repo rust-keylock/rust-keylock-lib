@@ -223,7 +223,7 @@ impl Safe {
 
 #[cfg(test)]
 mod safe_unit_tests {
-    use crate::api::Entry;
+    use crate::api::{Entry, EntryMeta};
 
     #[test]
     fn merge_entries() {
@@ -231,22 +231,23 @@ mod safe_unit_tests {
         assert!(safe.entries.len() == 0);
 
         // Add some initial Entries
-        let all = vec![Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "1".to_string(), "1".to_string()),
-                       Entry::new("2".to_string(), "2".to_string(), "2".to_string(), "2".to_string(), "2".to_string())];
+        let all = vec![
+            Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "1".to_string(), "1".to_string(), EntryMeta::default()),
+            Entry::new("2".to_string(), "2".to_string(), "2".to_string(), "2".to_string(), "2".to_string(), EntryMeta::default())];
         safe.add_all(all);
 
         // This one should be added
-        let first = vec![Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), "3".to_string())];
+        let first = vec![Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), EntryMeta::default())];
         safe.merge(first);
         assert!(safe.entries.len() == 3);
 
         // This one should not be added
-        let second = vec![Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "1".to_string(), "1".to_string())];
+        let second = vec![Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "1".to_string(), "1".to_string(), EntryMeta::default())];
         safe.merge(second);
         assert!(safe.entries.len() == 3);
 
         // This one should not be added either (the description is not the same with any of the existing ones
-        let third = vec![Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "1".to_string(), "3".to_string())];
+        let third = vec![Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "1".to_string(), "3".to_string(), EntryMeta::default())];
         safe.merge(third);
         assert!(safe.entries.len() == 4);
     }
@@ -254,7 +255,7 @@ mod safe_unit_tests {
     #[test]
     fn add_entry() {
         let mut safe = super::Safe::new();
-        let entry = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
+        let entry = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), EntryMeta::default());
         safe.add_entry(entry.clone());
         assert!(safe.entries.len() == 1);
         assert!(safe.entries[0].name == entry.name);
@@ -267,9 +268,9 @@ mod safe_unit_tests {
     #[test]
     fn replace_entry() {
         let mut safe = super::Safe::new();
-        let entry = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
+        let entry = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), EntryMeta::default());
         safe.add_entry(entry.clone());
-        let new_entry = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string(), "33".to_string());
+        let new_entry = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string(), "33".to_string(), EntryMeta::default());
         let _ = safe.replace_entry(0, new_entry.clone());
 
         assert!(safe.entries.len() == 1);
@@ -284,13 +285,13 @@ mod safe_unit_tests {
     #[test]
     fn replace_entry_after_filter() {
         let mut safe = super::Safe::new();
-        let entry1 = Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "1".to_string(), "1".to_string());
-        let entry2 = Entry::new("2".to_string(), "2".to_string(), "2".to_string(), "2".to_string(), "2".to_string());
-        let entry3 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
+        let entry1 = Entry::new("1".to_string(), "1".to_string(), "1".to_string(), "1".to_string(), "1".to_string(), EntryMeta::default());
+        let entry2 = Entry::new("2".to_string(), "2".to_string(), "2".to_string(), "2".to_string(), "2".to_string(), EntryMeta::default());
+        let entry3 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), EntryMeta::default());
         safe.add_entry(entry1.clone());
         safe.add_entry(entry2.clone());
         safe.add_entry(entry3.clone());
-        let new_entry = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string(), "33".to_string());
+        let new_entry = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string(), "33".to_string(), EntryMeta::default());
 
         safe.set_filter("3".to_string());
         let _ = safe.replace_entry(0, new_entry.clone());
@@ -308,8 +309,8 @@ mod safe_unit_tests {
     #[test]
     fn remove_entry() {
         let mut safe = super::Safe::new();
-        let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
-        let entry2 = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string(), "33".to_string());
+        let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), EntryMeta::default());
+        let entry2 = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string(), "33".to_string(), EntryMeta::default());
         safe.add_entry(entry1.clone());
         safe.add_entry(entry2.clone());
 
@@ -326,8 +327,8 @@ mod safe_unit_tests {
     #[test]
     fn remove_entry_after_filter() {
         let mut safe = super::Safe::new();
-        let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
-        let entry2 = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string(), "33".to_string());
+        let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), EntryMeta::default());
+        let entry2 = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string(), "33".to_string(), EntryMeta::default());
         safe.add_entry(entry1.clone());
         safe.add_entry(entry2.clone());
 
@@ -347,8 +348,8 @@ mod safe_unit_tests {
     #[test]
     fn add_all() {
         let mut safe = super::Safe::new();
-        let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
-        let entry2 = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string(), "33".to_string());
+        let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), EntryMeta::default());
+        let entry2 = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string(), "33".to_string(), EntryMeta::default());
         let entries = vec![entry1.clone(), entry2.clone()];
 
         safe.add_all(entries);
@@ -361,8 +362,8 @@ mod safe_unit_tests {
     #[test]
     fn get_entry() {
         let mut safe = super::Safe::new();
-        let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
-        let entry2 = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string(), "33".to_string());
+        let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), EntryMeta::default());
+        let entry2 = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string(), "33".to_string(), EntryMeta::default());
         let entries = vec![entry1.clone(), entry2.clone()];
         safe.add_all(entries);
 
@@ -377,8 +378,8 @@ mod safe_unit_tests {
     #[test]
     fn get_entry_decrypted() {
         let mut safe = super::Safe::new();
-        let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
-        let entry2 = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string(), "33".to_string());
+        let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), EntryMeta::default());
+        let entry2 = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string(), "33".to_string(), EntryMeta::default());
         let entries = vec![entry1.clone(), entry2.clone()];
         safe.add_all(entries);
 
@@ -393,8 +394,8 @@ mod safe_unit_tests {
     #[test]
     fn get_entries() {
         let mut safe = super::Safe::new();
-        let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
-        let entry2 = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string(), "33".to_string());
+        let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), EntryMeta::default());
+        let entry2 = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string(), "33".to_string(), EntryMeta::default());
         let entries = vec![entry1.clone(), entry2.clone()];
         safe.add_all(entries);
 
@@ -405,8 +406,8 @@ mod safe_unit_tests {
     #[test]
     fn get_entries_decrypted() {
         let mut safe = super::Safe::new();
-        let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
-        let entry2 = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string(), "33".to_string());
+        let entry1 = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), EntryMeta::default());
+        let entry2 = Entry::new("33".to_string(), "33".to_string(), "33".to_string(), "33".to_string(), "33".to_string(), EntryMeta::default());
         let entries = vec![entry1.clone(), entry2.clone()];
         safe.add_all(entries);
 
@@ -419,8 +420,8 @@ mod safe_unit_tests {
     #[test]
     fn set_filter() {
         let mut safe = super::Safe::new();
-        let entry1 = Entry::new("1".to_string(), "2".to_string(), "3".to_string(), "5".to_string(), "4".to_string());
-        let entry2 = Entry::new("11".to_string(), "12".to_string(), "13".to_string(), "15".to_string(), "14".to_string());
+        let entry1 = Entry::new("1".to_string(), "2".to_string(), "3".to_string(), "5".to_string(), "4".to_string(), EntryMeta::default());
+        let entry2 = Entry::new("11".to_string(), "12".to_string(), "13".to_string(), "15".to_string(), "14".to_string(), EntryMeta::default());
         let entries = vec![entry1, entry2];
         safe.add_all(entries);
 
@@ -450,7 +451,7 @@ mod safe_unit_tests {
         assert!(safe.get_entries().len() == 0);
 
         // The filter should by applied ignoring the case
-        let entry3 = Entry::new("NAME".to_string(), "Url".to_string(), "User".to_string(), "pass".to_string(), "Desc".to_string());
+        let entry3 = Entry::new("NAME".to_string(), "Url".to_string(), "User".to_string(), "pass".to_string(), "Desc".to_string(), EntryMeta::default());
         safe.add_entry(entry3);
         safe.set_filter("name".to_string());
         assert!(safe.get_entries().len() == 1);
@@ -466,7 +467,7 @@ mod safe_unit_tests {
     #[test]
     fn clear() {
         let mut safe = super::Safe::new();
-        let entry = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), "3".to_string());
+        let entry = Entry::new("3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), "3".to_string(), EntryMeta::default());
         safe.add_entry(entry.clone());
         safe.set_filter("a_filter".to_string());
 
