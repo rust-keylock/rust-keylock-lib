@@ -50,7 +50,7 @@ use log::*;
 
 pub use file_handler::default_rustkeylock_location;
 
-use crate::api::{PasswordChecker, RklPasswordChecker, EditorShowMessageWrapper};
+use crate::api::{EditorShowMessageWrapper, PasswordChecker, RklPasswordChecker};
 use crate::asynch::dropbox::DropboxConfiguration;
 use crate::asynch::nextcloud::NextcloudConfiguration;
 use crate::asynch::ReqwestClientFactory;
@@ -64,6 +64,7 @@ use self::api::{
 pub use self::api::{
     AllConfigurations,
     Entry,
+    EntryMeta,
     EntryPresentationType,
     Menu,
     MessageSeverity,
@@ -500,23 +501,87 @@ impl CoreLogicHandler {
                 stop = true;
                 UserSelection::GoTo(Menu::Current)
             }
-            UserSelection::NewEntry(entry) => {
+            UserSelection::NewEntry(mut entry) => {
                 debug!("UserSelection::NewEntry(entry)");
-                s.safe.add_entry(entry);
-                s.contents_changed = true;
-                UserSelection::GoTo(Menu::EntriesList("".to_string()))
-            }
-            UserSelection::ReplaceEntry(index, entry) => {
-                debug!("UserSelection::ReplaceEntry(index, entry)");
-                s.contents_changed = true;
-                match s.safe.replace_entry(index, entry) {
-                    Ok(_) => { /**/ }
-                    Err(error) => {
-                        error!("Could not replace entry: {:?}", error);
-                        let _ = s.editor.show_message("Could not replace the password entry. Please see the logs for more details.", vec![UserOption::ok()], MessageSeverity::Error);
+
+                let entry_to_replace_opt = match RklPasswordChecker::default().is_unsafe(&entry.pass).await {
+                    Ok(true) => {
+                        warn!("The password for entry {} has leaked!", entry.name);
+                        let sel = s.editor.show_message(
+                            "The password you provided has been leaked and is not safe. Are you sure you want to use it?",
+                            vec![UserOption::yes(), UserOption::no()],
+                            MessageSeverity::Warn);
+
+                        if sel == UserSelection::UserOption(UserOption::yes()) {
+                            warn!("The user accepted that entry {} will have leaked password.", entry.name);
+                            entry.meta.leaked_password = true;
+                            Some(entry)
+                        } else {
+                            None
+                        }
                     }
+                    Ok(false) => {
+                        debug!("The password for entry {} is not leaked!", entry.name);
+                        entry.meta.leaked_password = false;
+                        Some(entry)
+                    }
+                    Err(error) => {
+                        debug!("No information about password leakage for entry {}. Reason: {}", entry.name, error);
+                        Some(entry)
+                    }
+                };
+
+                if let Some(entry) = entry_to_replace_opt {
+                    s.safe.add_entry(entry);
+                    s.contents_changed = true;
+                    UserSelection::GoTo(Menu::EntriesList("".to_string()))
+                } else {
+                    UserSelection::GoTo(Menu::Current)
                 }
-                UserSelection::GoTo(Menu::EntriesList(s.safe.get_filter()))
+            }
+            UserSelection::ReplaceEntry(index, mut entry) => {
+                debug!("UserSelection::ReplaceEntry(index, entry)");
+
+                let entry_to_replace_opt = match RklPasswordChecker::default().is_unsafe(&entry.pass).await {
+                    Ok(true) => {
+                        warn!("The password for entry {} has leaked!", entry.name);
+                        let sel = s.editor.show_message(
+                            "The password you provided has been leaked and is not safe. Are you sure you want to use it?",
+                            vec![UserOption::yes(), UserOption::no()],
+                            MessageSeverity::Warn);
+
+                        if sel == UserSelection::UserOption(UserOption::yes()) {
+                            warn!("The user accepted that entry {} will have leaked password.", entry.name);
+                            entry.meta.leaked_password = true;
+                            Some(entry)
+                        } else {
+                            None
+                        }
+                    }
+                    Ok(false) => {
+                        debug!("The password for entry {} is not leaked!", entry.name);
+                        entry.meta.leaked_password = false;
+                        Some(entry)
+                    }
+                    Err(error) => {
+                        debug!("No information about password leakage for entry {}. Reason: {}", entry.name, error);
+                        Some(entry)
+                    }
+                };
+
+                if let Some(entry) = entry_to_replace_opt {
+                    s.contents_changed = true;
+                    match s.safe.replace_entry(index, entry) {
+                        Ok(_) => { /**/ }
+                        Err(error) => {
+                            error!("Could not replace entry: {:?}", error);
+                            let _ = s.editor.show_message("Could not replace the password entry. Please see the logs for more details.", vec![UserOption::ok()], MessageSeverity::Error);
+                        }
+                    }
+                    UserSelection::GoTo(Menu::EntriesList(s.safe.get_filter()))
+                } else {
+                    UserSelection::GoTo(Menu::Current)
+                }
             }
             UserSelection::DeleteEntry(index) => {
                 debug!("UserSelection::DeleteEntry(index)");
@@ -954,15 +1019,15 @@ pub trait AsyncEditor {
 
 #[cfg(test)]
 mod unit_tests {
-    use async_trait::async_trait;
-
     use std::mem;
     use std::sync::mpsc::{self, Sender};
     use std::sync::Mutex;
     use std::time::SystemTime;
 
+    use async_trait::async_trait;
     use clipboard::{ClipboardContext, ClipboardProvider};
 
+    use crate::api::EntryMeta;
     use crate::api::safe::Safe;
     use crate::EntryPresentationType;
 
@@ -971,7 +1036,6 @@ mod unit_tests {
     use super::asynch::dropbox::DropboxConfiguration;
     use super::asynch::nextcloud::NextcloudConfiguration;
     use super::file_handler;
-    use crate::api::EntryMeta;
 
     #[test]
     fn try_recv_from_vec() {
@@ -1138,12 +1202,13 @@ mod unit_tests {
     fn execute_edit_entry() {
         println!("===========execute_edit_entry");
         let (tx, rx) = mpsc::channel();
+        let pass = rs_password_utils::dice::generate(6);
         let editor = Box::new(TestEditor::new(vec![
             // Login
             UserSelection::ProvidedPassword("123".to_string(), 0),
             // Edit the first entry
             UserSelection::GoTo(Menu::EditEntry(0)),
-            UserSelection::ReplaceEntry(0, Entry::new("r".to_owned(), "url".to_owned(), "ru".to_owned(), "rp".to_owned(), "rs".to_owned(),  EntryMeta::default())),
+            UserSelection::ReplaceEntry(0, Entry::new("r".to_owned(), "url".to_owned(), "ru".to_owned(), pass, "rs".to_owned(), EntryMeta::default())),
             // Exit
             UserSelection::GoTo(Menu::ForceExit)], tx));
 
@@ -1155,12 +1220,13 @@ mod unit_tests {
     fn execute_add_entry() {
         println!("===========execute_add_entry");
         let (tx, rx) = mpsc::channel();
+        let pass = rs_password_utils::dice::generate(6);
         let editor = Box::new(TestEditor::new(vec![
             // Login
             UserSelection::ProvidedPassword("123".to_string(), 0),
             // Add an entry
             UserSelection::GoTo(Menu::NewEntry(None)),
-            UserSelection::NewEntry(Entry::new("n".to_owned(), "url".to_owned(), "u".to_owned(), "p".to_owned(), "s".to_owned(),EntryMeta::default())),
+            UserSelection::NewEntry(Entry::new("n".to_owned(), "url".to_owned(), "u".to_owned(), pass, "s".to_owned(), EntryMeta::default())),
             // Save
             UserSelection::GoTo(Menu::Save(false)),
             // Ack saved message

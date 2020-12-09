@@ -159,7 +159,7 @@ impl Default for SystemConfiguration {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct EntryMeta {
     /// True if the password is leaked.
-    leaked_password: bool
+    pub leaked_password: bool
 }
 
 impl EntryMeta {
@@ -262,6 +262,7 @@ impl Entry {
         table.insert("user".to_string(), toml::Value::String(self.user.clone()));
         table.insert("pass".to_string(), toml::Value::String(self.pass.clone()));
         table.insert("desc".to_string(), toml::Value::String(self.desc.clone()));
+        table.insert("meta".to_string(), toml::Value::Table(self.meta.to_table()));
 
         table
     }
@@ -814,6 +815,7 @@ mod api_unit_tests {
 			user = "user1"
 			pass = "123"
 			desc = "some description"
+			meta = {leaked_password = false}
 		"#;
 
         let value = toml.parse::<toml::value::Value>().unwrap();
@@ -822,6 +824,7 @@ mod api_unit_tests {
         assert!(entry_opt.is_ok());
         let entry = entry_opt.unwrap();
         let new_table = entry.to_table();
+        dbg!(&new_table);
         assert!(table == &new_table);
     }
 
