@@ -142,6 +142,10 @@ impl Safe {
         &self.get_entries()[index]
     }
 
+    pub(crate) fn get_entry_mut(&mut self, index: usize) -> &mut Entry {
+        &mut self.get_entries_mut()[index]
+    }
+
     /// Retrieves an Entry at a given index with the password decrypted
     pub(crate) fn get_entry_decrypted(&self, index: usize) -> Entry {
         self.get_entry(index).decrypted(&self.password_cryptor)
@@ -150,6 +154,10 @@ impl Safe {
     /// Retrieves the existing entries, after applying the filter to the Vector
     pub(crate) fn get_entries(&self) -> &[Entry] {
         &self.filtered_entries
+    }
+
+    pub(crate) fn get_entries_mut(&mut self) -> &mut [Entry] {
+        &mut self.filtered_entries
     }
 
     /// Retrieves __all__ the Entries with the passwords decrypted

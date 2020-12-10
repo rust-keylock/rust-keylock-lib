@@ -785,7 +785,7 @@ Warning: Saving will discard all the entries that could not be recovered.
             }
             UserSelection::CheckPasswords => {
                 debug!("UserSelection::CheckPasswords");
-                let mr = handle_check_passwords(&s.safe, &RklPasswordChecker::default()).await;
+                let mr = handle_check_passwords(&mut s.safe, &RklPasswordChecker::default()).await;
                 let _ = s.editor.show_message(&mr.message, mr.user_options, mr.severity);
                 UserSelection::GoTo(Menu::EntriesList("".to_string()))
             }
@@ -806,17 +806,20 @@ Warning: Saving will discard all the entries that could not be recovered.
     }
 }
 
-async fn handle_check_passwords<T>(safe: &Safe, password_checker: &T) -> EditorShowMessageWrapper
+async fn handle_check_passwords<T>(safe: &mut Safe, password_checker: &T) -> EditorShowMessageWrapper
     where T: PasswordChecker {
     let mut pwned: Option<Vec<String>> = None;
     for index in 0..safe.get_entries().len() {
         let entry = safe.get_entry_decrypted(index);
         let pwned_res = password_checker.is_unsafe(&entry.pass).await;
         if pwned_res.is_ok() {
+            let is_pwned = pwned_res.unwrap();
+            let mut borrowed_entry = safe.get_entry_mut(index);
+            borrowed_entry.meta.leaked_password = is_pwned;
             if pwned.is_none() {
                 pwned = Some(Vec::new());
             }
-            if pwned_res.unwrap() {
+            if is_pwned {
                 pwned.as_mut().unwrap().push(entry.name);
             }
         } else {
