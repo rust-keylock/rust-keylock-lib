@@ -22,6 +22,7 @@ rust:
   - nightly
 
 script:
+  - cargo install cargo-kcov
   - cargo clean
   - cargo test -- --nocapture
 
@@ -37,8 +38,7 @@ after_success:
       sudo make install &&
       cd ../.. &&
       rm -rf kcov-master &&
-      for crate in rust_keylock; do for file in target/debug/$crate_*[^\.d]; do mkdir -p "target/cov/$(basename $file)"; \
-      kcov --exclude-pattern=/.cargo,/usr/lib --verify "target/cov/$(basename $file)" "$file"; done; done &&
+      cargo kcov --lib -- --exclude-pattern=/.cargo,/usr/lib,/.rustup &&
       bash <(curl -s https://codecov.io/bash) &&
       echo "Uploaded code coverage"
 
