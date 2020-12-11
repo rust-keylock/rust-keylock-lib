@@ -1127,7 +1127,7 @@ mod unit_tests {
         let mut safe = Safe::default();
 
         // No entries to check
-        let smw = handle_check_passwords(&safe, &AlwaysOkTruePasswordChecker {}).await;
+        let smw = handle_check_passwords(&mut safe, &AlwaysOkTruePasswordChecker {}).await;
         assert!(&smw.message == "No entries to check");
 
         // Entries Ok and healthy
@@ -1138,15 +1138,15 @@ mod unit_tests {
                        "pass".to_string(),
                        "desc".to_string(),
                        EntryMeta::default()));
-        let smw = handle_check_passwords(&safe, &AlwaysOkFalsePasswordChecker {}).await;
+        let smw = handle_check_passwords(&mut safe, &AlwaysOkFalsePasswordChecker {}).await;
         assert!(&smw.message == "The passwords of the entries look ok!");
 
         // Entries Ok but not healthy
-        let smw = handle_check_passwords(&safe, &AlwaysOkTruePasswordChecker {}).await;
+        let smw = handle_check_passwords(&mut safe, &AlwaysOkTruePasswordChecker {}).await;
         assert!(&smw.message == "The following entries have leaked passwords: name! Please change them immediately!");
 
         // Entries Error
-        let smw = handle_check_passwords(&safe, &AlwaysErrorPasswordChecker {}).await;
+        let smw = handle_check_passwords(&mut safe, &AlwaysErrorPasswordChecker {}).await;
         assert!(&smw.message == "Error while checking passwords health. Please see the logs for more details.");
     }
 
