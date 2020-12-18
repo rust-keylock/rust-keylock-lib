@@ -35,10 +35,11 @@ use super::{Entry, Props, RklContent, SystemConfiguration};
 use super::asynch::nextcloud::NextcloudConfiguration;
 use super::datacrypt::{BcryptAes, Cryptor};
 use super::errors::{self, RustKeylockError};
+use zeroize::Zeroize;
 
 pub(crate) fn create_bcryptor(filename: &str,
                               password: String,
-                              salt_position: usize,
+                              mut salt_position: usize,
                               reinitialize_randoms: bool,
                               use_default_location: bool, )
                               -> Result<BcryptAes, io::Error> {
@@ -102,7 +103,9 @@ pub(crate) fn create_bcryptor(filename: &str,
             }
         }
     };
-    Ok(BcryptAes::new(password, salt, iv, salt_position, hash_bytes))
+    let to_ret = Ok(BcryptAes::new(password, salt, iv, salt_position, hash_bytes));
+    salt_position.zeroize();
+    to_ret
 }
 
 /// Returns false if the passwords file exists in the Filesystem, true otherwise
@@ -616,7 +619,7 @@ mod test_file_handler {
         assert!(new_nc_conf.username == "nc_user");
         assert!(new_nc_conf.use_self_signed_certificate);
 
-        assert!(new_dbx_conf.decrypted_token().unwrap() == "token");
+        assert!(new_dbx_conf.decrypted_token().unwrap().as_str() == "token");
 
         assert!(new_sys_conf.saved_at == Some(0));
         assert!(new_sys_conf.version == Some(1));
@@ -771,7 +774,7 @@ mod test_file_handler {
         assert!(entries == rkl_content.entries);
         assert!("nc_url" == rkl_content.nextcloud_conf.server_url);
         assert!("nc_user" == rkl_content.nextcloud_conf.username);
-        assert!("token" == rkl_content.dropbox_conf.decrypted_token().unwrap());
+        assert!("token" == rkl_content.dropbox_conf.decrypted_token().unwrap().as_str());
         assert!(rkl_content.nextcloud_conf.use_self_signed_certificate);
         let new_nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), true).unwrap();
         let new_dbx_conf = DropboxConfiguration::new("newtoken".to_string()).unwrap();

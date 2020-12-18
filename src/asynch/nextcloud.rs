@@ -27,6 +27,7 @@ use log::*;
 use toml;
 use toml::value::Table;
 use xml::reader::{EventReader, XmlEvent};
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::{errors, file_handler};
 use crate::asynch::{self, SyncStatus, SynchronizerAction, ServerVersionData};
@@ -58,7 +59,7 @@ impl Synchronizer {
                       -> errors::Result<Synchronizer> {
         let ncc = NextcloudConfiguration::new(ncc.server_url.clone(),
                                               ncc.username.clone(),
-                                              ncc.decrypted_password()?,
+                                              ncc.decrypted_password()?.to_string(),
                                               ncc.use_self_signed_certificate)?;
         let s = Synchronizer {
             conf: ncc,
@@ -72,7 +73,7 @@ impl Synchronizer {
     }
 
     /// Returns the password decrypted
-    fn use_password(&self) -> errors::Result<String> {
+    fn use_password(&self) -> errors::Result<Zeroizing<String>> {
         self.conf.decrypted_password()
     }
 
@@ -105,7 +106,7 @@ impl Synchronizer {
     }
 
     async fn do_execute(capsule: ArgsCapsule) -> errors::Result<SyncStatus> {
-        let uri = format!("{}/remote.php/dav/files/{}/.rust-keylock/{}", capsule.server_url(), capsule.username(), capsule.file_name());
+        let uri = format!("{}/remote.php/dav/files/{}/.rust-keylock/{}", capsule.server_url(), capsule.username().as_str(), capsule.file_name());
         debug!("Syncing with {}", uri);
 
         // Set the body of the request so that it returns the oc:rklsavedat and oc:rklversion properties
@@ -284,7 +285,7 @@ impl Synchronizer {
 
     #[allow(clippy::string_lit_as_bytes)]
     async fn create_rust_keylock_col(username: &str,
-                                     password: String,
+                                     password: Zeroizing<String>,
                                      server_url: &str,
                                      is_not_https: bool,
                                      use_self_signed: bool) -> errors::Result<()> {
@@ -309,8 +310,8 @@ impl Synchronizer {
 
     /// Put the file and update the property with the file creation seconds using PROPPATCH
     #[allow(clippy::too_many_arguments)]
-    async fn put(username: String,
-                 password: String,
+    async fn put(username: Zeroizing<String>,
+                 password: Zeroizing<String>,
                  server_url: String,
                  filename: String,
                  local_saved_at: Option<i64>,
@@ -321,7 +322,7 @@ impl Synchronizer {
         let mut file_bytes: Vec<_> = Vec::new();
         file.read_to_end(&mut file_bytes).unwrap_or_else(|_| panic!(format!("Could not read the file {} while performing HTTP PUT", filename)));
 
-        let uri = format!("{}/remote.php/dav/files/{}/.rust-keylock/{}", server_url, username, filename);
+        let uri = format!("{}/remote.php/dav/files/{}/.rust-keylock/{}", server_url, username.as_str(), filename);
         let req_builder = Request::put(uri);
         let req = req_builder
             .header(header::AUTHORIZATION, basic_auth(&username, password.as_ref()))
@@ -347,7 +348,7 @@ impl Synchronizer {
                                        local_saved_at.map(|s| s.to_string()).unwrap_or_else(String::new),
                                        local_version.map(|s| s.to_string()).unwrap_or_else(String::new));
 
-        let uri_pp = format!("{}/remote.php/dav/files/{}/.rust-keylock/{}", server_url, username, filename);
+        let uri_pp = format!("{}/remote.php/dav/files/{}/.rust-keylock/{}", server_url, username.as_str(), filename);
         let req_builder = Request::builder();
         let req_pp = req_builder
             .uri(uri_pp)
@@ -371,7 +372,7 @@ impl Synchronizer {
 
     #[allow(clippy::string_lit_as_bytes)]
     async fn get(username: &str,
-                 password: String,
+                 password: Zeroizing<String>,
                  server_url: &str,
                  filename: &str,
                  is_not_https: bool,
@@ -423,7 +424,7 @@ impl super::AsyncTask for Synchronizer {
             self.conf.server_url.clone(),
             self.conf.username.clone(),
             self.file_name.clone(),
-            self.use_password().expect("Could not retrieve the password for the nextcloud server"),
+            self.use_password().expect("Could not retrieve the password for the nextcloud server").to_string(),
             self.conf.server_url.starts_with("http://"),
             self.conf.use_self_signed_certificate,
             self.saved_at_local,
@@ -452,7 +453,8 @@ impl super::AsyncTask for Synchronizer {
 }
 
 /// The configuration that is retrieved from the rust-keylock encrypted file
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Zeroize)]
+#[zeroize(drop)]
 pub struct NextcloudConfiguration {
     /// The server base URL (eg. https://my.nextcloud.server/nextcloud)
     pub server_url: String,
@@ -482,8 +484,8 @@ impl NextcloudConfiguration {
         Ok(s)
     }
 
-    pub fn decrypted_password(&self) -> errors::Result<String> {
-        self.password_cryptor.decrypt_str(&self.password)
+    pub fn decrypted_password(&self) -> errors::Result<Zeroizing<String>> {
+        self.password_cryptor.decrypt_str(&self.password).map(|s| Zeroizing::new(s))
     }
 
     /// Creates a TOML table form this NextcloudConfiguration. The resulted table contains the decrypted password.
@@ -491,7 +493,7 @@ impl NextcloudConfiguration {
         let mut table = Table::new();
         table.insert("url".to_string(), toml::Value::String(self.server_url.clone()));
         table.insert("user".to_string(), toml::Value::String(self.username.clone()));
-        table.insert("pass".to_string(), toml::Value::String(self.decrypted_password()?));
+        table.insert("pass".to_string(), toml::Value::String(self.decrypted_password()?.as_str().to_string()));
         table.insert("use_self_signed_certificate".to_string(), toml::Value::Boolean(self.use_self_signed_certificate));
 
         Ok(table)
@@ -513,7 +515,7 @@ impl NextcloudConfiguration {
     /// Returns true is the configuration contains the needed values to operate correctly
     pub(crate) fn is_filled(&self) -> bool {
         let dp = self.decrypted_password();
-        (dp.is_ok() && dp.unwrap() != "") && self.server_url != "" && self.username != ""
+        (dp.is_ok() && dp.unwrap().as_str() != "") && self.server_url != "" && self.username != ""
     }
 }
 
@@ -546,9 +548,9 @@ fn basic_auth(username: &str, password: &str) -> String {
 #[derive(Clone)]
 struct ArgsCapsule {
     server_url: String,
-    username: String,
+    username: Zeroizing<String>,
     file_name: String,
-    password: String,
+    password: Zeroizing<String>,
     is_not_https: bool,
     use_self_signed: bool,
     saved_at_local: Option<i64>,
@@ -558,10 +560,10 @@ struct ArgsCapsule {
 
 impl ArgsCapsule {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(server_url: String,
-               username: String,
+    pub fn new<T: Into<Zeroizing<String>>>(server_url: String,
+               username: T,
                file_name: String,
-               password: String,
+               password: T,
                is_not_https: bool,
                use_self_signed: bool,
                saved_at_local: Option<i64>,
@@ -569,9 +571,9 @@ impl ArgsCapsule {
                last_sync_version: Option<i64>) -> ArgsCapsule {
         ArgsCapsule {
             server_url,
-            username,
+            username: username.into(),
             file_name,
-            password,
+            password: password.into(),
             is_not_https,
             use_self_signed,
             saved_at_local,
@@ -584,7 +586,7 @@ impl ArgsCapsule {
         self.server_url.clone()
     }
 
-    fn username(&self) -> String {
+    fn username(&self) -> Zeroizing<String> {
         self.username.clone()
     }
 
@@ -592,7 +594,7 @@ impl ArgsCapsule {
         self.file_name.clone()
     }
 
-    fn password(&self) -> String {
+    fn password(&self) -> Zeroizing<String> {
         self.password.clone()
     }
 
@@ -665,7 +667,7 @@ mod nextcloud_tests {
                 .unwrap();
         let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, "filename").unwrap();
 
-        assert!(nc.conf.decrypted_password().unwrap() == password)
+        assert!(nc.conf.decrypted_password().unwrap().as_str() == password)
     }
 
     #[test]

@@ -14,8 +14,9 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
 
-use secstr::SecStr;
 use std::borrow::Borrow;
+
+use secstr::SecStr;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct RklSecret {

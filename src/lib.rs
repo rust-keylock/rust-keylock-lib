@@ -418,7 +418,7 @@ impl CoreLogicHandler {
             }
             UserSelection::ProvidedPassword(pwd, salt_pos) => {
                 debug!("UserSelection::GoTo(Menu::ProvidedPassword)");
-                s.cryptor = file_handler::create_bcryptor(FILENAME, pwd, salt_pos, true, true).unwrap();
+                s.cryptor = file_handler::create_bcryptor(FILENAME, pwd.to_string(), *salt_pos, true, true).unwrap();
                 UserSelection::GoTo(Menu::Main)
             }
             UserSelection::GoTo(Menu::EntriesList(filter)) => {
@@ -675,7 +675,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                 match us {
                     UserSelection::ImportFrom(path, pwd, salt_pos) |
                     UserSelection::ImportFromDefaultLocation(path, pwd, salt_pos) => {
-                        let cr = file_handler::create_bcryptor(&path, pwd, salt_pos, false, import_from_default_location).unwrap();
+                        let cr = file_handler::create_bcryptor(&path, pwd.to_string(), *salt_pos, false, import_from_default_location).unwrap();
                         debug!("UserSelection::ImportFrom(path, pwd, salt_pos)");
 
                         match file_handler::load(&path, &cr, import_from_default_location) {
@@ -749,7 +749,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                             let _ = s.editor.show_message("Empty Dropbox Authentication token was retrieved.", vec![UserOption::ok()], MessageSeverity::Error);
                             UserSelection::GoTo(Menu::ShowConfiguration)
                         } else {
-                            UserSelection::GoTo(Menu::SetDbxToken(token.clone()))
+                            UserSelection::GoTo(Menu::SetDbxToken(token))
                         }
                     }
                     Err(error) => {
@@ -814,13 +814,13 @@ async fn handle_check_passwords<T>(safe: &mut Safe, password_checker: &T) -> Edi
         let pwned_res = password_checker.is_unsafe(&entry.pass).await;
         if pwned_res.is_ok() {
             let is_pwned = pwned_res.unwrap();
-            let mut borrowed_entry = safe.get_entry_mut(index);
+            let borrowed_entry = safe.get_entry_mut(index);
             borrowed_entry.meta.leaked_password = is_pwned;
             if pwned.is_none() {
                 pwned = Some(Vec::new());
             }
             if is_pwned {
-                pwned.as_mut().unwrap().push(entry.name);
+                pwned.as_mut().unwrap().push(entry.name.clone());
             }
         } else {
             error!("Error while checking passwords: {}", pwned_res.unwrap_err());
@@ -866,7 +866,7 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
     match provided_password {
         UserSelection::ProvidedPassword(pwd, salt_pos) => {
             // New Cryptor here
-            let cr = file_handler::create_bcryptor(filename, pwd.clone(), salt_pos, false, true).unwrap();
+            let cr = file_handler::create_bcryptor(filename, pwd.to_string(), *salt_pos, false, true).unwrap();
             // Try to decrypt and load the Entries
             let retrieved_entries = match file_handler::load(filename, &cr, true) {
                 // Success, go to the List of entries
@@ -1170,7 +1170,7 @@ mod unit_tests {
         let (tx, rx) = mpsc::channel();
         let editor = Box::new(TestEditor::new(vec![
             // Login
-            UserSelection::ProvidedPassword("123".to_string(), 0),
+            UserSelection::new_provided_password("123".to_string(), 0),
             // Save
             UserSelection::GoTo(Menu::Save(false)),
             // Ack saved message
@@ -1189,7 +1189,7 @@ mod unit_tests {
         let (tx, rx) = mpsc::channel();
         let editor = Box::new(TestEditor::new(vec![
             // Login
-            UserSelection::ProvidedPassword("123".to_string(), 0),
+            UserSelection::new_provided_password("123".to_string(), 0),
             // Add an entry
             UserSelection::NewEntry(Entry::new("11nn".to_owned(), "11url".to_owned(), "11un".to_owned(), "11pn".to_owned(), "11sn".to_owned(), EntryMeta::default())),
             // Show the first entry
@@ -1208,7 +1208,7 @@ mod unit_tests {
         let pass = rs_password_utils::dice::generate(6);
         let editor = Box::new(TestEditor::new(vec![
             // Login
-            UserSelection::ProvidedPassword("123".to_string(), 0),
+            UserSelection::new_provided_password("123".to_string(), 0),
             // Edit the first entry
             UserSelection::GoTo(Menu::EditEntry(0)),
             UserSelection::ReplaceEntry(0, Entry::new("r".to_owned(), "url".to_owned(), "ru".to_owned(), pass, "rs".to_owned(), EntryMeta::default())),
@@ -1226,7 +1226,7 @@ mod unit_tests {
         let pass = rs_password_utils::dice::generate(6);
         let editor = Box::new(TestEditor::new(vec![
             // Login
-            UserSelection::ProvidedPassword("123".to_string(), 0),
+            UserSelection::new_provided_password("123".to_string(), 0),
             // Add an entry
             UserSelection::GoTo(Menu::NewEntry(None)),
             UserSelection::NewEntry(Entry::new("n".to_owned(), "url".to_owned(), "u".to_owned(), pass, "s".to_owned(), EntryMeta::default())),
@@ -1247,7 +1247,7 @@ mod unit_tests {
         let (tx, rx) = mpsc::channel();
         let editor = Box::new(TestEditor::new(vec![
             // Login
-            UserSelection::ProvidedPassword("123".to_string(), 0),
+            UserSelection::new_provided_password("123".to_string(), 0),
             // Add an entry
             UserSelection::NewEntry(Entry::new("11nn".to_owned(), "11url".to_owned(), "11un".to_owned(), "11pn".to_owned(), "11sn".to_owned(), EntryMeta::default())),
             // Delete the first entry
@@ -1270,11 +1270,11 @@ mod unit_tests {
         let (tx, rx) = mpsc::channel();
         let editor1 = Box::new(TestEditor::new(vec![
             // Login
-            UserSelection::ProvidedPassword("123".to_string(), 0),
+            UserSelection::new_provided_password("123".to_string(), 0),
             // Go to change pass
             UserSelection::GoTo(Menu::ChangePass),
             // Return the new password
-            UserSelection::ProvidedPassword("321".to_string(), 1),
+            UserSelection::new_provided_password("321".to_string(), 1),
             // Save
             UserSelection::GoTo(Menu::Save(false)),
             // Ack saved message
@@ -1289,7 +1289,7 @@ mod unit_tests {
         // Assert the password is changed
         let editor2 = Box::new(TestEditor::new(vec![
             // Login
-            UserSelection::ProvidedPassword("321".to_string(), 1),
+            UserSelection::new_provided_password("321".to_string(), 1),
             // Exit
             UserSelection::GoTo(Menu::ForceExit)], tx.clone()));
 
@@ -1300,11 +1300,11 @@ mod unit_tests {
         // Change the password back to the previous one
         let editor3 = Box::new(TestEditor::new(vec![
             // Login
-            UserSelection::ProvidedPassword("321".to_string(), 1),
+            UserSelection::new_provided_password("321".to_string(), 1),
             // Go to change pass
             UserSelection::GoTo(Menu::ChangePass),
             // Return the new password
-            UserSelection::ProvidedPassword("123".to_string(), 0),
+            UserSelection::new_provided_password("123".to_string(), 0),
             // Save
             UserSelection::GoTo(Menu::Save(false)),
             // Ack saved message
@@ -1326,7 +1326,7 @@ mod unit_tests {
         let loc_str = loc.into_os_string().into_string().unwrap();
         let editor = Box::new(TestEditor::new(vec![
             // Login
-            UserSelection::ProvidedPassword("123".to_string(), 0),
+            UserSelection::new_provided_password("123".to_string(), 0),
             // Export entries
             UserSelection::GoTo(Menu::ExportEntries),
             UserSelection::ExportTo(loc_str.clone()),
@@ -1363,18 +1363,18 @@ mod unit_tests {
         let loc_str = loc.into_os_string().into_string().unwrap();
         let editor = Box::new(TestEditor::new(vec![
             // Login
-            UserSelection::ProvidedPassword("123".to_string(), 0),
+            UserSelection::new_provided_password("123".to_string(), 0),
             // Export entries
             UserSelection::GoTo(Menu::ImportEntries),
             UserSelection::ExportTo(loc_str.clone()),
             // Ack message
             UserSelection::UserOption(UserOption::ok()),
             // Import entries
-            UserSelection::ImportFrom(loc_str, "123".to_string(), 0),
+            UserSelection::new_import_from(loc_str, "123".to_string(), 0),
             // Ack message
             UserSelection::UserOption(UserOption::ok()),
             // Import a non-existing file
-            UserSelection::ImportFrom("/non-existing".to_string(), "123".to_string(), 0),
+            UserSelection::new_import_from("/non-existing".to_string(), "123".to_string(), 0),
             // Ack message
             UserSelection::UserOption(UserOption::ok()),
             // Exit
@@ -1409,7 +1409,7 @@ mod unit_tests {
 
         let editor = Box::new(TestEditor::new(vec![
             // Login
-            UserSelection::ProvidedPassword("123".to_string(), 0),
+            UserSelection::new_provided_password("123".to_string(), 0),
             // Update the configuration
             UserSelection::GoTo(Menu::ShowConfiguration),
             UserSelection::UpdateConfiguration(new_conf),
@@ -1429,7 +1429,7 @@ mod unit_tests {
         let a_string = "1string".to_string();
         let editor = Box::new(TestEditor::new(vec![
             // Login
-            UserSelection::ProvidedPassword("123".to_string(), 0),
+            UserSelection::new_provided_password("123".to_string(), 0),
             // Add to clipboard
             UserSelection::AddToClipboard(a_string.clone()),
             // Ack message

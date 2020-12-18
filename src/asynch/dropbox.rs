@@ -35,6 +35,7 @@ use percent_encoding::{AsciiSet, CONTROLS, percent_decode, utf8_percent_encode};
 use toml;
 use toml::value::Table;
 use url::Url;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::asynch::{self, BoxedRklHttpAsyncClient, RklHttpAsyncFactory, ServerVersionData, SynchronizerAction, SyncStatus};
 use crate::datacrypt::{create_random, EntryPasswordCryptor};
@@ -131,7 +132,7 @@ impl Synchronizer {
     }
 
     /// Returns the password decrypted
-    fn use_token(&self) -> errors::Result<String> {
+    fn use_token(&self) -> errors::Result<Zeroizing<String>> {
         self.conf.decrypted_token()
     }
 
@@ -141,8 +142,7 @@ impl Synchronizer {
         let version_local = self.version_local.clone();
         let last_sync_version = self.last_sync_version.clone();
         let mut client = self.client_factory.create();
-        let token = self.use_token()?;
-        client.header("Authorization", &format!("Bearer {}", token));
+        client.header("Authorization", &format!("Bearer {}", self.use_token()?.as_str()));
         let server_version = Self::get_version(&mut client).await?;
         let synchronizer_action = asynch::synchronizer_action(&server_version, &file_name, &saved_at_local, &version_local, &last_sync_version)?;
         Self::parse_synchronizer_action(synchronizer_action, &file_name, &mut client, version_local, saved_at_local).await
@@ -284,7 +284,8 @@ fn create_version_file_locally(version: Option<i64>, last_modified: Option<i64>)
 }
 
 /// The configuration that is retrieved from the rust-keylock encrypted file
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Zeroize)]
+#[zeroize(drop)]
 pub struct DropboxConfiguration {
     /// The token for a dropbox account
     pub token: String,
@@ -293,14 +294,14 @@ pub struct DropboxConfiguration {
 
 impl DropboxConfiguration {
     /// Creates a new DropboxConfiguration
-    pub fn new(token: String) -> errors::Result<DropboxConfiguration> {
+    pub fn new<T: Into<Zeroizing<String>>>(token: T) -> errors::Result<DropboxConfiguration> {
         let mut s = DropboxConfiguration::default();
-        s.token = s.token_cryptor.encrypt_str(&token)?;
+        s.token = s.token_cryptor.encrypt_str(&token.into())?;
         Ok(s)
     }
 
-    pub fn decrypted_token(&self) -> errors::Result<String> {
-        self.token_cryptor.decrypt_str(&self.token)
+    pub fn decrypted_token(&self) -> errors::Result<Zeroizing<String>> {
+        self.token_cryptor.decrypt_str(&self.token).map(|token| Zeroizing::new(token))
     }
 
     pub fn dropbox_url() -> String {
@@ -313,7 +314,7 @@ impl DropboxConfiguration {
     /// Creates a TOML table form this NextcloudConfiguration. The resulted table contains the decrypted password.
     pub(crate) fn to_table(&self) -> errors::Result<Table> {
         let mut table = Table::new();
-        table.insert("token".to_string(), toml::Value::String(self.decrypted_token()?));
+        table.insert("token".to_string(), toml::Value::String(self.decrypted_token()?.as_str().to_string()));
         Ok(table)
     }
 
@@ -329,7 +330,7 @@ impl DropboxConfiguration {
     /// Returns true is the configuration contains the needed values to operate correctly
     pub fn is_filled(&self) -> bool {
         let res = self.decrypted_token();
-        res.is_ok() && res.unwrap() != ""
+        res.is_ok() && res.unwrap().as_str() != ""
     }
 }
 
@@ -347,7 +348,7 @@ async fn token_server_shutdown_signal(tx: futures::channel::oneshot::Receiver<()
     tx.into_future().await.unwrap()
 }
 
-pub(crate) fn retrieve_token(url_string: String) -> errors::Result<String> {
+pub(crate) fn retrieve_token(url_string: String) -> errors::Result<Zeroizing<String>> {
     debug!("Retrieving a token for dropbox");
     // Define the server shutdown handle
     let (tx_shutdown, rx_shutdown) = oneshot::channel::<()>();
@@ -476,7 +477,7 @@ fn parse_url(url_string: String) -> errors::Result<(u16, String)> {
     Ok((port, state))
 }
 
-fn retrieve_token_and_state_from_post_body(post_body: &str) -> errors::Result<(String, String)> {
+fn retrieve_token_and_state_from_post_body(post_body: &str) -> errors::Result<(Zeroizing<String>, Zeroizing<String>)> {
     let access_token_tups: Vec<(&str, &str)> = post_body.split('&')
         .map(|s| {
             let v: Vec<&str> = s.splitn(2, '=').collect();
@@ -491,13 +492,13 @@ fn retrieve_token_and_state_from_post_body(post_body: &str) -> errors::Result<(S
         })
         .filter(|tup| tup.0 == "access_token" || tup.0 == "state")
         .collect();
-    let mut access_token = "".to_string();
-    let mut state = "".to_string();
+    let mut access_token = Zeroizing::new("".to_string());
+    let mut state = Zeroizing::new("".to_string());
     for tup in access_token_tups {
         if tup.0 == "access_token" {
-            access_token = tup.1.to_string();
+            access_token = Zeroizing::new(tup.1.to_string());
         } else if tup.0 == "state" {
-            state = tup.1.to_string();
+            state = Zeroizing::new(tup.1.to_string());
         }
     }
     Ok((access_token, state))
@@ -528,8 +529,8 @@ mod dropbox_tests {
     fn retrieve_a_token_and_a_state_from_post_body() {
         let res = retrieve_token_and_state_from_post_body("access_token=mytoken&token_type=bearer&state=mystate&uid=myuid&account_id=myaccountid");
         let (token, state) = res.unwrap();
-        assert!(token == "mytoken");
-        assert!(state == "mystate");
+        assert!(token.as_str() == "mytoken");
+        assert!(state.as_str() == "mystate");
     }
 
     #[test]
@@ -651,7 +652,7 @@ mod dropbox_tests {
         let dbx_res = DropboxConfiguration::from_table(&table);
         assert!(dbx_res.is_ok());
         let dbx = dbx_res.unwrap();
-        assert!(dbx.decrypted_token().unwrap() == "thisisatoken");
+        assert!(dbx.decrypted_token().unwrap().as_str() == "thisisatoken");
     }
 
     #[test]
@@ -666,7 +667,7 @@ mod dropbox_tests {
     fn use_the_token_derypted() {
         let token = "thisisatoken";
         let dbx = DropboxConfiguration::new(token.to_string()).unwrap();
-        assert!(dbx.decrypted_token().unwrap() == token);
+        assert!(dbx.decrypted_token().unwrap().as_str() == token);
     }
 
     #[test]

@@ -22,6 +22,7 @@ use log::*;
 use rs_password_utils;
 use toml;
 use toml::value::Table;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::asynch::dropbox::DropboxConfiguration;
 use crate::asynch::nextcloud::NextcloudConfiguration;
@@ -58,7 +59,7 @@ impl RklContent {
         let entries = tup.0.get_entries_decrypted();
         let nextcloud_conf = nextcloud::NextcloudConfiguration::new(tup.1.server_url.clone(),
                                                                     tup.1.username.clone(),
-                                                                    tup.1.decrypted_password()?,
+                                                                    tup.1.decrypted_password()?.to_string(),
                                                                     tup.1.use_self_signed_certificate);
         let dropbox_conf = dropbox::DropboxConfiguration::new(tup.2.decrypted_token()?);
         let system_conf = SystemConfiguration::new(tup.3.saved_at, tup.3.version, tup.3.last_sync_version);
@@ -156,7 +157,8 @@ impl Default for SystemConfiguration {
 }
 
 /// Struct that defines meta-data for an entry.
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Zeroize)]
+#[zeroize(drop)]
 pub struct EntryMeta {
     /// True if the password is leaked.
     pub leaked_password: bool
@@ -192,7 +194,8 @@ impl Default for EntryMeta {
 }
 
 /// Struct that defines a password entry.
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Zeroize)]
+#[zeroize(drop)]
 pub struct Entry {
     /// The name of the Entry
     ///
@@ -413,7 +416,7 @@ pub enum Menu {
     /// Temporarily creates a web server and waits for the callback HTTP request that obtains the Dropbox token
     WaitForDbxTokenCallback(String),
     /// Sets the dropbox token
-    SetDbxToken(String),
+    SetDbxToken(Zeroizing<String>),
     /// Stay in the current menu
     Current,
 }
@@ -430,15 +433,15 @@ pub enum UserSelection {
     /// The User selected to go to a `Menu`.
     GoTo(Menu),
     /// The User provided a password and a number.
-    ProvidedPassword(String, usize),
+    ProvidedPassword(Zeroizing<String>, Zeroizing<usize>),
     /// The User acknowledges something.
     Ack,
     /// The User selected to export the password `Entries` to a path.
     ExportTo(String),
     /// The User selected to import the password `Entries` from a path.
-    ImportFrom(String, String, usize),
+    ImportFrom(String, Zeroizing<String>, Zeroizing<usize>),
     /// The User selected to import the password `Entries` from a file in the default location.
-    ImportFromDefaultLocation(String, String, usize),
+    ImportFromDefaultLocation(String, Zeroizing<String>, Zeroizing<usize>),
     /// The User may be offered to select one of the Options.
     UserOption(UserOption),
     /// The User updates the configuration.
@@ -455,6 +458,18 @@ pub enum UserSelection {
 impl UserSelection {
     pub fn is_same_variant_with(&self, other: &UserSelection) -> bool {
         self.ordinal() == other.ordinal()
+    }
+
+    pub fn new_provided_password<T: Into<Zeroizing<String>>, U: Into<Zeroizing<usize>>>(password: T, number: U) -> UserSelection {
+        UserSelection::ProvidedPassword(password.into(), number.into())
+    }
+
+    pub fn new_import_from<T: Into<Zeroizing<String>>, U: Into<Zeroizing<usize>>>(location: String, password: T, number: U) -> UserSelection {
+        UserSelection::ImportFrom(location, password.into(), number.into())
+    }
+
+    pub fn new_import_from_default_location<T: Into<Zeroizing<String>>, U: Into<Zeroizing<usize>>>(location: String, password: T, number: U) -> UserSelection {
+        UserSelection::ImportFromDefaultLocation(location, password.into(), number.into())
     }
 
     fn ordinal(&self) -> i8 {
@@ -1016,11 +1031,11 @@ mod api_unit_tests {
         assert!(UserSelection::ReplaceEntry(1, Entry::empty()).ordinal() == 2);
         assert!(UserSelection::DeleteEntry(1).ordinal() == 3);
         assert!(UserSelection::GoTo(Menu::TryPass(false)).ordinal() == 4);
-        assert!(UserSelection::ProvidedPassword("".to_owned(), 33).ordinal() == 5);
+        assert!(UserSelection::new_provided_password("".to_owned(), 33).ordinal() == 5);
         assert!(UserSelection::Ack.ordinal() == 6);
         assert!(UserSelection::ExportTo("".to_owned()).ordinal() == 7);
-        assert!(UserSelection::ImportFrom("".to_owned(), "".to_owned(), 1).ordinal() == 8);
-        assert!(UserSelection::ImportFromDefaultLocation("".to_owned(), "".to_owned(), 1).ordinal() == 9);
+        assert!(UserSelection::new_import_from("".to_owned(), "".to_owned(), 1).ordinal() == 8);
+        assert!(UserSelection::new_import_from_default_location("".to_owned(), "".to_owned(), 1).ordinal() == 9);
         assert!(UserSelection::UserOption(UserOption::empty()).ordinal() == 10);
         assert!(UserSelection::UpdateConfiguration(AllConfigurations::default()).ordinal() == 11);
         assert!(UserSelection::AddToClipboard("".to_owned()).ordinal() == 12);
@@ -1028,6 +1043,6 @@ mod api_unit_tests {
 
     #[test]
     fn is_same_variant_with() {
-        assert!(UserSelection::ProvidedPassword("".to_owned(), 33).is_same_variant_with(&UserSelection::ProvidedPassword("other".to_owned(), 11)));
+        assert!(UserSelection::new_provided_password("".to_owned(), 33).is_same_variant_with(&UserSelection::new_provided_password("other".to_owned(), 11)));
     }
 }

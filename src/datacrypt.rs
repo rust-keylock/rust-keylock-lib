@@ -24,14 +24,14 @@ use std::thread::JoinHandle;
 use aes_ctr::Aes256Ctr;
 use aes_ctr::stream_cipher::generic_array::GenericArray;
 use base64;
+use bcrypt::bcrypt;
 use ctr::stream_cipher::{NewStreamCipher, SyncStreamCipher};
 use hkdf::Hkdf;
 use rand::{Rng, RngCore};
 use rand::rngs::OsRng;
 use sha2::Sha256;
 use sha3::{Digest, Sha3_512};
-
-use bcrypt::bcrypt;
+use zeroize::Zeroize;
 
 use super::errors::{self, RustKeylockError};
 use super::protected::RklSecret;
@@ -97,10 +97,10 @@ impl BcryptAes {
     /// * iv for AES
     /// * The position of the salt
     /// * hash for Sha3Keccak512 hashing
-    pub fn new(password: String,
-               salt: Vec<u8>,
+    pub fn new(mut password: String,
+               mut salt: Vec<u8>,
                iv: Vec<u8>,
-               salt_position: usize,
+               mut salt_position: usize,
                hash_bytes: Vec<u8>, )
                -> BcryptAes {
         let mut salt_key_pairs = Vec::new();
@@ -132,14 +132,22 @@ impl BcryptAes {
         // Create the SHA3 hasher
         let hasher = Sha3Keccak512::new();
 
-        BcryptAes {
+
+        let to_ret = BcryptAes {
             key: salt_key_pairs.remove(0).1.clone(),
             iv,
             salt_position,
             salt_key_pairs,
             hasher,
             hash: RklSecret::new(hash_bytes),
-        }
+        };
+
+        // Zeroize what's not moved
+        password.zeroize();
+        salt.zeroize();
+        salt_position.zeroize();
+
+        to_ret
     }
 
     fn decrypt_bytes(&self, encrypted: &[u8], key: &[u8]) -> errors::Result<Vec<u8>> {
@@ -247,6 +255,12 @@ pub struct EntryPasswordCryptor {
     key: RklSecret,
     /// The initialization vector for the AES.
     iv: Vec<u8>,
+}
+
+impl Zeroize for EntryPasswordCryptor {
+    fn zeroize(&mut self) {
+        self.iv.zeroize();
+    }
 }
 
 impl EntryPasswordCryptor {

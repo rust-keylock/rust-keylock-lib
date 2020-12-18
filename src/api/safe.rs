@@ -14,8 +14,12 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::{datacrypt, errors};
 use std::collections::HashMap;
+
+use zeroize::Zeroize;
+
+use crate::{datacrypt, errors};
+
 use super::Entry;
 
 /// Holds the data that should be safe and secret.
@@ -30,6 +34,21 @@ pub(crate) struct Safe {
     map_filtered_to_unfiltered: HashMap<usize, usize>,
     password_cryptor: datacrypt::EntryPasswordCryptor,
     filter: String,
+}
+
+impl Drop for Safe {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl Zeroize for Safe {
+    fn zeroize(&mut self) {
+        self.entries.zeroize();
+        self.filtered_entries.zeroize();
+        self.password_cryptor.zeroize();
+        self.filter.zeroize();
+    }
 }
 
 impl Default for Safe {
