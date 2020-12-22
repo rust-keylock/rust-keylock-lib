@@ -441,7 +441,7 @@ pub(crate) fn retrieve_token(url_string: String) -> errors::Result<Zeroizing<Str
     });
 
     debug!("Waiting for Dropbox Token...");
-    let rec = rx.recv_timeout(time::Duration::from_millis(300000))
+    let rec = rx.recv_timeout(time::Duration::from_millis(600000))
         .map_err(|error| RustKeylockError::from(error))
         .and_then(|rec_res| rec_res);
     debug!("Dropbox Token retrieved. Stopping temporary server...");
