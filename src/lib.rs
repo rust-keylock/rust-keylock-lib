@@ -1153,23 +1153,52 @@ mod unit_tests {
     #[test]
     // WARNING: Running this, will mess with the passwords that are stored in the $HOME/.rust-keylock directory
     fn execution_cases() {
-        execute_try_pass();
+        execute_login_success();
         execute_show_entry();
         execute_add_entry();
+        execute_add_entry_with_leaked_password();
+        execute_add_entry_with_leaked_password_and_fix_it();
         execute_edit_entry();
+        execute_edit_entry_define_leaked_password();
+        execute_edit_entry_define_leaked_password_and_fix_it();
         execute_delete_entry();
         execute_change_pass();
         execute_export_entries();
         execute_import_entries();
         execute_update_configuration();
         execute_add_to_clipboard();
+        // This should be after setting nextcloud or dropbox in order to include testing with the configurations filled
+        execute_login_fail_and_then_sucess();
     }
 
-    fn execute_try_pass() {
-        println!("===========execute_try_pass");
+    fn execute_login_success() {
+        println!("===========execute_login_success");
         let (tx, rx) = mpsc::channel();
         let editor = Box::new(TestEditor::new(vec![
             // Login
+            UserSelection::new_provided_password("123".to_string(), 0),
+            // Save
+            UserSelection::GoTo(Menu::Save(false)),
+            // Ack saved message
+            UserSelection::UserOption(UserOption::ok()),
+            // Exit
+            UserSelection::GoTo(Menu::Exit),
+            UserSelection::GoTo(Menu::ForceExit)], tx));
+
+        super::execute(editor);
+        let res = rx.recv();
+        assert!(res.is_ok() && res.unwrap());
+    }
+
+    fn execute_login_fail_and_then_sucess() {
+        println!("===========execute_login_fail_and_then_sucess");
+        let (tx, rx) = mpsc::channel();
+        let editor = Box::new(TestEditor::new(vec![
+            // Login for failure
+            UserSelection::new_provided_password("12311".to_string(), 0),
+            // Ack wrong password message
+            UserSelection::UserOption(UserOption::ok()),
+            // Login for success
             UserSelection::new_provided_password("123".to_string(), 0),
             // Save
             UserSelection::GoTo(Menu::Save(false)),
@@ -1220,6 +1249,47 @@ mod unit_tests {
         assert!(res.is_ok() && res.unwrap());
     }
 
+    fn execute_edit_entry_define_leaked_password() {
+        println!("===========execute_edit_entry_define_leaked_password");
+        let (tx, rx) = mpsc::channel();
+        let editor = Box::new(TestEditor::new(vec![
+            // Login
+            UserSelection::new_provided_password("123".to_string(), 0),
+            // Edit the first entry
+            UserSelection::GoTo(Menu::EditEntry(0)),
+            UserSelection::ReplaceEntry(0, Entry::new("r".to_owned(), "url".to_owned(), "ru".to_owned(), "123".to_string(), "rs".to_owned(), EntryMeta::default())),
+            // Answer ok to the warning about the leaked password
+            UserSelection::UserOption(UserOption::yes()),
+            // Exit
+            UserSelection::GoTo(Menu::ForceExit)], tx));
+
+        super::execute(editor);
+        let res = rx.recv();
+        assert!(res.is_ok() && res.unwrap());
+    }
+
+    fn execute_edit_entry_define_leaked_password_and_fix_it() {
+        println!("===========execute_edit_entry_define_leaked_password_and_fix_it");
+        let (tx, rx) = mpsc::channel();
+        let pass = rs_password_utils::dice::generate(6);
+        let editor = Box::new(TestEditor::new(vec![
+            // Login
+            UserSelection::new_provided_password("123".to_string(), 0),
+            // Edit the first entry
+            UserSelection::GoTo(Menu::EditEntry(0)),
+            UserSelection::ReplaceEntry(0, Entry::new("r".to_owned(), "url".to_owned(), "ru".to_owned(), "123".to_string(), "rs".to_owned(), EntryMeta::default())),
+            // Answer no to the warning about the leaked password
+            UserSelection::UserOption(UserOption::no()),
+            // Define a non-leaked password
+            UserSelection::ReplaceEntry(0, Entry::new("r".to_owned(), "url".to_owned(), "ru".to_owned(), pass, "rs".to_owned(), EntryMeta::default())),
+            // Exit
+            UserSelection::GoTo(Menu::ForceExit)], tx));
+
+        super::execute(editor);
+        let res = rx.recv();
+        assert!(res.is_ok() && res.unwrap());
+    }
+
     fn execute_add_entry() {
         println!("===========execute_add_entry");
         let (tx, rx) = mpsc::channel();
@@ -1229,6 +1299,55 @@ mod unit_tests {
             UserSelection::new_provided_password("123".to_string(), 0),
             // Add an entry
             UserSelection::GoTo(Menu::NewEntry(None)),
+            UserSelection::NewEntry(Entry::new("n".to_owned(), "url".to_owned(), "u".to_owned(), pass, "s".to_owned(), EntryMeta::default())),
+            // Save
+            UserSelection::GoTo(Menu::Save(false)),
+            // Ack saved message
+            UserSelection::UserOption(UserOption::ok()),
+            // Exit
+            UserSelection::GoTo(Menu::ForceExit)], tx));
+
+        super::execute(editor);
+        let res = rx.recv();
+        assert!(res.is_ok() && res.unwrap());
+    }
+
+    fn execute_add_entry_with_leaked_password() {
+        println!("===========execute_add_entry_with_leaked_password");
+        let (tx, rx) = mpsc::channel();
+        let editor = Box::new(TestEditor::new(vec![
+            // Login
+            UserSelection::new_provided_password("123".to_string(), 0),
+            // Add an entry
+            UserSelection::GoTo(Menu::NewEntry(None)),
+            UserSelection::NewEntry(Entry::new("n".to_owned(), "url".to_owned(), "u".to_owned(), "123".to_string(), "s".to_owned(), EntryMeta::default())),
+            // Answer ok to the warning about the leaked password
+            UserSelection::UserOption(UserOption::yes()),
+            // Save
+            UserSelection::GoTo(Menu::Save(false)),
+            // Ack saved message
+            UserSelection::UserOption(UserOption::ok()),
+            // Exit
+            UserSelection::GoTo(Menu::ForceExit)], tx));
+
+        super::execute(editor);
+        let res = rx.recv();
+        assert!(res.is_ok() && res.unwrap());
+    }
+
+    fn execute_add_entry_with_leaked_password_and_fix_it() {
+        println!("===========execute_add_entry_with_leaked_password_and_fix_it");
+        let pass = rs_password_utils::dice::generate(6);
+        let (tx, rx) = mpsc::channel();
+        let editor = Box::new(TestEditor::new(vec![
+            // Login
+            UserSelection::new_provided_password("123".to_string(), 0),
+            // Add an entry
+            UserSelection::GoTo(Menu::NewEntry(None)),
+            UserSelection::NewEntry(Entry::new("n".to_owned(), "url".to_owned(), "u".to_owned(), "123".to_string(), "s".to_owned(), EntryMeta::default())),
+            // Answer no to the warning about the leaked password
+            UserSelection::UserOption(UserOption::no()),
+            // Add an entry with not leaked password
             UserSelection::NewEntry(Entry::new("n".to_owned(), "url".to_owned(), "u".to_owned(), pass, "s".to_owned(), EntryMeta::default())),
             // Save
             UserSelection::GoTo(Menu::Save(false)),
