@@ -1154,6 +1154,7 @@ mod unit_tests {
     // WARNING: Running this, will mess with the passwords that are stored in the $HOME/.rust-keylock directory
     fn execution_cases() {
         execute_login_success();
+        execute_exit_without_login();
         execute_show_entry();
         execute_add_entry();
         execute_add_entry_with_leaked_password();
@@ -1167,6 +1168,8 @@ mod unit_tests {
         execute_import_entries();
         execute_update_configuration();
         execute_add_to_clipboard();
+        execute_file_recovery();
+        execute_check_passwords();
         // This should be after setting nextcloud or dropbox in order to include testing with the configurations filled
         execute_login_fail_and_then_sucess();
     }
@@ -1184,6 +1187,22 @@ mod unit_tests {
             // Exit
             UserSelection::GoTo(Menu::Exit),
             UserSelection::GoTo(Menu::ForceExit)], tx));
+
+        super::execute(editor);
+        let res = rx.recv();
+        assert!(res.is_ok() && res.unwrap());
+    }
+
+    fn execute_exit_without_login() {
+        println!("===========execute_exit_without_login");
+        let (tx, rx) = mpsc::channel();
+        let editor = Box::new(TestEditor::new(vec![
+            // Login for failure
+            UserSelection::new_provided_password("12311".to_string(), 0),
+            // Ack wrong password message
+            UserSelection::UserOption(UserOption::ok()),
+            // Exit
+            UserSelection::GoTo(Menu::Exit)], tx));
 
         super::execute(editor);
         let res = rx.recv();
@@ -1272,15 +1291,17 @@ mod unit_tests {
         println!("===========execute_edit_entry_define_leaked_password_and_fix_it");
         let (tx, rx) = mpsc::channel();
         let pass = rs_password_utils::dice::generate(6);
+        let anentry = Entry::new("r".to_owned(), "url".to_owned(), "ru".to_owned(), "123".to_string(), "rs".to_owned(), EntryMeta::default());
         let editor = Box::new(TestEditor::new(vec![
             // Login
             UserSelection::new_provided_password("123".to_string(), 0),
             // Edit the first entry
             UserSelection::GoTo(Menu::EditEntry(0)),
-            UserSelection::ReplaceEntry(0, Entry::new("r".to_owned(), "url".to_owned(), "ru".to_owned(), "123".to_string(), "rs".to_owned(), EntryMeta::default())),
+            UserSelection::ReplaceEntry(0, anentry.clone()),
             // Answer no to the warning about the leaked password
             UserSelection::UserOption(UserOption::no()),
-            // Define a non-leaked password
+            // Generate a strong password
+            UserSelection::GeneratePassphrase(Some(0), anentry),
             UserSelection::ReplaceEntry(0, Entry::new("r".to_owned(), "url".to_owned(), "ru".to_owned(), pass, "rs".to_owned(), EntryMeta::default())),
             // Exit
             UserSelection::GoTo(Menu::ForceExit)], tx));
@@ -1518,22 +1539,16 @@ mod unit_tests {
 
         let new_conf = AllConfigurations::new(nc_conf, dbx_conf);
 
-        let new_empty_nc_conf = NextcloudConfiguration::new(
-            "".to_string(),
-            "".to_string(),
-            "".to_string(),
-            false).unwrap();
-
-        let new_empty_conf = AllConfigurations::new(new_empty_nc_conf, DropboxConfiguration::default());
-
         let editor = Box::new(TestEditor::new(vec![
             // Login
             UserSelection::new_provided_password("123".to_string(), 0),
             // Update the configuration
             UserSelection::GoTo(Menu::ShowConfiguration),
             UserSelection::UpdateConfiguration(new_conf),
-            // Update the configuration with a non-filled one
-            UserSelection::UpdateConfiguration(new_empty_conf),
+            // Save
+            UserSelection::GoTo(Menu::Save(false)),
+            // Ack saved message
+            UserSelection::UserOption(UserOption::ok()),
             // Exit
             UserSelection::GoTo(Menu::ForceExit)], tx));
 
@@ -1569,6 +1584,45 @@ mod unit_tests {
             }
         }
 
+        let res = rx.recv();
+        assert!(res.is_ok() && res.unwrap());
+    }
+
+    fn execute_file_recovery() {
+        println!("===========execute_file_recovery");
+        let (tx, rx) = mpsc::channel();
+        let editor = Box::new(TestEditor::new(vec![
+            // Login
+            UserSelection::new_provided_password("123".to_string(), 0),
+            // Trigger to recovery
+            UserSelection::GoTo(Menu::TryFileRecovery),
+            // Ack messages. One for recovery start and one for completion
+            UserSelection::UserOption(UserOption::ok()),
+            UserSelection::UserOption(UserOption::ok()),
+            // Exit
+            UserSelection::GoTo(Menu::Exit),
+            UserSelection::GoTo(Menu::ForceExit)], tx));
+
+        super::execute(editor);
+        let res = rx.recv();
+        assert!(res.is_ok() && res.unwrap());
+    }
+
+    fn execute_check_passwords() {
+        println!("===========execute_check_passwords");
+        let (tx, rx) = mpsc::channel();
+        let editor = Box::new(TestEditor::new(vec![
+            // Login
+            UserSelection::new_provided_password("123".to_string(), 0),
+            // Trigger check
+            UserSelection::CheckPasswords,
+            // Ack message
+            UserSelection::UserOption(UserOption::ok()),
+            // Exit
+            UserSelection::GoTo(Menu::Exit),
+            UserSelection::GoTo(Menu::ForceExit)], tx));
+
+        super::execute(editor);
         let res = rx.recv();
         assert!(res.is_ok() && res.unwrap());
     }
