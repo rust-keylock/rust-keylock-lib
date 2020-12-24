@@ -785,9 +785,17 @@ Warning: Saving will discard all the entries that could not be recovered.
             }
             UserSelection::CheckPasswords => {
                 debug!("UserSelection::CheckPasswords");
-                let mr = handle_check_passwords(&mut s.safe, &RklPasswordChecker::default()).await;
-                let _ = s.editor.show_message(&mr.message, mr.user_options, mr.severity);
-                UserSelection::GoTo(Menu::EntriesList("".to_string()))
+                match handle_check_passwords(&mut s.safe, &RklPasswordChecker::default()).await {
+                    Ok(mr) => {
+                        let _ = s.editor.show_message(&mr.message, mr.user_options, mr.severity);
+                        UserSelection::GoTo(Menu::EntriesList("".to_string()))
+                    }
+                    Err(error) => {
+                        let _ = s.editor.show_message(error.to_string().as_str(), vec![UserOption::ok()], MessageSeverity::Error);
+                        UserSelection::GoTo(Menu::EntriesList("".to_string()))
+                    }
+                }
+
             }
             UserSelection::GoTo(Menu::Current) => {
                 debug!("UserSelection::GoTo(Menu::Current)");
@@ -806,52 +814,55 @@ Warning: Saving will discard all the entries that could not be recovered.
     }
 }
 
-async fn handle_check_passwords<T>(safe: &mut Safe, password_checker: &T) -> EditorShowMessageWrapper
+async fn handle_check_passwords<T>(safe: &mut Safe, password_checker: &T) -> errors::Result<EditorShowMessageWrapper>
     where T: PasswordChecker {
-    let mut pwned: Option<Vec<String>> = None;
+    let mut pwned_passwords_found: Option<Vec<String>> = None;
     for index in 0..safe.get_entries().len() {
-        let entry = safe.get_entry_decrypted(index);
+        let mut entry = safe.get_entry_decrypted(index);
         let pwned_res = password_checker.is_unsafe(&entry.pass).await;
         if pwned_res.is_ok() {
             let is_pwned = pwned_res.unwrap();
-            let borrowed_entry = safe.get_entry_mut(index);
-            borrowed_entry.meta.leaked_password = is_pwned;
-            if pwned.is_none() {
-                pwned = Some(Vec::new());
+            if pwned_passwords_found.is_none() {
+                pwned_passwords_found = Some(Vec::new());
             }
             if is_pwned {
-                pwned.as_mut().unwrap().push(entry.name.clone());
+                pwned_passwords_found.as_mut().unwrap().push(entry.name.clone());
             }
+            if is_pwned != entry.meta.leaked_password {
+                entry.meta.leaked_password = is_pwned;
+                safe.replace_entry(index, entry)?;
+            }
+
         } else {
             error!("Error while checking passwords: {}", pwned_res.unwrap_err());
-            pwned = None;
+            pwned_passwords_found = None;
             break;
         }
     }
-    if pwned.is_none() {
+    if pwned_passwords_found.is_none() {
         if !safe.get_entries().is_empty() {
-            EditorShowMessageWrapper::new("Error while checking passwords health. Please see the logs for more details.",
+            Ok(EditorShowMessageWrapper::new("Error while checking passwords health. Please see the logs for more details.",
                                           vec![UserOption::ok()],
-                                          MessageSeverity::Error)
+                                          MessageSeverity::Error))
         } else {
-            EditorShowMessageWrapper::new("No entries to check",
+            Ok(EditorShowMessageWrapper::new("No entries to check",
                                           vec![UserOption::ok()],
-                                          MessageSeverity::Info)
+                                          MessageSeverity::Info))
         }
     } else {
-        if !pwned.as_ref().unwrap().is_empty() {
+        if !pwned_passwords_found.as_ref().unwrap().is_empty() {
             let message = format!("The following entries have leaked passwords: {}! Please change them immediately!",
-                                  pwned.unwrap().join(","));
+                                  pwned_passwords_found.unwrap().join(","));
             info!("{}", message);
-            EditorShowMessageWrapper::new(&message,
+            Ok(EditorShowMessageWrapper::new(&message,
                                           vec![UserOption::ok()],
-                                          MessageSeverity::Warn)
+                                          MessageSeverity::Warn))
         } else {
             let message = format!("The passwords of the entries look ok!");
             debug!("{}", message);
-            EditorShowMessageWrapper::new(&message,
+            Ok(EditorShowMessageWrapper::new(&message,
                                           vec![UserOption::ok()],
-                                          MessageSeverity::Info)
+                                          MessageSeverity::Info))
         }
     }
 }
@@ -1119,7 +1130,7 @@ mod unit_tests {
         let mut safe = Safe::default();
 
         // No entries to check
-        let smw = handle_check_passwords(&mut safe, &AlwaysOkTruePasswordChecker {}).await;
+        let smw = handle_check_passwords(&mut safe, &AlwaysOkTruePasswordChecker {}).await.unwrap();
         assert!(&smw.message == "No entries to check");
 
         // Entries Ok and healthy
@@ -1130,15 +1141,15 @@ mod unit_tests {
                        "pass".to_string(),
                        "desc".to_string(),
                        EntryMeta::default()));
-        let smw = handle_check_passwords(&mut safe, &AlwaysOkFalsePasswordChecker {}).await;
+        let smw = handle_check_passwords(&mut safe, &AlwaysOkFalsePasswordChecker {}).await.unwrap();
         assert!(&smw.message == "The passwords of the entries look ok!");
 
         // Entries Ok but not healthy
-        let smw = handle_check_passwords(&mut safe, &AlwaysOkTruePasswordChecker {}).await;
+        let smw = handle_check_passwords(&mut safe, &AlwaysOkTruePasswordChecker {}).await.unwrap();
         assert!(&smw.message == "The following entries have leaked passwords: name! Please change them immediately!");
 
         // Entries Error
-        let smw = handle_check_passwords(&mut safe, &AlwaysErrorPasswordChecker {}).await;
+        let smw = handle_check_passwords(&mut safe, &AlwaysErrorPasswordChecker {}).await.unwrap();
         assert!(&smw.message == "Error while checking passwords health. Please see the logs for more details.");
     }
 }
