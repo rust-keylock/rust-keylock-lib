@@ -68,7 +68,16 @@ pub(crate) fn create_bcryptor(filename: &str,
                     super::datacrypt::create_random(16)
                 };
                 // The actual salt position is the one selected by the user, plus 16 bytes because the first 16 bytes is the iv
-                let actual_salt_position = if bytes.len() == 96 { 16 } else { salt_position + 16 };
+                let actual_salt_position = if bytes.len() == 96 {
+                    // This means that we have only iv:16 + salt:16 + hash:64 (no data)
+                    16
+                } else if salt_position >= bytes.len() && bytes.len() >= 80 {
+                    // iv:16 + data + salt:16 + hash:64, but the salt position given by the user is more than data.len()
+                    // This means that the actual salt position is data - salt:16 - hash:64
+                    bytes.len() - 80
+                } else {
+                    salt_position + 16
+                };
                 // If the bytes are not more than 96 (iv:16 + salt:16 + hash:64) it means that there is no data for entries
                 let salt = if (bytes.len() > 96 && !reinitialize_randoms && bytes.len() >= actual_salt_position) || bytes.len() == 96 {
                     bytes.iter()
@@ -791,6 +800,52 @@ mod test_file_handler {
     }
 
     #[test]
+    fn create_encrypt_and_then_decrypt_big_salt_position() {
+        let filename = "create_encrypt_and_then_decrypt_big_salt_position.toml";
+
+        let salt_position = 123123123;
+        let password = "123".to_string();
+
+        let mut entries = Vec::new();
+        for i in 0..100 {
+            entries.push(Entry::new(
+                i.to_string(),
+                i.to_string(),
+                i.to_string(),
+                i.to_string(),
+                i.to_string(),
+                EntryMeta::default(),
+            ));
+        }
+        let nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), true).unwrap();
+        let dbx_conf = DropboxConfiguration::new("token".to_string()).unwrap();
+        let sys_conf = SystemConfiguration::new(Some(0), Some(1), Some(2));
+
+        let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
+        assert!(super::save(super::RklContent::new(entries.clone(), nc_conf, dbx_conf, sys_conf), filename, &cryptor, true).is_ok());
+        cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
+        let m = super::load(filename, &cryptor, true);
+        let rkl_content = m.unwrap();
+        assert!(entries == rkl_content.entries);
+        assert!("nc_url" == rkl_content.nextcloud_conf.server_url);
+        assert!("nc_user" == rkl_content.nextcloud_conf.username);
+        assert!("token" == rkl_content.dropbox_conf.decrypted_token().unwrap().as_str());
+        assert!(rkl_content.nextcloud_conf.use_self_signed_certificate);
+        let new_nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), true).unwrap();
+        let new_dbx_conf = DropboxConfiguration::new("newtoken".to_string()).unwrap();
+        let new_sys_conf = SystemConfiguration::new(Some(0), Some(1), Some(2));
+        assert!(super::save(
+            super::RklContent::new(entries, new_nc_conf, new_dbx_conf, new_sys_conf),
+            filename,
+            &cryptor,
+            true,
+        )
+            .is_ok());
+
+        delete_file(filename);
+    }
+
+    #[test]
     fn create_encrypt_and_import() {
         // Create the file to import
         let import_filename = "to_import.toml";
@@ -842,7 +897,7 @@ mod test_file_handler {
             "1".to_string(),
             "1".to_string(),
             "1".to_string(),
-            EntryMeta::default()
+            EntryMeta::default(),
         ));
         let nc_conf = NextcloudConfiguration::new("nc_url".to_string(), "nc_user".to_string(), "nc_pass".to_string(), false).unwrap();
         let dbx_conf = DropboxConfiguration::new("token".to_string()).unwrap();
@@ -969,7 +1024,7 @@ mod test_file_handler {
             "user".to_string(),
             "pass".to_string(),
             "desc".to_string(),
-            EntryMeta::default()
+            EntryMeta::default(),
         )];
         let nc_conf = NextcloudConfiguration::default();
         let dbx_conf = DropboxConfiguration::default();
