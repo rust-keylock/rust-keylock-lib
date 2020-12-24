@@ -38,7 +38,7 @@ after_success:
       sudo make install &&
       cd ../.. &&
       rm -rf kcov-master &&
-      cargo kcov --lib -- --exclude-pattern=/.cargo,/usr/lib,/.rustup &&
+      cargo kcov -- --exclude-pattern=/.cargo,/usr/lib,/.rustup &&
       bash <(curl -s https://codecov.io/bash) &&
       echo "Uploaded code coverage"
 
