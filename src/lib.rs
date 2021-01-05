@@ -718,6 +718,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                     UserSelection::GoTo(Menu::Current)
                 } else {
                     s.configuration.nextcloud = new_conf.nextcloud;
+                    s.configuration.dropbox = new_conf.dropbox;
                     if s.configuration.nextcloud.is_filled() {
                         debug!("A valid configuration for Nextcloud synchronization was found after being updated by the User. Spawning \
                             nextcloud sync task");
