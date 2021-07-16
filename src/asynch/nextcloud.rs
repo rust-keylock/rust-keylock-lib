@@ -318,9 +318,9 @@ impl Synchronizer {
                  local_version: Option<i64>,
                  is_not_https: bool,
                  use_self_signed: bool) -> errors::Result<()> {
-        let mut file = file_handler::get_file(&filename).unwrap_or_else(|_| panic!(format!("Could get the file {} while performing HTTP PUT", filename)));
+        let mut file = file_handler::get_file(&filename).unwrap_or_else(|_| panic!("Could get the file {} while performing HTTP PUT", filename));
         let mut file_bytes: Vec<_> = Vec::new();
-        file.read_to_end(&mut file_bytes).unwrap_or_else(|_| panic!(format!("Could not read the file {} while performing HTTP PUT", filename)));
+        file.read_to_end(&mut file_bytes).unwrap_or_else(|_| panic!("Could not read the file {} while performing HTTP PUT", filename));
 
         let uri = format!("{}/remote.php/dav/files/{}/.rust-keylock/{}", server_url, username.as_str(), filename);
         let req_builder = Request::put(uri);

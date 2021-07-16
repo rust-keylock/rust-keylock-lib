@@ -807,7 +807,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                                        to the developers.",
                                       &other);
                 error!("{}", message);
-                panic!(message)
+                panic!("{}", message)
             }
         };
 
