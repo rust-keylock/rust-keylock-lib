@@ -149,16 +149,21 @@ impl Synchronizer {
     }
 
     async fn get_version(client: &mut BoxedRklHttpAsyncClient) -> errors::Result<ServerVersionData> {
-        let bytes = client.post(
+        debug!("DBX: Getting version");
+        let bytes_res = client.post(
             "https://content.dropboxapi.com/2/files/download",
             &[("Dropbox-API-Arg", r#"{"path": "/.version"}"#)],
-            Vec::new()).await?;
+            Vec::new()).await;
+
+        let bytes = bytes_res.unwrap_or("0,0".as_bytes().to_vec());
         let s = std::str::from_utf8(bytes.as_ref())?;
         let version_data = parse_version_str(s).unwrap_or(ServerVersionData::default());
+        debug!("DBX: Got version");
         Ok(version_data)
     }
 
     async fn download(filename: &str, client: &mut BoxedRklHttpAsyncClient) -> errors::Result<String> {
+        debug!("DBX: Download");
         let tmp_file_name = format!("tmp_{}", filename);
 
         let bytes = client.post(
@@ -166,10 +171,12 @@ impl Synchronizer {
             &[("Dropbox-API-Arg", &format!(r#"{{"path": "/{}"}}"#, filename))],
             Vec::new()).await?;
         file_handler::save_bytes(&tmp_file_name, &bytes, false)?;
+        debug!("DBX: Downloaded");
         Ok(tmp_file_name)
     }
 
     async fn upload(filename: &str, client: &mut BoxedRklHttpAsyncClient) -> errors::Result<()> {
+        debug!("DBX: Upload");
         let filename_string = filename.to_string();
         let mut file = file_handler::get_file(filename)?;
         let mut post_body: Vec<u8> = Vec::new();
@@ -182,6 +189,7 @@ impl Synchronizer {
             ],
             post_body).await?;
 
+        debug!("DBX: Uploaded");
         Ok(())
     }
 
@@ -215,10 +223,12 @@ impl Synchronizer {
     }
 
     async fn upload_all(filename: &str, client: &mut BoxedRklHttpAsyncClient, version_local: Option<i64>, saved_at_local: Option<i64>) -> errors::Result<()> {
+        debug!("DBX: Uploading all");
         Self::upload(filename, client).await?;
         create_version_file_locally(version_local, saved_at_local)?;
         Self::upload(".version", client).await?;
         file_handler::delete_file(".version")?;
+        debug!("DBX: Uploaded all");
         Ok(())
     }
 
