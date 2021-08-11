@@ -544,6 +544,16 @@ mod dropbox_tests {
     }
 
     #[test]
+    fn parse_token_and_state() {
+        let token = "abcdefghijklmnopqrstuvwxyz-_123:4567890";
+        let post_body = format!("access_token={}&token_type=bearer&state=mystate&uid=myuid&account_id=myaccountid", token);
+        let res = retrieve_token_and_state_from_post_body(&post_body);
+        let (token, state) = res.unwrap();
+        assert!(token.as_str() == token.as_str());
+        assert!(state.as_str() == "mystate");
+    }
+
+    #[test]
     fn token_retrieval_success_and_failure() {
         retrieval_success();
         retrieval_failure();
