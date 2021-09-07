@@ -20,15 +20,16 @@ name = "rust_keylock"
 crate-type = ["rlib", "dylib"]
 
 [dependencies]
-ctr = "0.4"
-aes-ctr = "0.4"
+ctr = "0.8"
+aes = { version = "0.7", features = ["ctr"] }
+block-modes = "0.8"
 sha2 = "0.9"
 sha3 = "0.9"
-hkdf = "0.9"
-stream-cipher = "0.6"
-bcrypt = "0.8"
-base64 = "0.12"
-rand = "0.7"
+hkdf = "0.11"
+cipher = "0.3"
+bcrypt = "0.10"
+base64 = "0.13"
+rand = "0.8"
 log = "0.4"
 secstr = "0.4"
 hyper = "0.13"
@@ -47,7 +48,7 @@ reqwest = "0.10"
 serde_json = "1.0"
 rs-password-utils = "0.1"
 async-trait = "0.1.41"
-zeroize = {version = "1.2", features = ["zeroize_derive"] }
+zeroize = {version = "1.4", features = ["zeroize_derive"] }
 
 [dependencies.toml]
 version = "0.5"

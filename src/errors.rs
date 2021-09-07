@@ -26,7 +26,7 @@ use std::num::ParseIntError;
 use std::string::FromUtf8Error;
 use std::sync::mpsc::{RecvError, RecvTimeoutError, SendError};
 use toml;
-use ctr::stream_cipher::LoopError;
+use aes::cipher::errors::LoopError;
 use url;
 use tokio;
 use futures::channel::oneshot::Canceled;

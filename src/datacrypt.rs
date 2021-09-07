@@ -21,14 +21,13 @@ use std::iter::repeat;
 use std::thread;
 use std::thread::JoinHandle;
 
-use aes_ctr::Aes256Ctr;
-use aes_ctr::stream_cipher::generic_array::GenericArray;
+use aes::Aes256Ctr;
+use ctr::cipher::generic_array::GenericArray;
 use base64;
 use bcrypt::bcrypt;
-use ctr::stream_cipher::{NewStreamCipher, SyncStreamCipher};
+use aes::cipher::{NewCipher, StreamCipher};
 use hkdf::Hkdf;
-use rand::{Rng, RngCore};
-use rand::rngs::OsRng;
+use rand::{thread_rng, Rng, RngCore};
 use sha2::Sha256;
 use sha3::{Digest, Sha3_512};
 use zeroize::Zeroize;
@@ -219,9 +218,10 @@ impl Cryptor for BcryptAes {
     fn encrypt(&self, input: &[u8]) -> Result<Vec<u8>, RustKeylockError> {
         // Create a new iv
         let iv = create_random(16);
+        let mut rng = thread_rng();
         // Choose randomly one of the salt-key pairs
         let idx = {
-            OsRng.gen_range(0, NUMBER_OF_SALT_KEY_PAIRS)
+            rng.gen_range(0.. NUMBER_OF_SALT_KEY_PAIRS)
         };
         let salt_key_pair = &self.salt_key_pairs[idx];
 
@@ -395,7 +395,7 @@ impl Hasher for Sha3Keccak512 {
 /// Creates a pseudo-random array of bytes with the given size
 pub fn create_random(size: usize) -> Vec<u8> {
     let mut random: Vec<u8> = repeat(0u8).take(size).collect();
-    OsRng.fill_bytes(&mut random);
+    thread_rng().fill_bytes(&mut random);
     random
 }
 
