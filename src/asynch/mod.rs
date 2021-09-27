@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
 
-use std::str::FromStr;
+use std::str::{self, FromStr};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread;
 use std::time::{self, Duration, SystemTime};
@@ -49,9 +49,10 @@ pub fn execute_task(task: Box<dyn AsyncTask>, every: time::Duration) -> AsyncTas
     let (tx_loop_control, rx_loop_control): (Sender<bool>, Receiver<bool>) = mpsc::channel();
 
     let mut task = task;
-    task.init();
 
     tokio::spawn(async move {
+        task.init().await;
+
         loop {
             let f = task.execute();
             let cont = f.await;
@@ -79,7 +80,7 @@ pub fn execute_task(task: Box<dyn AsyncTask>, every: time::Duration) -> AsyncTas
 #[async_trait]
 pub trait AsyncTask: Send {
     /// Initializes a task
-    fn init(&mut self);
+    async fn init(&mut self);
     /// Executes the task
     /// When the returned boolean is true, the task will run again. When false, the task will be stopped.
     async fn execute(&self) -> bool;
@@ -510,9 +511,13 @@ impl ReqwestClient {
         ReqwestClient { headers, client }
     }
 
-    fn validate_response(resp: Response) -> errors::Result<Response> {
+    async fn validate_response(resp: Response) -> errors::Result<Response> {
         if resp.status().is_client_error() || resp.status().is_server_error() {
-            Err(RustKeylockError::HttpError(format!("Error during HTTP request: {}", resp.status().to_string())))
+            let message= format!("Error during HTTP request: {}.", resp.status().to_string());
+            let body_bytes = Self::get_body(resp).await?;
+            let body_str = str::from_utf8(&body_bytes)?;
+            error!("{}: {}", message, body_str);
+            Err(RustKeylockError::HttpError(message))
         } else {
             Ok(resp)
         }
@@ -552,7 +557,7 @@ impl RklHttpAsyncClient for ReqwestClient {
         }
 
         let resp = builder.send().await?;
-        let resp = Self::validate_response(resp)?;
+        let resp = Self::validate_response(resp).await?;
         Self::get_body(resp).await
     }
 
@@ -571,7 +576,7 @@ impl RklHttpAsyncClient for ReqwestClient {
             }));
         }
         let resp = builder.send().await?;
-        let resp = Self::validate_response(resp)?;
+        let resp = Self::validate_response(resp).await?;
         Self::get_body(resp).await
     }
 }
@@ -817,7 +822,7 @@ mod async_tests {
 
     #[async_trait]
     impl super::AsyncTask for DummyTask {
-        fn init(&mut self) {}
+        async fn init(&mut self) {}
 
         async fn execute(&self) -> bool {
             let _ = self.tx.clone().send(Ok("dummy"));

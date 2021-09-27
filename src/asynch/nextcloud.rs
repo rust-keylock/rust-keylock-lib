@@ -417,7 +417,7 @@ impl Synchronizer {
 
 #[async_trait]
 impl super::AsyncTask for Synchronizer {
-    fn init(&mut self) {}
+    async fn init(&mut self) {}
 
     async fn execute(&self) -> bool {
         let capsule = ArgsCapsule::new(

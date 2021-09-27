@@ -22,61 +22,34 @@ use std::thread;
 use std::time;
 
 use async_trait::async_trait;
-use base64;
 use futures::channel::oneshot;
 use std::convert::Infallible;
 use futures::TryFutureExt;
-use http::StatusCode;
+use http::{StatusCode, Uri};
 use hyper::{self, Body, Request, Response, Server};
 use hyper::server::conn::AddrStream;
 use hyper::service::{make_service_fn, service_fn};
 use log::*;
-use percent_encoding::{AsciiSet, CONTROLS, percent_decode, utf8_percent_encode};
+use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
+use serde::{Deserialize, Serialize};
 use toml;
 use toml::value::Table;
 use url::Url;
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::asynch::{self, BoxedRklHttpAsyncClient, RklHttpAsyncFactory, ServerVersionData, SynchronizerAction, SyncStatus};
-use crate::datacrypt::{create_random, EntryPasswordCryptor};
+use crate::asynch::{self, BoxedRklHttpAsyncClient, RklHttpAsyncFactory, ServerVersionData, SynchronizerAction, SyncStatus, ReqwestClientFactory};
+use crate::datacrypt::{EntryPasswordCryptor, create_random_utf_string};
 use crate::errors;
 use crate::errors::RustKeylockError;
 use crate::file_handler;
 use crate::SystemConfiguration;
 use crate::utils;
+use std::collections::HashMap;
 
 const FRAGMENT: &AsciiSet = &CONTROLS.add(b'+').add(b'/');
 const APP_KEY: &str = "7git6ovjwtdbfvm";
+
 const HTTP_GET_RESPONSE_BODY: &str = r#"
-<!DOCTYPE html>
-<html>
-<head>
-<title>rust-keylock</title>
-</head>
-<body onload="submitToken()">
-
-<form id="tknform" name="tknform" action="/" method="post">
-    <input type="hidden" name="tkninput" id="tkninput"/>
-</form>
-
-<script>
-function submitToken() {
-    var hiddentkn = document.getElementById("tkninput");
-    hiddentkn.value = getToken();
-    var form = document.getElementById("tknform");
-    form.submit();
-}
-
-function getToken() {
-  return window.location.hash;
-}
-</script>
-
-</body>
-</html>
-"#;
-
-const HTTP_POST_RESPONSE_BODY: &str = r#"
 <!DOCTYPE html>
 <html>
 <head>
@@ -131,9 +104,14 @@ impl Synchronizer {
         Ok(s)
     }
 
-    /// Returns the password decrypted
+    /// Returns the refresh token decrypted
     fn use_token(&self) -> errors::Result<Zeroizing<String>> {
         self.conf.decrypted_token()
+    }
+
+    /// Returns the short-lived token decrypted
+    fn use_short_lived_token(&self) -> errors::Result<Zeroizing<String>> {
+        self.conf.decrypted_short_lived_token()
     }
 
     async fn do_execute(&self) -> errors::Result<SyncStatus> {
@@ -142,10 +120,30 @@ impl Synchronizer {
         let version_local = self.version_local.clone();
         let last_sync_version = self.last_sync_version.clone();
         let mut client = self.client_factory.create();
-        client.header("Authorization", &format!("Bearer {}", self.use_token()?.as_str()));
+        client.header("Authorization", &format!("Bearer {}", self.use_short_lived_token()?.as_str()));
         let server_version = Self::get_version(&mut client).await?;
         let synchronizer_action = asynch::synchronizer_action(&server_version, &file_name, &saved_at_local, &version_local, &last_sync_version)?;
         Self::parse_synchronizer_action(synchronizer_action, &file_name, &mut client, version_local, saved_at_local).await
+    }
+
+    async fn get_short_lived_token(&self) -> errors::Result<Zeroizing<String>> {
+        let mut client = self.client_factory.create();
+        debug!("DBX: Retrieving a short-lived token");
+
+        let post_body: Vec<u8> = format!("grant_type=refresh_token&refresh_token={}&client_id={}",
+                                         utf8_percent_encode(&self.use_token()?.as_str(), FRAGMENT),
+                                         APP_KEY).into_bytes();
+
+        let response_bytes = client.post(
+            "https://api.dropbox.com/oauth2/token",
+            &[
+                ("Content-Type", "application/x-www-form-urlencoded"),
+            ],
+            post_body).await?;
+        let response_string = String::from_utf8(response_bytes)?;
+        let dbx_auth_response: DbxAuthResponse = serde_json::from_str(&response_string)?;
+
+        Ok(Zeroizing::new(dbx_auth_response.access_token.clone()))
     }
 
     async fn get_version(client: &mut BoxedRklHttpAsyncClient) -> errors::Result<ServerVersionData> {
@@ -252,7 +250,18 @@ impl Synchronizer {
 
 #[async_trait]
 impl super::AsyncTask for Synchronizer {
-    fn init(&mut self) {}
+    async fn init(&mut self) {
+        match self.get_short_lived_token().await {
+            Ok(short_lived_token) => {
+                if let Err(error) = self.conf.set_short_lived_token(short_lived_token) {
+                    error!("Could not initialize the Dropbox synchronizer: {}", error);
+                }
+            }
+            Err(error) => {
+                error!("Could not initialize the Dropbox synchronizer - error while retrieving short-lived token: {}", error);
+            }
+        }
+    }
 
     async fn execute(&self) -> bool {
         let cloned_tx_ok = self.tx.clone();
@@ -297,8 +306,11 @@ fn create_version_file_locally(version: Option<i64>, last_modified: Option<i64>)
 #[derive(Debug, PartialEq, Clone, Zeroize)]
 #[zeroize(drop)]
 pub struct DropboxConfiguration {
-    /// The token for a dropbox account
+    /// The refresh token for a dropbox account
     pub token: String,
+    /// The short-lived token that is used for dbx API authentication.
+    /// This is retrieved during the dropbox synchronizer intialization and is transient.
+    pub short_lived_token: String,
     token_cryptor: EntryPasswordCryptor,
 }
 
@@ -310,15 +322,26 @@ impl DropboxConfiguration {
         Ok(s)
     }
 
+    /// Encrypts a short_lived_token and sets it to self
+    pub fn set_short_lived_token<T: Into<Zeroizing<String>>>(&mut self, short_lived_token: T) -> errors::Result<()> {
+        self.short_lived_token = self.token_cryptor.encrypt_str(&short_lived_token.into())?;
+        Ok(())
+    }
+
     pub fn decrypted_token(&self) -> errors::Result<Zeroizing<String>> {
         self.token_cryptor.decrypt_str(&self.token).map(|token| Zeroizing::new(token))
     }
 
+    pub fn decrypted_short_lived_token(&self) -> errors::Result<Zeroizing<String>> {
+        self.token_cryptor.decrypt_str(&self.short_lived_token).map(|short_lived_token| Zeroizing::new(short_lived_token))
+    }
+
     pub fn dropbox_url() -> String {
-        let random_bytes = create_random(128);
-        let b64 = base64::encode(&random_bytes);
-        let random_string = utf8_percent_encode(&b64, FRAGMENT).to_string();
-        format!("https://www.dropbox.com/1/oauth2/authorize?client_id={}&response_type=token&redirect_uri=http://localhost:8899&state={}", APP_KEY, random_string)
+        let random_string = create_random_utf_string(128);
+        // PKCE flow
+        format!("https://www.dropbox.com/oauth2/authorize?client_id={}&response_type=code&code_challenge={}&code_challenge_method=plain&code_challenge_method=plain&redirect_uri=http://localhost:8899&token_access_type=offline",
+                APP_KEY,
+                random_string)
     }
 
     /// Creates a TOML table form this NextcloudConfiguration. The resulted table contains the decrypted password.
@@ -348,6 +371,7 @@ impl Default for DropboxConfiguration {
     fn default() -> DropboxConfiguration {
         DropboxConfiguration {
             token: "".to_string(),
+            short_lived_token: "".to_string(),
             token_cryptor: EntryPasswordCryptor::new(),
         }
     }
@@ -370,61 +394,57 @@ pub(crate) fn retrieve_token(url_string: String) -> errors::Result<Zeroizing<Str
         let mut rt = tokio::runtime::Runtime::new().unwrap();
         let f = async {
             // Get the port and state from the URL
-            let (port, state) = parse_url(url_string).unwrap();
+            let (port, code_challenge) = parse_url(url_string).unwrap();
             // The tx to be shared between threads (used by the server function).
             let tx_arc = Arc::new(Mutex::new(tx));
             // The state to be shared between threads (used by the server function).
-            let state_arc = Arc::new(state);
+            let code_challenge_arc = Arc::new(code_challenge);
             // The server function
             let make_svc = make_service_fn(move |_socket: &AddrStream| {
                 let shared_tx = tx_arc.clone();
-                let shared_state = state_arc.clone();
+                let shared_code_challenge = code_challenge_arc.clone();
                 async move {
                     let shared_tx = shared_tx.clone();
-                    let shared_state = shared_state.clone();
+                    let shared_code_challenge = shared_code_challenge.clone();
                     Ok::<_, Infallible>({
                         let shared_tx = shared_tx.clone();
-                        let shared_state = shared_state.clone();
+                        let shared_code_challenge = shared_code_challenge.clone();
                         service_fn(move |req: Request<Body>| {
                             let shared_tx = shared_tx.clone();
-                            let shared_state = shared_state.clone();
+                            let shared_code_challenge = shared_code_challenge.clone();
                             async move {
                                 let shared_tx = shared_tx.clone();
-                                let shared_state = shared_state.clone();
+                                let shared_code_challenge = shared_code_challenge.clone();
                                 Ok::<_, Infallible>({
                                     let resp_builder = Response::builder();
 
                                     if req.method() == &hyper::Method::GET {
-                                        // Something like http://localhost:8899/#access_token=blabla&token_type=bearer&state=blabla&uid=blabla&account_id=blabla
-                                        resp_builder.status(StatusCode::OK).body(Body::from(HTTP_GET_RESPONSE_BODY)).unwrap()
+                                        let code = parse_get_uri(req.uri()).unwrap();
+                                        let reqwest_client_factory = Box::new(ReqwestClientFactory::new());
+                                        let mut client = reqwest_client_factory.create();
+
+                                        match get_refresh_token(&code, &shared_code_challenge, &mut client).await {
+                                            Ok(short_lived_token) => {
+                                                client.post(&format!("http://localhost:{}/", port), &[], short_lived_token.to_string().into_bytes()).await.unwrap();
+                                                resp_builder.status(StatusCode::OK).body(Body::from(HTTP_GET_RESPONSE_BODY)).unwrap()
+                                            }
+                                            Err(error) => {
+                                                let message = format!("Error while retrieving the dropbox short lived token: {}", error);
+                                                error!("{}", message);
+                                                resp_builder.status(StatusCode::BAD_REQUEST).body(Body::from(message)).unwrap()
+                                            }
+                                        }
                                     } else if req.method() == &hyper::Method::POST {
-                                        // The post body should be like:
-                                        // tkninput=%23access_token%thisisatoken%26token_type%3Dbearer%26state%3DmiRHqBMRYjKMd089A4904USkjjrV7uh7mrrFaU1MrtXQPstDuf4ojC2bFQjkS83kslXrlhksomcopvFHV6e0BF7Ta6c4D1sDsOhYA864b6rwrqJlZzJZ%2B%252FpUeaQ4NvpP1tV%252FhCqUqdj5juK1h49x5DbCYNQMe54DeZe5XBPYl%2Bs%253D%26uid%3D1417302560%26account_id%3Ddbid%253AAAABRSgfZEneZO8ogIDXa0EH3BdpFWNRVc0
-                                        // let shared_tx_2 = shared_tx.clone();
-                                        // let shared_state_2 = shared_state.clone();
                                         let error_message = format!("Could not get the body of the request to {}. Using an empty body instead.", req.uri());
                                         let v = req_to_body(req).await.unwrap_or_else(move |error| {
                                             error!("{} {}", error_message, error);
                                             Vec::new()
                                         });
-                                        let bdy = String::from_utf8(v).unwrap();
-                                        let raw_fragment = bdy.replace("tkninput=%23", "");
-                                        let fragment = percent_decode(raw_fragment.as_bytes())
-                                            .decode_utf8().unwrap()
-                                            .to_string();
-                                        let (found_token, found_state) = retrieve_token_and_state_from_post_body(&fragment).unwrap();
-                                        let decoded_state = percent_decode(found_state.as_bytes())
-                                            .decode_utf8().unwrap()
-                                            .to_string();
-
+                                        let found_token = String::from_utf8(v).unwrap();
                                         let tx = shared_tx.lock().unwrap();
-                                        if &shared_state.to_string() == &decoded_state {
-                                            let _ = tx.send(Ok(found_token));
-                                        } else {
-                                            let _ = tx.send(Err(RustKeylockError::GeneralError(format!("Invalid request state. Expected: {}, found: {}", &shared_state.to_string(), decoded_state))));
-                                        }
+                                        let _ = tx.send(Ok(Zeroizing::new(found_token)));
 
-                                        resp_builder.status(StatusCode::OK).body(Body::from(HTTP_POST_RESPONSE_BODY)).unwrap()
+                                        resp_builder.status(StatusCode::OK).body(Body::empty()).unwrap()
                                     } else {
                                         let tx = shared_tx.lock().unwrap();
                                         let _ = tx.send(Err(RustKeylockError::GeneralError("error".to_string())));
@@ -469,13 +489,13 @@ fn parse_url(url_string: String) -> errors::Result<(u16, String)> {
     let url = Url::parse(&url_string)?;
     let mut port = 8899;
     let mut redirect_url_string = "".to_string();
-    let mut state = "".to_string();
+    let mut code_challenge = "".to_string();
 
     for pair in url.query_pairs() {
         if &pair.0 == "redirect_uri" {
             redirect_url_string = pair.1.to_string();
-        } else if &pair.0 == "state" {
-            state = pair.1.to_string().replace(' ', "+")
+        } else if &pair.0 == "code_challenge" {
+            code_challenge = pair.1.to_string().replace(' ', "+")
         }
     }
 
@@ -484,34 +504,57 @@ fn parse_url(url_string: String) -> errors::Result<(u16, String)> {
         port = redirect_url.port().unwrap_or(8899);
     }
 
-    Ok((port, state))
+    Ok((port, code_challenge))
 }
 
-fn retrieve_token_and_state_from_post_body(post_body: &str) -> errors::Result<(Zeroizing<String>, Zeroizing<String>)> {
-    let access_token_tups: Vec<(&str, &str)> = post_body.split('&')
-        .map(|s| {
-            let v: Vec<&str> = s.splitn(2, '=').collect();
-            v
+fn parse_get_uri(uri: &Uri) -> errors::Result<Zeroizing<String>> {
+    let params: HashMap<String, String> = uri
+        .query()
+        .map(|v| {
+            url::form_urlencoded::parse(v.as_bytes())
+                .into_owned()
+                .collect()
         })
-        .map(|elems| {
-            if elems.len() == 2 {
-                (elems.get(0).unwrap().clone(), elems.get(1).unwrap().clone())
-            } else {
-                ("", "")
-            }
-        })
-        .filter(|tup| tup.0 == "access_token" || tup.0 == "state")
-        .collect();
-    let mut access_token = Zeroizing::new("".to_string());
-    let mut state = Zeroizing::new("".to_string());
-    for tup in access_token_tups {
-        if tup.0 == "access_token" {
-            access_token = Zeroizing::new(tup.1.to_string());
-        } else if tup.0 == "state" {
-            state = Zeroizing::new(tup.1.to_string());
-        }
-    }
-    Ok((access_token, state))
+        .unwrap_or_else(HashMap::new);
+    let code = Zeroizing::new(params.get("code").map(|s| s.to_owned()).unwrap_or_else(String::new));
+
+    Ok(code)
+}
+
+async fn get_refresh_token(code: &str, code_challenge: &str, client: &mut BoxedRklHttpAsyncClient) -> errors::Result<Zeroizing<String>> {
+    debug!("DBX: Retrieving a refresh token");
+
+    let post_body: Vec<u8> = format!("code={}&grant_type=authorization_code&redirect_uri=http://localhost:8899&code_verifier={}&client_id={}",
+                                     utf8_percent_encode(&code, FRAGMENT),
+                                     utf8_percent_encode(&code_challenge, FRAGMENT),
+                                     APP_KEY).into_bytes();
+
+    let response_bytes = client.post(
+        "https://api.dropbox.com/oauth2/token",
+        &[
+            ("Content-Type", "application/x-www-form-urlencoded"),
+        ],
+        post_body).await?;
+    let response_string = String::from_utf8(response_bytes)?;
+    let dbx_auth_response: DbxAuthResponse = serde_json::from_str(&response_string)?;
+
+    Ok(Zeroizing::new(dbx_auth_response.refresh_token.clone()))
+}
+
+#[derive(Serialize, Deserialize, Debug, Zeroize)]
+#[zeroize(drop)]
+struct DbxAuthResponse {
+    access_token: String,
+    token_type: String,
+    #[serde(default)]
+    uid: String,
+    #[serde(default)]
+    account_id: String,
+    #[serde(default)]
+    scope: String,
+    expires_in: isize,
+    #[serde(default)]
+    refresh_token: String,
 }
 
 #[cfg(test)]
@@ -520,6 +563,7 @@ mod dropbox_tests {
     use std::sync::mpsc;
     use std::thread;
     use std::time;
+    use std::str::FromStr;
 
     use async_trait::async_trait;
     use hyper::{Client, Method, Request};
@@ -634,7 +678,16 @@ mod dropbox_tests {
 
     #[test]
     fn dbx_url() {
-        assert!(DropboxConfiguration::dropbox_url().starts_with("https://www.dropbox.com/1/oauth2/authorize?client_id=7git6ovjwtdbfvm&response_type=token&redirect_uri=http://localhost:8899&"))
+        assert!(DropboxConfiguration::dropbox_url().starts_with("https://www.dropbox.com/oauth2/authorize?client_id=7git6ovjwtdbfvm&response_type=code&code_challenge="))
+    }
+
+    #[test]
+    fn parse_a_get_uri() {
+        let res = parse_get_uri(&Uri::from_str("/?state=a%2Fstate%3D&code=acode").unwrap());
+        assert!(res.is_ok());
+        let (code, state) = res.unwrap();
+        assert!(&code.as_str() == &"acode");
+        assert!(&state.as_str() == &"a/state=");
     }
 
     #[test]

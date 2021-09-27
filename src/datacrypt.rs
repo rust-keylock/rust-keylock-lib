@@ -399,6 +399,15 @@ pub fn create_random(size: usize) -> Vec<u8> {
     random
 }
 
+/// Creates a random String with the given size
+pub fn create_random_utf_string(size: usize) -> String {
+    repeat(())
+        .map(|()| thread_rng().sample(rand::distributions::Alphanumeric))
+        .map(char::from)
+        .take(size)
+        .collect()
+}
+
 fn extract_bytes_to_decrypt(input_bytes: &[u8], salt_position: usize) -> Vec<u8> {
     let bytes = Vec::from(input_bytes);
     // Check whether the salt exists between the data.
