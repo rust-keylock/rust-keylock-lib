@@ -339,7 +339,7 @@ impl DropboxConfiguration {
     pub fn dropbox_url() -> String {
         let random_string = create_random_utf_string(128);
         // PKCE flow
-        format!("https://www.dropbox.com/oauth2/authorize?client_id={}&response_type=code&code_challenge={}&code_challenge_method=plain&code_challenge_method=plain&redirect_uri=http://localhost:8899&token_access_type=offline",
+        format!("https://www.dropbox.com/oauth2/authorize?client_id={}&response_type=code&code_challenge={}&code_challenge_method=plain&redirect_uri=http://localhost:8899&token_access_type=offline",
                 APP_KEY,
                 random_string)
     }
@@ -422,18 +422,7 @@ pub(crate) fn retrieve_token(url_string: String) -> errors::Result<Zeroizing<Str
                                         let code = parse_get_uri(req.uri()).unwrap();
                                         let reqwest_client_factory = Box::new(ReqwestClientFactory::new());
                                         let mut client = reqwest_client_factory.create();
-
-                                        match get_refresh_token(&code, &shared_code_challenge, &mut client).await {
-                                            Ok(short_lived_token) => {
-                                                client.post(&format!("http://localhost:{}/", port), &[], short_lived_token.to_string().into_bytes()).await.unwrap();
-                                                resp_builder.status(StatusCode::OK).body(Body::from(HTTP_GET_RESPONSE_BODY)).unwrap()
-                                            }
-                                            Err(error) => {
-                                                let message = format!("Error while retrieving the dropbox short lived token: {}", error);
-                                                error!("{}", message);
-                                                resp_builder.status(StatusCode::BAD_REQUEST).body(Body::from(message)).unwrap()
-                                            }
-                                        }
+                                        handle_get(&code, &shared_code_challenge, &mut client, port).await
                                     } else if req.method() == &hyper::Method::POST {
                                         let error_message = format!("Could not get the body of the request to {}. Using an empty body instead.", req.uri());
                                         let v = req_to_body(req).await.unwrap_or_else(move |error| {
@@ -479,6 +468,21 @@ pub(crate) fn retrieve_token(url_string: String) -> errors::Result<Zeroizing<Str
     let _ = tx_shutdown.send(());
 
     rec
+}
+
+async fn handle_get(code: &str, shared_code_challenge: &str, client: &mut BoxedRklHttpAsyncClient, port: u16) -> Response<Body> {
+    let resp_builder = Response::builder();
+    match get_refresh_token(code, shared_code_challenge, client).await {
+        Ok(short_lived_token) => {
+            client.post(&format!("http://localhost:{}/", port), &[], short_lived_token.to_string().into_bytes()).await.unwrap();
+            resp_builder.status(StatusCode::OK).body(Body::from(HTTP_GET_RESPONSE_BODY)).unwrap()
+        }
+        Err(error) => {
+            let message = format!("Error while retrieving the dropbox short lived token: {}", error);
+            error!("{}", message);
+            resp_builder.status(StatusCode::BAD_REQUEST).body(Body::from(message)).unwrap()
+        }
+    }
 }
 
 async fn req_to_body(req: Request<Body>) -> errors::Result<Vec<u8>> {
@@ -580,39 +584,17 @@ mod dropbox_tests {
     }
 
     #[test]
-    fn retrieve_a_token_and_a_state_from_post_body() {
-        let res = retrieve_token_and_state_from_post_body("access_token=mytoken&token_type=bearer&state=mystate&uid=myuid&account_id=myaccountid");
-        let (token, state) = res.unwrap();
-        assert!(token.as_str() == "mytoken");
-        assert!(state.as_str() == "mystate");
-    }
-
-    #[test]
-    fn parse_token_and_state() {
-        let token = "abcdefghijklmnopqrstuvwxyz-_123:4567890";
-        let post_body = format!("access_token={}&token_type=bearer&state=mystate&uid=myuid&account_id=myaccountid", token);
-        let res = retrieve_token_and_state_from_post_body(&post_body);
-        let (token, state) = res.unwrap();
-        assert!(token.as_str() == token.as_str());
-        assert!(state.as_str() == "mystate");
-    }
-
-    #[test]
-    fn token_retrieval_success_and_failure() {
-        retrieval_success();
-        retrieval_failure();
-    }
-
-    fn retrieval_success() {
+    fn token_retrieval_success() {
         let mut rt = tokio::runtime::Runtime::new().unwrap();
         let (tx, rx) = mpsc::channel();
-        // The state
-        let state = "cyrNicoWwMP%2FVKd%2FwunLPVO6ZU+D4UwQQ9BDeckxJwL5vlQGDf4Kt2J49bfJ+V3qnI7TTtLq3PZRJY9Sn0p3S4EfYBNSPtdIHNWsSLoFz7u1FnVXbOdfjrjybKLusY4Eu+usJP+e86tnJi4lCDrYXy6O7hMZZmAvj1%2FmykZhgmQ";
+        // The code_challenge
+        let code_challenge = "AAO6fShhDBAAAAAAAAABPuYM0gnquccZyc1c9LfQI3Y";
         // The redirect URI that is included in the request to dropbox
-        let redirect_uri = format!("http://localhost:8899&state={}", state);
-        let redirect_uri_clone = redirect_uri.clone();
+        let redirect_uri = format!("http://localhost:8899&code_challenge={}", code_challenge);
         thread::spawn(move || {
-            let url_string = format!("https://www.dropbox.com/1/oauth2/authorize?client_id=7git6ovjwtdbfvm&response_type=token&redirect_uri={}", redirect_uri_clone);
+            let url_string = format!("https://www.dropbox.com/oauth2/authorize?client_id={}&response_type=code&code_challenge={}&code_challenge_method=plain&token_access_type=offline",
+                                     APP_KEY,
+                                     redirect_uri);
             let token_res = retrieve_token(url_string);
             let _ = tx.send(token_res);
         });
@@ -621,9 +603,9 @@ mod dropbox_tests {
 
         // Send the HTTP POST request
         let client = Client::new();
-        let uri: hyper::Uri = "http://localhost:8899/".parse().unwrap();
-        let post_body = format!("tkninput=%23access_token%3DAHO6fSqhEBAAAAAAAAAAZeiCpsEkwQSDd4bgz3vOWTsx2RnZ1uQ2NyS5N315lGRq%26token_type%3Dbearer%26state%3D{}%26uid%3D1417302560%26account_id%3Ddbid%253AAAABRSgfZEneZO8ogIDXa0EH3BdpFWNRVc0", state);
-        let mut req = Request::new(Body::from(post_body));
+        let refresh_token = "a-refresh-token-generated-by-drobpox-servers";
+        let uri: hyper::Uri = format!("http://localhost:8899/").parse().unwrap();
+        let mut req = Request::new(Body::from(refresh_token));
         *req.method_mut() = Method::POST;
         *req.uri_mut() = uri.clone();
 
@@ -637,43 +619,57 @@ mod dropbox_tests {
 
         // Wait for the token from the retrieve_token function (it is spawned above)
         let res = rx.recv_timeout(time::Duration::from_millis(10000));
-        assert!(res.unwrap().is_ok());
+        assert!(res.is_ok());
+        let res = res.unwrap();
+        assert!(res.is_ok());
+        let token = res.unwrap().to_string();
+        assert!(token == refresh_token);
     }
 
-    fn retrieval_failure() {
+    #[test]
+    fn test_handle_get_success() {
         let mut rt = tokio::runtime::Runtime::new().unwrap();
-        let (tx, rx) = mpsc::channel();
-        // The state
-        let state = "astate";
-        // The redirect URI that is included in the request to dropbox
-        let redirect_uri = format!("http://localhost:8899&state={}", state);
-        let redirect_uri_clone = redirect_uri.clone();
-        thread::spawn(move || {
-            let url_string = format!("https://www.dropbox.com/1/oauth2/authorize?client_id=7git6ovjwtdbfvm&response_type=token&redirect_uri={}", redirect_uri_clone);
-            let token_res = retrieve_token(url_string);
-            let _ = tx.send(token_res);
-        });
-        // Sleep to give time to the server to start
-        thread::sleep(time::Duration::from_millis(1000));
+        let code = "acode";
+        let code_challenge = "acode_challenge";
+        let port = 8899;
+        let mut client = Box::new(AlwaysSuccessfulHttpClient::new());
+        // Client initialization: This is the post response from the local temporary server
+        client.add_response(Vec::new());
+        // Client initialization: This is the response from the dropbox servers
+        let json_response: Vec<u8> = r#"{
+                                    "uid": "123",
+                                    "access_token": "an.access-token",
+                                    "expires_in": 14399,
+                                    "token_type": "bearer",
+                                    "scope": "scope1 scope2",
+                                    "refresh_token": "a-refresh-token",
+                                    "account_id": "dbid:MYACCOUNTID"
+                                    }"#.to_owned().into_bytes();
+        client.add_response(json_response);
+        let mut dyn_client = client as BoxedRklHttpAsyncClient;
+        let response = rt.block_on(handle_get(code, code_challenge, &mut dyn_client, port));
+        assert!(response.status().is_success());
+    }
 
-        // Send the HTTP POST request
-        let client = Client::new();
-        let uri: hyper::Uri = "http://localhost:8899/".parse().unwrap();
-        let invalid_state = "anotherstate";
-        let post_body = format!("tkninput=%23access_token%3DAHO6fSqhEBAAAAAAAAAAZeiCpsEkwQSDd4bgz3vOWTsx2RnZ1uQ2NyS5N315lGRq%26token_type%3Dbearer%26state%3D{}%26uid%3D1417302560%26account_id%3Ddbid%253AAAABRSgfZEneZO8ogIDXa0EH3BdpFWNRVc0", invalid_state);
-        let mut req = Request::new(Body::from(post_body));
-        *req.method_mut() = Method::POST;
-        *req.uri_mut() = uri.clone();
-
-        let response = rt.block_on(client.request(req));
-        if response.is_ok() {
-            println!("POST Response OK: {:?}", response.unwrap());
-        } else {
-            println!("POST Response Error: {:?}", response.unwrap_err());
-        }
-        // Wait for the token from the retrieve_token function (it is spawned above)
-        let res = rx.recv_timeout(time::Duration::from_millis(10000));
-        assert!(res.unwrap().is_err());
+    #[test]
+    fn test_handle_get_failure_on_dbx_token_api_call() {
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let code = "acode";
+        let code_challenge = "acode_challenge";
+        let port = 8899;
+        let mut client = Box::new(AlwaysSuccessfulHttpClient::new());
+        // Client initialization: This is the post response from the local temporary server
+        client.add_response(Vec::new());
+        // Client initialization: This is the response from the dropbox servers.
+        // It is a wrong JSON to force a failure
+        let json_response: Vec<u8> = r#"{
+                                    "uid": "123",
+                                    "account_id": "dbid:MYACCOUNTID"
+                                    }"#.to_owned().into_bytes();
+        client.add_response(json_response);
+        let mut dyn_client = client as BoxedRklHttpAsyncClient;
+        let response = rt.block_on(handle_get(code, code_challenge, &mut dyn_client, port));
+        assert!(response.status().is_client_error());
     }
 
     #[test]
@@ -683,11 +679,11 @@ mod dropbox_tests {
 
     #[test]
     fn parse_a_get_uri() {
-        let res = parse_get_uri(&Uri::from_str("/?state=a%2Fstate%3D&code=acode").unwrap());
+        let test_code = "AHO6fSqhEBAAAAAAAAABPuYM0gnquccZyc1c3LfQI1Y";
+        let res = parse_get_uri(&Uri::from_str(&format!("/?code={}", test_code)).unwrap());
         assert!(res.is_ok());
-        let (code, state) = res.unwrap();
-        assert!(&code.as_str() == &"acode");
-        assert!(&state.as_str() == &"a/state=");
+        let code = res.unwrap();
+        assert!(code.as_str() == test_code);
     }
 
     #[test]
