@@ -1,4 +1,4 @@
-[![Build Status](https://travis-ci.org/rust-keylock/rust-keylock-lib.svg?branch=master)](https://travis-ci.org/rust-keylock/rust-keylock-lib)
+[![Build Status](https://travis-ci.com/rust-keylock/rust-keylock-lib.svg?branch=master)](https://travis-ci.com/rust-keylock/rust-keylock-lib)
 [![crates.io](https://img.shields.io/crates/v/rust_keylock.svg)](https://crates.io/crates/rust_keylock)
 [![codecov](https://codecov.io/gh/rust-keylock/rust-keylock-lib/branch/master/graph/badge.svg)](https://codecov.io/gh/rust-keylock/rust-keylock-lib)
 
