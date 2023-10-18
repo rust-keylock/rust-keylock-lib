@@ -1010,8 +1010,7 @@ mod nextcloud_tests {
     #[test]
     fn parse_xml_success() {
         let filename = "afilename";
-        let xml = format!(r#"
-                            <?xml version="1.0"?>
+        let xml = format!(r#"<?xml version="1.0"?>
                             <d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">
                              <d:response>
                               <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/{}</d:href>
@@ -1039,8 +1038,7 @@ mod nextcloud_tests {
     fn parse_xml_error_no_file_is_present() {
         let filename = "afilename";
         // The file element is not present
-        let xml = r#"
-                            <?xml version="1.0"?>
+        let xml = r#"<?xml version="1.0"?>
                             <d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">
                              <d:response>
                               <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/</d:href>
@@ -1069,8 +1067,7 @@ mod nextcloud_tests {
     fn parse_xml_error_not_all_elements_are_present() {
         let filename = "afilename";
         // The oc:rklsavedat element is not present
-        let xml = format!(r#"
-                            <?xml version="1.0"?>
+        let xml = format!(r#"<?xml version="1.0"?>
                             <d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">
                              <d:response>
                               <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/{}</d:href>
@@ -1091,8 +1088,7 @@ mod nextcloud_tests {
     #[test]
     fn parse_xml_error_in_web_dav_response() {
         let filename = "afilename";
-        let xml = format!(r#"
-                            <?xml version="1.0"?>
+        let xml = format!(r#"<?xml version="1.0"?>
                             <d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">
                              <d:response>
                               <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/{}</d:href>
@@ -1140,8 +1136,7 @@ mod nextcloud_tests {
 
         if req.method() == &hyper::Method::from_bytes("PROPFIND".as_ref()).unwrap() {
             let _ = tx_assert.send(true);
-            let xml = r#"
-                                <?xml version="1.0"?>
+            let xml = r#"<?xml version="1.0"?>
                                 <d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">
                                  <d:response>
                                   <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/download_a_file_from_the_server</d:href>
@@ -1216,8 +1211,7 @@ mod nextcloud_tests {
 
         if req.method() == &hyper::Method::from_bytes("PROPFIND".as_ref()).unwrap() {
             let _ = tx_assert.send(true);
-            let xml = r#"
-                                <?xml version="1.0"?>
+            let xml = r#"<?xml version="1.0"?>
                                 <d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">
                                  <d:response>
                                   <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/http_error_response_on_get</d:href>

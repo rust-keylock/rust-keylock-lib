@@ -10,7 +10,7 @@ repository = "https://github.com/rust-keylock/rust-keylock-lib"
 homepage = "https://rust-keylock.github.io/"
 readme = "README.md"
 categories = ["cryptography", "authentication"]
-edition = "2018"
+edition = "2021"
 
 [badges]
 travis-ci = { repository = "rust-keylock/rust-keylock-lib", branch = "master" }

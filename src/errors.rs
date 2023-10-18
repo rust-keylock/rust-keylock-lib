@@ -67,12 +67,12 @@ impl fmt::Display for RustKeylockError {
 impl Error for RustKeylockError {
     fn description(&self) -> &str {
         match *self {
-            RustKeylockError::GeneralError(_) => ("General error occured"),
-            RustKeylockError::ParseError(_) => ("Error during parsing"),
-            RustKeylockError::DecryptionError(_) => ("Error during decryption"),
-            RustKeylockError::EncryptionError(_) => ("Error during encryption"),
-            RustKeylockError::SyncError(_) => ("Error while synchronizing"),
-            RustKeylockError::HttpError(_) => ("Error while executing HTTP operations"),
+            RustKeylockError::GeneralError(_) => "General error occured",
+            RustKeylockError::ParseError(_) => "Error during parsing",
+            RustKeylockError::DecryptionError(_) => "Error during decryption",
+            RustKeylockError::EncryptionError(_) => "Error during encryption",
+            RustKeylockError::SyncError(_) => "Error while synchronizing",
+            RustKeylockError::HttpError(_) => "Error while executing HTTP operations",
         }
     }
 }

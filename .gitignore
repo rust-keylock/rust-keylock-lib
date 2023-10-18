@@ -16,3 +16,10 @@ Cargo.lock
 
 /.idea/
 /rust-keylock-lib.iml
+
+# VSCode
+/rust-keylock-lib
+/.vscode
+
+# Other
+*.ods
