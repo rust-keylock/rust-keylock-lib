@@ -21,11 +21,10 @@ use std::iter::repeat;
 use std::thread;
 use std::thread::JoinHandle;
 
-use aes::Aes256Ctr;
-use ctr::cipher::generic_array::GenericArray;
+use aes::Aes256;
 use base64;
 use bcrypt::bcrypt;
-use aes::cipher::{NewCipher, StreamCipher};
+use aes::cipher::{KeyIvInit, StreamCipher, generic_array::GenericArray};
 use hkdf::Hkdf;
 use rand::{thread_rng, Rng, RngCore};
 use sha2::Sha256;
@@ -36,7 +35,7 @@ use super::errors::{self, RustKeylockError};
 use super::protected::RklSecret;
 
 const NUMBER_OF_SALT_KEY_PAIRS: usize = 10;
-
+type Aes256Ctr64LE = ctr::Ctr64LE<Aes256>;
 pub(crate) const BCRYPT_COST: u32 = 7;
 
 pub trait Cryptor {
@@ -153,7 +152,7 @@ impl BcryptAes {
         let mut data: Vec<u8> = encrypted.to_vec();
         let k = GenericArray::from_slice(key);
         let nonce = GenericArray::from_slice(&self.iv);
-        let mut cipher = Aes256Ctr::new(&k, &nonce);
+        let mut cipher = Aes256Ctr64LE::new(&k, &nonce);
         cipher.try_apply_keystream(&mut data)?;
 
         Ok(data)
@@ -163,7 +162,7 @@ impl BcryptAes {
         let mut data: Vec<u8> = plain.to_vec();
         let k = GenericArray::from_slice(key);
         let nonce = GenericArray::from_slice(iv);
-        let mut cipher = Aes256Ctr::new(&k, &nonce);
+        let mut cipher = Aes256Ctr64LE::new(&k, &nonce);
         cipher.try_apply_keystream(&mut data)?;
 
         Ok(data)
@@ -309,7 +308,7 @@ impl Cryptor for EntryPasswordCryptor {
         let mut data: Vec<u8> = input.to_vec();
         let k = GenericArray::from_slice(&self.key.borrow());
         let nonce = GenericArray::from_slice(&self.iv);
-        let mut cipher = Aes256Ctr::new(&k, &nonce);
+        let mut cipher: aes::cipher::StreamCipherCoreWrapper<ctr::CtrCore<Aes256, ctr::flavors::Ctr64LE>> = Aes256Ctr64LE::new(&k, &nonce);
         cipher.try_apply_keystream(&mut data)?;
 
         Ok(data)
@@ -319,7 +318,7 @@ impl Cryptor for EntryPasswordCryptor {
         let mut data: Vec<u8> = input.to_vec();
         let k = GenericArray::from_slice(&self.key.borrow());
         let nonce = GenericArray::from_slice(&self.iv);
-        let mut cipher = Aes256Ctr::new(&k, &nonce);
+        let mut cipher = Aes256Ctr64LE::new(&k, &nonce);
         cipher.try_apply_keystream(&mut data)?;
 
         Ok(data)

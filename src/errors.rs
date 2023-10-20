@@ -26,7 +26,7 @@ use std::num::ParseIntError;
 use std::string::FromUtf8Error;
 use std::sync::mpsc::{RecvError, RecvTimeoutError, SendError};
 use toml;
-use aes::cipher::errors::LoopError;
+use aes::cipher::StreamCipherError;
 use url;
 use tokio;
 use futures::channel::oneshot::Canceled;
@@ -155,8 +155,8 @@ impl From<RecvTimeoutError> for RustKeylockError {
     }
 }
 
-impl From<LoopError> for RustKeylockError {
-    fn from(err: LoopError) -> RustKeylockError {
+impl From<StreamCipherError> for RustKeylockError {
+    fn from(err: StreamCipherError) -> RustKeylockError {
         RustKeylockError::EncryptionError(format!("{:?}", err))
     }
 }

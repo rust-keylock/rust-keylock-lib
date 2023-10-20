@@ -1,6 +1,6 @@
 [package]
 name = "rust_keylock"
-version = "0.14.0"
+version = "0.15.0"
 authors = ["aston <astonbitecode@gmail.com>"]
 description = "A password manager with goals to be Secure, Simple to use, Portable and Extensible"
 keywords = ["password", "manager", "safe", "encryption", "key"]
@@ -20,9 +20,8 @@ name = "rust_keylock"
 crate-type = ["rlib", "dylib"]
 
 [dependencies]
-ctr = "0.8"
-aes = { version = "0.7", features = ["ctr"] }
-block-modes = "0.8"
+ctr = "0.9"
+aes = "0.8"
 sha2 = "0.9"
 sha3 = "0.9"
 hkdf = "0.11"
