@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use std::io::prelude::*;
 use std::sync::mpsc::SyncSender;
 
-use base64;
+use base64::{Engine as _, engine::general_purpose};
 use http::StatusCode;
 use hyper::{self, Body, Client, Request, Response};
 use hyper::header;
@@ -540,7 +540,7 @@ struct WebDavResponse {
 }
 
 fn basic_auth(username: &str, password: &str) -> String {
-    let encoded = base64::encode(&format!("{}:{}", username, password));
+    let encoded = general_purpose::STANDARD.encode(&format!("{}:{}", username, password));
     format!("Basic {}", encoded)
 }
 

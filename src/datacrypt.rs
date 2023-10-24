@@ -22,7 +22,7 @@ use std::thread;
 use std::thread::JoinHandle;
 
 use aes::Aes256;
-use base64;
+use base64::{Engine as _, engine::general_purpose};
 use bcrypt::bcrypt;
 use aes::cipher::{KeyIvInit, StreamCipher, generic_array::GenericArray};
 use hkdf::Hkdf;
@@ -74,8 +74,7 @@ impl BcryptAes {
     fn create_key(input: &[u8], salt: &[u8], cost: u32, output_bytes_size: i32) -> Vec<u8> {
         let mut key: Vec<u8> = Vec::new();
 
-        let mut ikm: Vec<u8> = repeat(0u8).take(24).collect();
-        bcrypt(cost, &salt, input, &mut ikm);
+        let ikm = bcrypt(cost, salt[0..16].try_into().expect(&format!("The salt for bcrypt operation was expected to be of size 16 but was {}", salt.len())), input);
 
         let info = b"rust-keylock";
 
@@ -272,8 +271,10 @@ impl EntryPasswordCryptor {
         // Create a salt
         let salt = create_random(16);
         // Generate a key
-        let mut key: Vec<u8> = create_random(24);
-        bcrypt(3, &salt, &password, &mut key);
+        let mut key = bcrypt(
+            3, 
+            salt[0..16].try_into().expect(&format!("The salt for bcrypt operation was expected to be of size 16 but was {}", salt.len())), 
+            &password).to_vec();
         let append_to_key: Vec<u8> = repeat(0u8).take(8).collect();
         key.extend(append_to_key.iter());
         // Create and return the EntryPasswordCryptor
@@ -286,12 +287,12 @@ impl EntryPasswordCryptor {
     /// Gets a String input and returns it encrypted and Base64-encoded
     pub fn encrypt_str(&self, input: &str) -> Result<String, RustKeylockError> {
         let encrypted = self.encrypt(input.as_bytes())?;
-        Ok(base64::encode(&encrypted))
+        Ok(general_purpose::STANDARD.encode(&encrypted))
     }
 
     /// Gets a Base64-encoded String input and returns it decrypted
     pub fn decrypt_str(&self, input: &str) -> Result<String, RustKeylockError> {
-        let encrypted = base64::decode(&input)?;
+        let encrypted = general_purpose::STANDARD.decode(&input)?;
         let decrypted_bytes = self.decrypt(&encrypted)?;
         Ok(String::from_utf8(decrypted_bytes)?)
     }

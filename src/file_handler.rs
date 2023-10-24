@@ -138,8 +138,8 @@ pub(crate) fn load(filename: &str, cryptor: &dyn Cryptor, use_default_location: 
         toml_path(filename)
     };
     debug!("Full Path to load: {:?}", full_path);
-    let toml = load_existing_file(&full_path, Some(cryptor))?;
-    let value = toml.as_str().parse::<Value>()?;
+    let toml_string = load_existing_file(&full_path, Some(cryptor))?;
+    let value: Value = toml::from_str(&toml_string)?;
     match value.as_table() {
         Some(table) => {
             let entries = transform_to_dtos(table, false)?;
@@ -524,11 +524,11 @@ pub(crate) fn save(rkl_content: RklContent, filename: &str, cryptor: &dyn Crypto
         "".to_string()
     } else {
         // Workaround https://github.com/alexcrichton/toml-rs/issues/145
-        if let Ok(s) = toml::to_string(&table) {
+        if let Ok(s) = toml::ser::to_string(&table) {
             s
         } else {
             let v = toml::Value::try_from(table)?;
-            toml::to_string(&v)?
+            toml::ser::to_string(&v)?
         }
     };
     let ebytes = cryptor.encrypt(toml_string.as_bytes())?;
