@@ -35,7 +35,7 @@ use super::errors::{self, RustKeylockError};
 use super::protected::RklSecret;
 
 const NUMBER_OF_SALT_KEY_PAIRS: usize = 10;
-type Aes256Ctr64LE = ctr::Ctr64LE<Aes256>;
+type AesCtr = ctr::Ctr64BE<Aes256>;
 pub(crate) const BCRYPT_COST: u32 = 7;
 
 pub trait Cryptor {
@@ -151,7 +151,7 @@ impl BcryptAes {
         let mut data: Vec<u8> = encrypted.to_vec();
         let k = GenericArray::from_slice(key);
         let nonce = GenericArray::from_slice(&self.iv);
-        let mut cipher = Aes256Ctr64LE::new(&k, &nonce);
+        let mut cipher = AesCtr::new(&k, &nonce);
         cipher.try_apply_keystream(&mut data)?;
 
         Ok(data)
@@ -161,7 +161,7 @@ impl BcryptAes {
         let mut data: Vec<u8> = plain.to_vec();
         let k = GenericArray::from_slice(key);
         let nonce = GenericArray::from_slice(iv);
-        let mut cipher = Aes256Ctr64LE::new(&k, &nonce);
+        let mut cipher = AesCtr::new(&k, &nonce);
         cipher.try_apply_keystream(&mut data)?;
 
         Ok(data)
@@ -309,7 +309,7 @@ impl Cryptor for EntryPasswordCryptor {
         let mut data: Vec<u8> = input.to_vec();
         let k = GenericArray::from_slice(&self.key.borrow());
         let nonce = GenericArray::from_slice(&self.iv);
-        let mut cipher: aes::cipher::StreamCipherCoreWrapper<ctr::CtrCore<Aes256, ctr::flavors::Ctr64LE>> = Aes256Ctr64LE::new(&k, &nonce);
+        let mut cipher = AesCtr::new(&k, &nonce);
         cipher.try_apply_keystream(&mut data)?;
 
         Ok(data)
@@ -319,7 +319,7 @@ impl Cryptor for EntryPasswordCryptor {
         let mut data: Vec<u8> = input.to_vec();
         let k = GenericArray::from_slice(&self.key.borrow());
         let nonce = GenericArray::from_slice(&self.iv);
-        let mut cipher = Aes256Ctr64LE::new(&k, &nonce);
+        let mut cipher = AesCtr::new(&k, &nonce);
         cipher.try_apply_keystream(&mut data)?;
 
         Ok(data)
