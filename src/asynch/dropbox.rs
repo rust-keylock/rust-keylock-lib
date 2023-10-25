@@ -391,7 +391,7 @@ pub(crate) fn retrieve_token(url_string: String) -> errors::Result<Zeroizing<Str
 
     // Spawn the server in a different thread
     thread::spawn(move || {
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
         let f = async {
             // Get the port and state from the URL
             let (port, code_challenge) = parse_url(url_string).unwrap();
@@ -585,7 +585,7 @@ mod dropbox_tests {
 
     #[test]
     fn token_retrieval_success() {
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
         let (tx, rx) = mpsc::channel();
         // The code_challenge
         let code_challenge = "AAO6fShhDBAAAAAAAAABPuYM0gnquccZyc1c9LfQI3Y";
@@ -628,7 +628,7 @@ mod dropbox_tests {
 
     #[test]
     fn test_handle_get_success() {
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
         let code = "acode";
         let code_challenge = "acode_challenge";
         let port = 8899;
@@ -653,7 +653,7 @@ mod dropbox_tests {
 
     #[test]
     fn test_handle_get_failure_on_dbx_token_api_call() {
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
         let code = "acode";
         let code_challenge = "acode_challenge";
         let port = 8899;
@@ -741,7 +741,7 @@ mod dropbox_tests {
 
     #[test]
     fn download() {
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
         let mut client = Box::new(TestHttpClient::new());
         client.header("Authorization", "Bearer thisisatoken");
 
@@ -762,7 +762,7 @@ mod dropbox_tests {
 
     #[test]
     fn upload() {
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
         let mut client = Box::new(TestHttpClient::new());
         client.header("Authorization", "Bearer thisisatoken");
 
@@ -786,7 +786,7 @@ mod dropbox_tests {
 
     #[test]
     fn get_version() {
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
         let mut client = Box::new(TestHttpClient::new());
         client.header("Authorization", "Bearer thisisatoken");
 
@@ -811,7 +811,7 @@ mod dropbox_tests {
 
     #[test]
     fn parse_synchronizer_action_download() {
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
         let mut client = Box::new(AlwaysSuccessfulHttpClient::new());
 
         client.add_response(Vec::from("irrelevant"));
@@ -832,7 +832,7 @@ mod dropbox_tests {
 
     #[test]
     fn parse_synchronizer_action_ignore() {
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
         let mut client = Box::new(AlwaysSuccessfulHttpClient::new());
 
         client.add_response(Vec::from("irrelevant"));
@@ -850,7 +850,7 @@ mod dropbox_tests {
 
     #[test]
     fn parse_synchronizer_action_upload() {
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
         file_handler::save_bytes("afile_upload", "123".as_bytes(), false).unwrap();
         file_handler::save_bytes(".version", "123,321".as_bytes(), false).unwrap();
         let mut client = Box::new(AlwaysSuccessfulHttpClient::new());
@@ -874,7 +874,7 @@ mod dropbox_tests {
 
     #[test]
     fn parse_synchronizer_action_download_merge_and_upload() {
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
         let mut client = Box::new(AlwaysSuccessfulHttpClient::new());
         client.add_response(Vec::from("irrelevant"));
 

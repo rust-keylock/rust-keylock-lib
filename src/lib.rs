@@ -1126,7 +1126,7 @@ mod unit_tests {
         }
     }
 
-    #[tokio::test(core_threads = 1)]
+    #[tokio::test]
     async fn test_handle_check_passwords() {
         let mut safe = Safe::default();
 

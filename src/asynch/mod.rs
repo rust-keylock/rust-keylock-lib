@@ -35,7 +35,7 @@ use super::{Editor, Menu, MessageSeverity, Props, UserOption, UserSelection};
 use super::api::UiCommand;
 use super::errors::{self, RustKeylockError};
 
-use tokio::time::delay_for;
+use tokio::time::sleep;
 
 pub mod nextcloud;
 pub mod dropbox;
@@ -69,7 +69,7 @@ pub fn execute_task(task: Box<dyn AsyncTask>, every: time::Duration) -> AsyncTas
             if !cont || force_stop {
                 break;
             }
-            delay_for(every).await;
+            sleep(every).await;
         }
     });
 
@@ -707,7 +707,7 @@ mod async_tests {
         let task = DummyTask { tx };
 
         thread::spawn(|| {
-            let mut rt = tokio::runtime::Runtime::new().unwrap();
+            let rt = tokio::runtime::Runtime::new().unwrap();
             let f = async {
                 let ten_millis = time::Duration::from_millis(10);
                 super::execute_task(Box::new(task), ten_millis)

@@ -741,7 +741,7 @@ mod nextcloud_tests {
         let (tx_assert, rx_assert): (SyncSender<bool>, Receiver<bool>) = mpsc::sync_channel(10);
         set_tx_for("run_col_not_exists", tx_assert);
         thread::spawn(move || {
-            let mut rt = tokio::runtime::Runtime::new().unwrap();
+            let rt = tokio::runtime::Runtime::new().unwrap();
             let f = start_web_dav_server("run_col_not_exists", 8080);
             rt.block_on(f);
         });
@@ -753,7 +753,7 @@ mod nextcloud_tests {
             .unwrap();
 
         thread::spawn(move || {
-            let mut rt = tokio::runtime::Runtime::new().unwrap();
+            let rt = tokio::runtime::Runtime::new().unwrap();
             let sys_config = SystemConfiguration::new(Some(123), Some(1), None);
             let nc = super::Synchronizer::new(&ncc, &sys_config, tx.clone(), filename).unwrap();
             let f = nc.execute();
@@ -787,7 +787,7 @@ mod nextcloud_tests {
         let (tx_assert, rx_assert): (SyncSender<bool>, Receiver<bool>) = mpsc::sync_channel(10);
         set_tx_for("run_download_a_file_from_the_server", tx_assert);
         thread::spawn(move || {
-            let mut rt = tokio::runtime::Runtime::new().unwrap();
+            let rt = tokio::runtime::Runtime::new().unwrap();
             let f = start_web_dav_server("run_download_a_file_from_the_server", 8081);
             rt.block_on(f);
         });
@@ -799,7 +799,7 @@ mod nextcloud_tests {
             .unwrap();
 
         thread::spawn(move || {
-            let mut rt = tokio::runtime::Runtime::new().unwrap();
+            let rt = tokio::runtime::Runtime::new().unwrap();
             let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename).unwrap();
             rt.block_on(nc.execute());
         });
@@ -829,7 +829,7 @@ mod nextcloud_tests {
         let (tx_assert, rx_assert): (SyncSender<bool>, Receiver<bool>) = mpsc::sync_channel(10);
         set_tx_for("run_http_error_response_on_propfind", tx_assert);
         thread::spawn(move || {
-            let mut rt = tokio::runtime::Runtime::new().unwrap();
+            let rt = tokio::runtime::Runtime::new().unwrap();
             let f = start_web_dav_server("run_http_error_response_on_propfind", 8082);
             rt.block_on(f);
         });
@@ -840,7 +840,7 @@ mod nextcloud_tests {
         let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8082".to_string(), "username".to_string(), password.clone(), false)
             .unwrap();
         thread::spawn(move || {
-            let mut rt = tokio::runtime::Runtime::new().unwrap();
+            let rt = tokio::runtime::Runtime::new().unwrap();
             let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename).unwrap();
             rt.block_on(nc.execute());
         });
@@ -866,7 +866,7 @@ mod nextcloud_tests {
         let (tx_assert, rx_assert): (SyncSender<bool>, Receiver<bool>) = mpsc::sync_channel(10);
         set_tx_for("run_http_error_response_on_mkcol", tx_assert);
         thread::spawn(move || {
-            let mut rt = tokio::runtime::Runtime::new().unwrap();
+            let rt = tokio::runtime::Runtime::new().unwrap();
             let f = start_web_dav_server("run_http_error_response_on_mkcol", 8083);
             rt.block_on(f);
         });
@@ -879,7 +879,7 @@ mod nextcloud_tests {
         let sys_config = SystemConfiguration::new(Some(123), Some(1), None);
 
         thread::spawn(move || {
-            let mut rt = tokio::runtime::Runtime::new().unwrap();
+            let rt = tokio::runtime::Runtime::new().unwrap();
             let nc = super::Synchronizer::new(&ncc, &sys_config, tx, filename).unwrap();
             rt.block_on(nc.execute());
         });
@@ -907,7 +907,7 @@ mod nextcloud_tests {
         let (tx_assert, rx_assert): (SyncSender<bool>, Receiver<bool>) = mpsc::sync_channel(10);
         set_tx_for("run_http_error_response_on_put", tx_assert);
         thread::spawn(move || {
-            let mut rt = tokio::runtime::Runtime::new().unwrap();
+            let rt = tokio::runtime::Runtime::new().unwrap();
             let f = start_web_dav_server("run_http_error_response_on_put", 8084);
             rt.block_on(f);
         });
@@ -920,7 +920,7 @@ mod nextcloud_tests {
         let sys_config = SystemConfiguration::new(Some(123), Some(1), None);
 
         thread::spawn(move || {
-            let mut rt = tokio::runtime::Runtime::new().unwrap();
+            let rt = tokio::runtime::Runtime::new().unwrap();
             let nc = super::Synchronizer::new(&ncc, &sys_config, tx, filename).unwrap();
             rt.block_on(nc.execute());
         });
@@ -950,7 +950,7 @@ mod nextcloud_tests {
         let (tx_assert, rx_assert): (SyncSender<bool>, Receiver<bool>) = mpsc::sync_channel(10);
         set_tx_for("run_http_error_response_on_get", tx_assert);
         thread::spawn(move || {
-            let mut rt = tokio::runtime::Runtime::new().unwrap();
+            let rt = tokio::runtime::Runtime::new().unwrap();
             let f = start_web_dav_server("run_http_error_response_on_get", 8085);
             rt.block_on(f);
         });
@@ -961,7 +961,7 @@ mod nextcloud_tests {
         let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8085".to_string(), "username".to_string(), password.clone(), false)
             .unwrap();
         thread::spawn(move || {
-            let mut rt = tokio::runtime::Runtime::new().unwrap();
+            let rt = tokio::runtime::Runtime::new().unwrap();
             let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename).unwrap();
             rt.block_on(nc.execute());
         });
@@ -992,7 +992,7 @@ mod nextcloud_tests {
         let ncc = super::NextcloudConfiguration::new("http://127.0.0.1".to_string(), "username".to_string(), password.clone(), false)
             .unwrap();
         thread::spawn(move || {
-            let mut rt = tokio::runtime::Runtime::new().unwrap();
+            let rt = tokio::runtime::Runtime::new().unwrap();
             let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename).unwrap();
             rt.block_on(nc.execute());
         });
