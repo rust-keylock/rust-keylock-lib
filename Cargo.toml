@@ -1,6 +1,6 @@
 [package]
 name = "rust_keylock"
-version = "0.15.0"
+version = "0.15.1"
 authors = ["aston <astonbitecode@gmail.com>"]
 description = "A password manager with goals to be Secure, Simple to use, Portable and Extensible"
 keywords = ["password", "manager", "safe", "encryption", "key"]
@@ -40,7 +40,7 @@ hyper-tls = "0.5"
 native-tls = "0.2"
 xml-rs = "0.8"
 openssl-probe = "0.1"
-clipboard = "0.5"
+terminal-clipboard = "0.4.1"
 dirs = "3.0"
 tokio = { version = "1", features = ["full"] }
 reqwest = "0.11"

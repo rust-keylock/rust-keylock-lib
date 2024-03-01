@@ -22,7 +22,7 @@
 
 extern crate async_trait;
 extern crate base64;
-extern crate clipboard;
+extern crate terminal_clipboard;
 extern crate dirs;
 extern crate futures;
 extern crate http;

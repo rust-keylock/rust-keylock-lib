@@ -2,7 +2,7 @@ use std::sync::mpsc::{self, Sender};
 use std::sync::Mutex;
 use std::time::SystemTime;
 
-use clipboard::{ClipboardContext, ClipboardProvider};
+use terminal_clipboard;
 
 use rust_keylock::{AllConfigurations, Entry, EntryMeta, EntryPresentationType, Menu, UserOption, UserSelection, execute, Editor, MessageSeverity};
 use rust_keylock::dropbox::DropboxConfiguration;
@@ -440,16 +440,9 @@ fn execute_add_to_clipboard() {
 
     execute(editor);
 
-    match ClipboardProvider::new() as Result<ClipboardContext, Box<dyn std::error::Error>> {
-        Ok(mut ctx) => {
-            let clip_res = ctx.get_contents();
-            assert!(clip_res.is_ok());
-            assert!(clip_res.unwrap() == a_string);
-        }
-        Err(_) => {
-            assert!(true);
-        }
-    }
+    let clip_res = terminal_clipboard::get_string();
+    assert!(clip_res.is_ok());
+    assert!(clip_res.unwrap() == a_string);
 
     let res = rx.recv();
     assert!(res.is_ok() && res.unwrap());
