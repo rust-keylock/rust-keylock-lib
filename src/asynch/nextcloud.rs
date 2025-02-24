@@ -15,25 +15,23 @@
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
 
 use async_trait::async_trait;
+use reqwest::{Body, Client, Request, Response};
 use std::io::prelude::*;
 use std::sync::mpsc::SyncSender;
+use url::Url;
 
-use base64::{Engine as _, engine::general_purpose};
-use http::StatusCode;
-use hyper::{self, Body, Client, Request, Response};
-use hyper::header;
-use hyper_tls::HttpsConnector;
+use http::{Method, StatusCode};
 use log::*;
 use toml;
 use toml::value::Table;
 use xml::reader::{EventReader, XmlEvent};
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::{errors, file_handler};
-use crate::asynch::{self, SyncStatus, SynchronizerAction, ServerVersionData};
+use crate::asynch::{self, ServerVersionData, SyncStatus, SynchronizerAction};
 use crate::datacrypt::EntryPasswordCryptor;
 use crate::errors::RustKeylockError;
 use crate::SystemConfiguration;
+use crate::{errors, file_handler};
 
 /// A (Next/Own)cloud synchronizer
 pub(crate) struct Synchronizer {
@@ -52,15 +50,18 @@ pub(crate) struct Synchronizer {
 }
 
 impl Synchronizer {
-    pub(crate) fn new(ncc: &NextcloudConfiguration,
-                      sys_conf: &SystemConfiguration,
-                      tx: SyncSender<errors::Result<SyncStatus>>,
-                      f: &str)
-                      -> errors::Result<Synchronizer> {
-        let ncc = NextcloudConfiguration::new(ncc.server_url.clone(),
-                                              ncc.username.clone(),
-                                              ncc.decrypted_password()?.to_string(),
-                                              ncc.use_self_signed_certificate)?;
+    pub(crate) fn new(
+        ncc: &NextcloudConfiguration,
+        sys_conf: &SystemConfiguration,
+        tx: SyncSender<errors::Result<SyncStatus>>,
+        f: &str,
+    ) -> errors::Result<Synchronizer> {
+        let ncc = NextcloudConfiguration::new(
+            ncc.server_url.clone(),
+            ncc.username.clone(),
+            ncc.decrypted_password()?.to_string(),
+            ncc.use_self_signed_certificate,
+        )?;
         let s = Synchronizer {
             conf: ncc,
             tx,
@@ -77,72 +78,91 @@ impl Synchronizer {
         self.conf.decrypted_password()
     }
 
-    async fn do_request(req: Request<Body>, is_not_https: bool, use_self_signed: bool) -> errors::Result<Response<Body>> {
-        if is_not_https {
-            // Use HTTP
-            let client = Client::new();
+    async fn do_request(
+        req: Request,
+        is_not_https: bool,
+        use_self_signed: bool,
+    ) -> errors::Result<Response> {
+        let response = reqwest::Client::builder()
+            .danger_accept_invalid_certs(use_self_signed)
+            .build()
+            .unwrap()
+            .execute(req)
+            .await?;
 
-            Ok(client.request(req).await?)
-        } else if use_self_signed {
-            // Use HTTPS with a self signed certificate
-            let mut self_signed_cert_path = file_handler::create_certs_path().expect("Could not create the certificates directory");
-            self_signed_cert_path.push("cacert.pem");
-            ::std::env::set_var("SSL_CERT_FILE", self_signed_cert_path.to_str().unwrap());
-            let client = Client::builder().build(HttpsConnector::new());
-
-            Ok(client.request(req).await?)
-        } else {
-            // Use HTTPS
-            let connector = HttpsConnector::new();
-            let client = Client::builder().build(connector);
-            Ok(client.request(req).await?)
-        }
+        Ok(response)
     }
 
-    async fn resp_to_status_and_body(response: Response<Body>) -> errors::Result<(StatusCode, Vec<u8>)> {
+    async fn resp_to_status_and_body(response: Response) -> errors::Result<(StatusCode, Vec<u8>)> {
         let status = response.status();
-        let v = hyper::body::to_bytes(response.into_body()).await?.to_vec();
+        let v = response.bytes().await?.into();
         Ok((status, v))
     }
 
     async fn do_execute(capsule: ArgsCapsule) -> errors::Result<SyncStatus> {
-        let uri = format!("{}/remote.php/dav/files/{}/.rust-keylock/{}", capsule.server_url(), capsule.username().as_str(), capsule.file_name());
-        debug!("Syncing with {}", uri);
+        let url = Url::parse(
+            format!(
+                "{}/remote.php/dav/files/{}/.rust-keylock/{}",
+                capsule.server_url(),
+                capsule.username().as_str(),
+                capsule.file_name()
+            )
+            .as_ref(),
+        )?;
+        debug!("Syncing with {}", url);
 
         // Set the body of the request so that it returns the oc:rklsavedat and oc:rklversion properties
         let xml_body = r#"<d:propfind xmlns:d="DAV:"><d:prop xmlns:oc="http://owncloud.org/ns"><oc:rklsavedat/><oc:rklversion/></d:prop></d:propfind>"#;
-        let req_builder = Request::builder();
-        let req = req_builder
-            .method("PROPFIND")
-            .uri(uri)
-            .extension("PROPFIND")
-            .header(header::AUTHORIZATION, basic_auth(capsule.username().as_ref(), capsule.password().as_ref()))
-            .body(Body::from(xml_body.as_bytes()))?;
+
+        let req_builder = Client::new()
+            .request(Method::from_bytes(b"PROPFIND")?, url)
+            .basic_auth(
+                capsule.username().as_str(),
+                Some(capsule.password().as_str()),
+            )
+            .body(Body::from(xml_body.as_bytes()));
+
+        let req = req_builder.build()?;
 
         let cloned_capsule = capsule.clone();
-        let response = Self::do_request(req, cloned_capsule.is_not_https(), cloned_capsule.use_self_signed()).await?;
+        let response = Self::do_request(
+            req,
+            cloned_capsule.is_not_https(),
+            cloned_capsule.use_self_signed(),
+        )
+        .await?;
         let (status, body) = Self::resp_to_status_and_body(response).await?;
         Ok(Self::match_propfind_status(status, body, capsule).await?)
     }
 
-    async fn match_propfind_status(http_status: hyper::StatusCode, body: Vec<u8>, capsule: ArgsCapsule) -> errors::Result<SyncStatus> {
+    async fn match_propfind_status(
+        http_status: hyper::StatusCode,
+        body: Vec<u8>,
+        capsule: ArgsCapsule,
+    ) -> errors::Result<SyncStatus> {
         match http_status {
             hyper::StatusCode::NOT_FOUND => {
                 if capsule.version_local.is_some() {
                     info!("Creating rust-keylock-resources on the server");
-                    Self::create_rust_keylock_col(&capsule.username,
-                                                  capsule.password(),
-                                                  &capsule.server_url,
-                                                  capsule.is_not_https(),
-                                                  capsule.use_self_signed()).await?;
-                    Self::put(capsule.username(),
-                              capsule.password(),
-                              capsule.server_url(),
-                              capsule.file_name(),
-                              capsule.saved_at_local(),
-                              capsule.version_local(),
-                              capsule.is_not_https(),
-                              capsule.use_self_signed()).await?;
+                    Self::create_rust_keylock_col(
+                        &capsule.username,
+                        capsule.password(),
+                        &capsule.server_url,
+                        capsule.is_not_https(),
+                        capsule.use_self_signed(),
+                    )
+                    .await?;
+                    Self::put(
+                        capsule.username(),
+                        capsule.password(),
+                        capsule.server_url(),
+                        capsule.file_name(),
+                        capsule.saved_at_local(),
+                        capsule.version_local(),
+                        capsule.is_not_https(),
+                        capsule.use_self_signed(),
+                    )
+                    .await?;
 
                     Ok(SyncStatus::UploadSuccess("nextcloud"))
                 } else {
@@ -153,29 +173,38 @@ impl Synchronizer {
             hyper::StatusCode::MULTI_STATUS => {
                 debug!("Parsing nextcoud response");
                 let web_dav_resp = Self::parse_xml(body.as_slice(), &capsule.file_name)?;
-                let synchronizer_action = Self::parse_web_dav_response(&web_dav_resp,
-                                                                       &capsule.file_name,
-                                                                       &capsule.saved_at_local,
-                                                                       &capsule.version_local,
-                                                                       &capsule.last_sync_version)?;
+                let synchronizer_action = Self::parse_web_dav_response(
+                    &web_dav_resp,
+                    &capsule.file_name,
+                    &capsule.saved_at_local,
+                    &capsule.version_local,
+                    &capsule.last_sync_version,
+                )?;
                 Ok(Self::parse_synchronizer_action(synchronizer_action, capsule).await?)
             }
-            other => {
-                Err(RustKeylockError::SyncError(format!("Cannot handle status {:?} while handling propfind response", other)))
-            }
+            other => Err(RustKeylockError::SyncError(format!(
+                "Cannot handle status {:?} while handling propfind response",
+                other
+            ))),
         }
     }
 
-    async fn parse_synchronizer_action(sa: SynchronizerAction, capsule: ArgsCapsule) -> errors::Result<SyncStatus> {
+    async fn parse_synchronizer_action(
+        sa: SynchronizerAction,
+        capsule: ArgsCapsule,
+    ) -> errors::Result<SyncStatus> {
         match sa {
             SynchronizerAction::Download => {
                 info!("Downloading file from the server");
-                let tmp_file_name = Self::get(&capsule.username,
-                                              capsule.password(),
-                                              &capsule.server_url,
-                                              &capsule.file_name,
-                                              capsule.is_not_https,
-                                              capsule.use_self_signed).await?;
+                let tmp_file_name = Self::get(
+                    &capsule.username,
+                    capsule.password(),
+                    &capsule.server_url,
+                    &capsule.file_name,
+                    capsule.is_not_https,
+                    capsule.use_self_signed,
+                )
+                .await?;
 
                 Ok(SyncStatus::NewAvailable("nextcloud", tmp_file_name))
             }
@@ -185,39 +214,52 @@ impl Synchronizer {
             }
             SynchronizerAction::Upload => {
                 info!("Uploading file on the server");
-                Self::put(capsule.username(),
-                          capsule.password(),
-                          capsule.server_url(),
-                          capsule.file_name(),
-                          capsule.saved_at_local(),
-                          capsule.version_local(),
-                          capsule.is_not_https(),
-                          capsule.use_self_signed()).await?;
+                Self::put(
+                    capsule.username(),
+                    capsule.password(),
+                    capsule.server_url(),
+                    capsule.file_name(),
+                    capsule.saved_at_local(),
+                    capsule.version_local(),
+                    capsule.is_not_https(),
+                    capsule.use_self_signed(),
+                )
+                .await?;
                 Ok(SyncStatus::UploadSuccess("nextcloud"))
             }
             SynchronizerAction::DownloadMergeAndUpload => {
-                let tmp_file_name = Self::get(&capsule.username,
-                                              capsule.password(),
-                                              &capsule.server_url,
-                                              &capsule.file_name,
-                                              capsule.is_not_https,
-                                              capsule.use_self_signed).await?;
+                let tmp_file_name = Self::get(
+                    &capsule.username,
+                    capsule.password(),
+                    &capsule.server_url,
+                    &capsule.file_name,
+                    capsule.is_not_https,
+                    capsule.use_self_signed,
+                )
+                .await?;
                 Ok(SyncStatus::NewToMerge("nextcloud", tmp_file_name))
             }
         }
     }
 
-    fn parse_web_dav_response(web_dav_response: &WebDavResponse,
-                              filename: &str,
-                              saved_at_local: &Option<i64>,
-                              version_local: &Option<i64>,
-                              last_sync_version: &Option<i64>)
-                              -> errors::Result<SynchronizerAction> {
+    fn parse_web_dav_response(
+        web_dav_response: &WebDavResponse,
+        filename: &str,
+        saved_at_local: &Option<i64>,
+        version_local: &Option<i64>,
+        last_sync_version: &Option<i64>,
+    ) -> errors::Result<SynchronizerAction> {
         let svd = &ServerVersionData {
             version: web_dav_response.version.clone(),
             last_modified: web_dav_response.last_modified.clone(),
         };
-        asynch::synchronizer_action(&svd, filename, saved_at_local, version_local, last_sync_version)
+        asynch::synchronizer_action(
+            &svd,
+            filename,
+            saved_at_local,
+            version_local,
+            last_sync_version,
+        )
     }
 
     fn parse_xml(bytes: &[u8], filename: &str) -> errors::Result<WebDavResponse> {
@@ -233,8 +275,10 @@ impl Synchronizer {
             status: "".to_string(),
         };
         let mut web_dav_resp_result: errors::Result<WebDavResponse> =
-            Err(errors::RustKeylockError::ParseError("Could not parse WebDav response. The required elements could not be found."
-                .to_string()));
+            Err(errors::RustKeylockError::ParseError(
+                "Could not parse WebDav response. The required elements could not be found."
+                    .to_string(),
+            ));
 
         for elem in parser {
             match elem {
@@ -242,10 +286,15 @@ impl Synchronizer {
                     curr_elem_name = name.to_string();
                 }
                 Ok(XmlEvent::Characters(string)) => {
-                    debug!("Parsing element {} that has characters {}", curr_elem_name, string);
+                    debug!(
+                        "Parsing element {} that has characters {}",
+                        curr_elem_name, string
+                    );
                     match curr_elem_name.as_ref() {
                         "{DAV:}d:href" => web_dav_resp.href = string,
-                        "{http://owncloud.org/ns}oc:rklsavedat" => web_dav_resp.last_modified = string,
+                        "{http://owncloud.org/ns}oc:rklsavedat" => {
+                            web_dav_resp.last_modified = string
+                        }
                         "{http://owncloud.org/ns}oc:rklversion" => web_dav_resp.version = string,
                         "{DAV:}d:status" => web_dav_resp.status = string,
                         _ => {
@@ -256,8 +305,12 @@ impl Synchronizer {
                 Ok(XmlEvent::EndElement { name, .. }) => {
                     if name.to_string() == "{DAV:}d:response" {
                         // Check if the file is the one where the passwords are stored and that the gathered data are all present
-                        if web_dav_resp.href.ends_with(filename) && web_dav_resp.href != "" && web_dav_resp.last_modified != "" &&
-                            web_dav_resp.status != "" && web_dav_resp.version != "" {
+                        if web_dav_resp.href.ends_with(filename)
+                            && web_dav_resp.href != ""
+                            && web_dav_resp.last_modified != ""
+                            && web_dav_resp.status != ""
+                            && web_dav_resp.version != ""
+                        {
                             if web_dav_resp.status.contains("200 OK") {
                                 web_dav_resp_result = Ok(web_dav_resp);
                             } else {
@@ -273,7 +326,8 @@ impl Synchronizer {
                 }
                 Err(error) => {
                     error!("Error while parsing a WebDav response {:?}", error);
-                    web_dav_resp_result = Err(errors::RustKeylockError::ParseError(format!("{:?}", error)));
+                    web_dav_resp_result =
+                        Err(errors::RustKeylockError::ParseError(format!("{:?}", error)));
                     break;
                 }
                 _ => {}
@@ -284,19 +338,27 @@ impl Synchronizer {
     }
 
     #[allow(clippy::string_lit_as_bytes)]
-    async fn create_rust_keylock_col(username: &str,
-                                     password: Zeroizing<String>,
-                                     server_url: &str,
-                                     is_not_https: bool,
-                                     use_self_signed: bool) -> errors::Result<()> {
-        let uri = format!("{}/remote.php/dav/files/{}/.rust-keylock", server_url, username);
-        let req_builder = Request::builder();
-        let req = req_builder
-            .uri(uri)
-            .extension("MKCOL")
-            .method("MKCOL")
-            .header(header::AUTHORIZATION, basic_auth(username, password.as_ref()))
-            .body(Body::from("".as_bytes()))?;
+    async fn create_rust_keylock_col(
+        username: &str,
+        password: Zeroizing<String>,
+        server_url: &str,
+        is_not_https: bool,
+        use_self_signed: bool,
+    ) -> errors::Result<()> {
+        let url = Url::parse(
+            format!(
+                "{}/remote.php/dav/files/{}/.rust-keylock",
+                server_url, username
+            )
+            .as_ref(),
+        )?;
+
+        let req_builder = Client::new()
+            .request(Method::from_bytes(b"MKCOL")?, url)
+            .basic_auth(username, Some(password.as_str()))
+            .body(Body::from("".as_bytes()));
+
+        let req = req_builder.build()?;
 
         let response = Self::do_request(req, is_not_https, use_self_signed).await?;
         let (status, _) = Self::resp_to_status_and_body(response).await?;
@@ -310,24 +372,44 @@ impl Synchronizer {
 
     /// Put the file and update the property with the file creation seconds using PROPPATCH
     #[allow(clippy::too_many_arguments)]
-    async fn put(username: Zeroizing<String>,
-                 password: Zeroizing<String>,
-                 server_url: String,
-                 filename: String,
-                 local_saved_at: Option<i64>,
-                 local_version: Option<i64>,
-                 is_not_https: bool,
-                 use_self_signed: bool) -> errors::Result<()> {
-        let mut file = file_handler::get_file(&filename).unwrap_or_else(|_| panic!("Could get the file {} while performing HTTP PUT", filename));
+    async fn put(
+        username: Zeroizing<String>,
+        password: Zeroizing<String>,
+        server_url: String,
+        filename: String,
+        local_saved_at: Option<i64>,
+        local_version: Option<i64>,
+        is_not_https: bool,
+        use_self_signed: bool,
+    ) -> errors::Result<()> {
+        let mut file = file_handler::get_file(&filename).unwrap_or_else(|_| {
+            panic!("Could get the file {} while performing HTTP PUT", filename)
+        });
         let mut file_bytes: Vec<_> = Vec::new();
-        file.read_to_end(&mut file_bytes).unwrap_or_else(|_| panic!("Could not read the file {} while performing HTTP PUT", filename));
+        file.read_to_end(&mut file_bytes).unwrap_or_else(|_| {
+            panic!(
+                "Could not read the file {} while performing HTTP PUT",
+                filename
+            )
+        });
 
-        let uri = format!("{}/remote.php/dav/files/{}/.rust-keylock/{}", server_url, username.as_str(), filename);
-        let req_builder = Request::put(uri);
-        let req = req_builder
-            .header(header::AUTHORIZATION, basic_auth(&username, password.as_ref()))
-            .header(header::CONTENT_TYPE, "application/octet-stream")
-            .body(Body::from(file_bytes))?;
+        let url = Url::parse(
+            format!(
+                "{}/remote.php/dav/files/{}/.rust-keylock/{}",
+                server_url,
+                username.as_str(),
+                filename
+            )
+            .as_ref(),
+        )?;
+
+        let req_builder = Client::new()
+            .request(Method::PUT, url)
+            .basic_auth(username.as_str(), Some(password.as_str()))
+            .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+            .body(Body::from(file_bytes));
+
+        let req = req_builder.build()?;
 
         let response = Self::do_request(req, is_not_https, use_self_signed).await?;
         let (status, _) = Self::resp_to_status_and_body(response).await?;
@@ -336,7 +418,8 @@ impl Synchronizer {
             return Err(errors::RustKeylockError::SyncError(format!("{:?}", status)));
         }
         // PROPPATCH starts here
-        let xml_body: String = format!(r#"<?xml version="1.0" encoding="UTF-8"?>
+        let xml_body: String = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
 <d:propertyupdate xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">
 <d:set>
 <d:prop>
@@ -345,18 +428,32 @@ impl Synchronizer {
 </d:prop>
 </d:set>
 </d:propertyupdate>"#,
-                                       local_saved_at.map(|s| s.to_string()).unwrap_or_else(String::new),
-                                       local_version.map(|s| s.to_string()).unwrap_or_else(String::new));
+            local_saved_at
+                .map(|s| s.to_string())
+                .unwrap_or_else(String::new),
+            local_version
+                .map(|s| s.to_string())
+                .unwrap_or_else(String::new)
+        );
 
-        let uri_pp = format!("{}/remote.php/dav/files/{}/.rust-keylock/{}", server_url, username.as_str(), filename);
-        let req_builder = Request::builder();
-        let req_pp = req_builder
-            .uri(uri_pp)
-            .extension("PROPPATCH")
-            .method("PROPPATCH")
-            .header(header::AUTHORIZATION, basic_auth(&username, password.as_ref()))
-            .header(header::CONTENT_TYPE, "application/octet-stream")
-            .body(Body::from(xml_body))?;
+        let url_pp = Url::parse(
+            format!(
+                "{}/remote.php/dav/files/{}/.rust-keylock/{}",
+                server_url,
+                username.as_str(),
+                filename
+            )
+            .as_ref(),
+        )?;
+
+        let req_builder_pp = Client::new()
+            .request(Method::from_bytes(b"PROPPATCH")?, url_pp)
+            .basic_auth(username.as_str(), Some(password.as_str()))
+            .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+            .body(Body::from(xml_body));
+
+        let req_pp = req_builder_pp.build()?;
+
         let resp_pp = Self::do_request(req_pp, is_not_https, use_self_signed).await?;
         let (status_pp, _) = Self::resp_to_status_and_body(resp_pp).await?;
         debug!("Response for PROPPATCH: {}", status_pp);
@@ -371,19 +468,31 @@ impl Synchronizer {
     }
 
     #[allow(clippy::string_lit_as_bytes)]
-    async fn get(username: &str,
-                 password: Zeroizing<String>,
-                 server_url: &str,
-                 filename: &str,
-                 is_not_https: bool,
-                 use_self_signed: bool) -> errors::Result<String> {
+    async fn get(
+        username: &str,
+        password: Zeroizing<String>,
+        server_url: &str,
+        filename: &str,
+        is_not_https: bool,
+        use_self_signed: bool,
+    ) -> errors::Result<String> {
         let tmp_file_name = format!("tmp_{}", filename);
-        let uri = format!("{}/remote.php/dav/files/{}/.rust-keylock/{}", server_url, username, filename);
-        let req_builder = Request::get(uri);
-        let req = req_builder
-            .header(header::AUTHORIZATION, basic_auth(username, password.as_ref()))
-            .header(header::CONTENT_TYPE, "application/octet-stream")
-            .body(Body::from("".as_bytes()))?;
+        let url = Url::parse(
+            format!(
+                "{}/remote.php/dav/files/{}/.rust-keylock/{}",
+                server_url, username, filename
+            )
+            .as_ref(),
+        )?;
+
+        let req_builder = Client::new()
+            .request(Method::GET, url)
+            .basic_auth(username, Some(password.as_str()))
+            .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+            .body(Body::from("".as_bytes()));
+
+        let req = req_builder.build()?;
+
         let response = Self::do_request(req, is_not_https, use_self_signed).await?;
         let (status, body) = Self::resp_to_status_and_body(response).await?;
         debug!("Response for GET: {}", status);
@@ -398,7 +507,10 @@ impl Synchronizer {
         res
     }
 
-    fn send_to_channel(res: errors::Result<SyncStatus>, tx: SyncSender<errors::Result<SyncStatus>>) {
+    fn send_to_channel(
+        res: errors::Result<SyncStatus>,
+        tx: SyncSender<errors::Result<SyncStatus>>,
+    ) {
         match res {
             Ok(ref r) => debug!("Nextcloud Async Task sends to the channel {:?}", r),
             Err(ref error) => error!("Nextcloud Async Tasks reported error: {:?}", error),
@@ -424,7 +536,9 @@ impl super::AsyncTask for Synchronizer {
             self.conf.server_url.clone(),
             self.conf.username.clone(),
             self.file_name.clone(),
-            self.use_password().expect("Could not retrieve the password for the nextcloud server").to_string(),
+            self.use_password()
+                .expect("Could not retrieve the password for the nextcloud server")
+                .to_string(),
             self.conf.server_url.starts_with("http://"),
             self.conf.use_self_signed_certificate,
             self.saved_at_local,
@@ -472,7 +586,12 @@ pub struct NextcloudConfiguration {
 
 impl NextcloudConfiguration {
     /// Creates a new NextcloudConfiguration
-    pub fn new(u: String, un: String, pw: String, use_self_signed_certificate: bool) -> errors::Result<NextcloudConfiguration> {
+    pub fn new(
+        u: String,
+        un: String,
+        pw: String,
+        use_self_signed_certificate: bool,
+    ) -> errors::Result<NextcloudConfiguration> {
         let mut s = NextcloudConfiguration {
             username: un,
             password: "".to_string(),
@@ -485,30 +604,56 @@ impl NextcloudConfiguration {
     }
 
     pub fn decrypted_password(&self) -> errors::Result<Zeroizing<String>> {
-        self.password_cryptor.decrypt_str(&self.password).map(|s| Zeroizing::new(s))
+        self.password_cryptor
+            .decrypt_str(&self.password)
+            .map(|s| Zeroizing::new(s))
     }
 
     /// Creates a TOML table form this NextcloudConfiguration. The resulted table contains the decrypted password.
     pub(crate) fn to_table(&self) -> errors::Result<Table> {
         let mut table = Table::new();
-        table.insert("url".to_string(), toml::Value::String(self.server_url.clone()));
-        table.insert("user".to_string(), toml::Value::String(self.username.clone()));
-        table.insert("pass".to_string(), toml::Value::String(self.decrypted_password()?.as_str().to_string()));
-        table.insert("use_self_signed_certificate".to_string(), toml::Value::Boolean(self.use_self_signed_certificate));
+        table.insert(
+            "url".to_string(),
+            toml::Value::String(self.server_url.clone()),
+        );
+        table.insert(
+            "user".to_string(),
+            toml::Value::String(self.username.clone()),
+        );
+        table.insert(
+            "pass".to_string(),
+            toml::Value::String(self.decrypted_password()?.as_str().to_string()),
+        );
+        table.insert(
+            "use_self_signed_certificate".to_string(),
+            toml::Value::Boolean(self.use_self_signed_certificate),
+        );
 
         Ok(table)
     }
 
     /// Creates a NextcloudConfiguration from a TOML table. The password gets encrypted once the `new` function is called.
-    pub(crate) fn from_table(table: &Table) -> Result<NextcloudConfiguration, errors::RustKeylockError> {
-        let url = table.get("url").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
-        let user = table.get("user").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
-        let pass = table.get("pass").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
-        let use_self_signed_certificate = table.get("use_self_signed_certificate")
+    pub(crate) fn from_table(
+        table: &Table,
+    ) -> Result<NextcloudConfiguration, errors::RustKeylockError> {
+        let url = table
+            .get("url")
+            .and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
+        let user = table
+            .get("user")
+            .and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
+        let pass = table
+            .get("pass")
+            .and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
+        let use_self_signed_certificate = table
+            .get("use_self_signed_certificate")
             .and_then(|value| value.as_bool().and_then(Some));
         match (url, user, pass, use_self_signed_certificate) {
             (Some(ul), Some(u), Some(p), Some(ssc)) => NextcloudConfiguration::new(ul, u, p, ssc),
-            _ => Err(errors::RustKeylockError::ParseError(toml::ser::to_string(&table).unwrap_or_else(|_| "Cannot deserialize toml".to_string()))),
+            _ => Err(errors::RustKeylockError::ParseError(
+                toml::ser::to_string(&table)
+                    .unwrap_or_else(|_| "Cannot deserialize toml".to_string()),
+            )),
         }
     }
 
@@ -539,11 +684,6 @@ struct WebDavResponse {
     status: String,
 }
 
-fn basic_auth(username: &str, password: &str) -> String {
-    let encoded = general_purpose::STANDARD.encode(&format!("{}:{}", username, password));
-    format!("Basic {}", encoded)
-}
-
 /// Convenience struct to use during function calls
 #[derive(Clone)]
 struct ArgsCapsule {
@@ -560,15 +700,17 @@ struct ArgsCapsule {
 
 impl ArgsCapsule {
     #[allow(clippy::too_many_arguments)]
-    pub fn new<T: Into<Zeroizing<String>>>(server_url: String,
-               username: T,
-               file_name: String,
-               password: T,
-               is_not_https: bool,
-               use_self_signed: bool,
-               saved_at_local: Option<i64>,
-               version_local: Option<i64>,
-               last_sync_version: Option<i64>) -> ArgsCapsule {
+    pub fn new<T: Into<Zeroizing<String>>>(
+        server_url: String,
+        username: T,
+        file_name: String,
+        password: T,
+        is_not_https: bool,
+        use_self_signed: bool,
+        saved_at_local: Option<i64>,
+        version_local: Option<i64>,
+        last_sync_version: Option<i64>,
+    ) -> ArgsCapsule {
         ArgsCapsule {
             server_url,
             username: username.into(),
@@ -632,19 +774,23 @@ mod nextcloud_tests {
     use std::thread;
     use std::time;
 
-    use std::convert::Infallible;
-    use hyper::{Body, Request, Response, Server};
-    use hyper::service::{make_service_fn, service_fn};
+    use http::StatusCode;
+    use hyper::service::service_fn;
+    use hyper::{Request, Response};
+    use hyper_util::rt::{TokioIo, TokioTimer};
     use lazy_static::lazy_static;
+    use std::convert::Infallible;
     use tokio;
     use toml;
 
-    use super::super::AsyncTask;
+    use hyper::server::conn::http1;
+    use tokio::net::TcpListener;
+
     use super::super::super::{errors, file_handler, SystemConfiguration};
-    use http::StatusCode;
+    use super::super::AsyncTask;
 
     lazy_static! {
-        static ref TXMAP: Mutex < HashMap < String, SyncSender < bool > > > = Mutex::new(HashMap::new());
+        static ref TXMAP: Mutex<HashMap<String, SyncSender<bool>>> = Mutex::new(HashMap::new());
     }
 
     fn get_tx_for(command: &str) -> SyncSender<bool> {
@@ -661,11 +807,19 @@ mod nextcloud_tests {
     #[test]
     fn synchronizer_stores_encrypted_password() {
         let password = "password".to_string();
-        let (tx, _rx): (SyncSender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::sync_channel(1);
-        let ncc =
-            super::NextcloudConfiguration::new("https://localhost/nextcloud".to_string(), "username".to_string(), password.clone(), false)
-                .unwrap();
-        let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, "filename").unwrap();
+        let (tx, _rx): (
+            SyncSender<errors::Result<super::SyncStatus>>,
+            Receiver<errors::Result<super::SyncStatus>>,
+        ) = mpsc::sync_channel(1);
+        let ncc = super::NextcloudConfiguration::new(
+            "https://localhost/nextcloud".to_string(),
+            "username".to_string(),
+            password.clone(),
+            false,
+        )
+        .unwrap();
+        let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, "filename")
+            .unwrap();
 
         assert!(nc.conf.decrypted_password().unwrap().as_str() == password)
     }
@@ -673,9 +827,13 @@ mod nextcloud_tests {
     #[test]
     fn nextcloud_configuration_stores_encrypted_password() {
         let password = "password".to_string();
-        let ncc =
-            super::NextcloudConfiguration::new("https://localhost/nextcloud".to_string(), "username".to_string(), password.clone(), false)
-                .unwrap();
+        let ncc = super::NextcloudConfiguration::new(
+            "https://localhost/nextcloud".to_string(),
+            "username".to_string(),
+            password.clone(),
+            false,
+        )
+        .unwrap();
 
         assert!(ncc.password != password)
     }
@@ -721,11 +879,13 @@ mod nextcloud_tests {
 
     #[test]
     fn nextcloud_configuration_is_filled() {
-        let ncc1 = super::NextcloudConfiguration::new("https://localhost/nextcloud".to_string(),
-                                                      "username".to_string(),
-                                                      "password".to_string(),
-                                                      false)
-            .unwrap();
+        let ncc1 = super::NextcloudConfiguration::new(
+            "https://localhost/nextcloud".to_string(),
+            "username".to_string(),
+            "password".to_string(),
+            false,
+        )
+        .unwrap();
         assert!(ncc1.is_filled());
         let ncc2 = super::NextcloudConfiguration::default();
         assert!(!ncc2.is_filled());
@@ -748,9 +908,17 @@ mod nextcloud_tests {
 
         // Execute the synchronizer
         let password = "password".to_string();
-        let (tx, rx): (SyncSender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::sync_channel(10);
-        let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8080".to_string(), "username".to_string(), password.clone(), false)
-            .unwrap();
+        let (tx, rx): (
+            SyncSender<errors::Result<super::SyncStatus>>,
+            Receiver<errors::Result<super::SyncStatus>>,
+        ) = mpsc::sync_channel(10);
+        let ncc = super::NextcloudConfiguration::new(
+            "http://127.0.0.1:8080".to_string(),
+            "username".to_string(),
+            password.clone(),
+            false,
+        )
+        .unwrap();
 
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
@@ -771,7 +939,10 @@ mod nextcloud_tests {
         assert!(rx_assert.recv_timeout(timeout).unwrap());
 
         // Assert that the file is ready to be downloaded
-        assert!(rx.recv_timeout(timeout).unwrap().unwrap() == super::SyncStatus::UploadSuccess("nextcloud"));
+        assert!(
+            rx.recv_timeout(timeout).unwrap().unwrap()
+                == super::SyncStatus::UploadSuccess("nextcloud")
+        );
 
         // Delete the dummy file
         let _ = file_handler::delete_file(filename);
@@ -794,13 +965,22 @@ mod nextcloud_tests {
 
         // Execute the synchronizer
         let password = "password".to_string();
-        let (tx, rx): (SyncSender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::sync_channel(10);
-        let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8081".to_string(), "username".to_string(), password.clone(), false)
-            .unwrap();
+        let (tx, rx): (
+            SyncSender<errors::Result<super::SyncStatus>>,
+            Receiver<errors::Result<super::SyncStatus>>,
+        ) = mpsc::sync_channel(10);
+        let ncc = super::NextcloudConfiguration::new(
+            "http://127.0.0.1:8081".to_string(),
+            "username".to_string(),
+            password.clone(),
+            false,
+        )
+        .unwrap();
 
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename).unwrap();
+            let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename)
+                .unwrap();
             rt.block_on(nc.execute());
         });
 
@@ -811,8 +991,13 @@ mod nextcloud_tests {
         assert!(rx_assert.recv_timeout(timeout).unwrap());
 
         // Assert that the file is ready to be downloaded
-        assert!(rx.recv_timeout(timeout).unwrap().unwrap() ==
-            super::SyncStatus::NewAvailable("nextcloud", "tmp_download_a_file_from_the_server".to_string()));
+        assert!(
+            rx.recv_timeout(timeout).unwrap().unwrap()
+                == super::SyncStatus::NewAvailable(
+                    "nextcloud",
+                    "tmp_download_a_file_from_the_server".to_string()
+                )
+        );
 
         // Delete the dummy file
         let _ = file_handler::delete_file(filename);
@@ -836,12 +1021,21 @@ mod nextcloud_tests {
 
         // Execute the synchronizer
         let password = "password".to_string();
-        let (tx, rx): (SyncSender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::sync_channel(10);
-        let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8082".to_string(), "username".to_string(), password.clone(), false)
-            .unwrap();
+        let (tx, rx): (
+            SyncSender<errors::Result<super::SyncStatus>>,
+            Receiver<errors::Result<super::SyncStatus>>,
+        ) = mpsc::sync_channel(10);
+        let ncc = super::NextcloudConfiguration::new(
+            "http://127.0.0.1:8082".to_string(),
+            "username".to_string(),
+            password.clone(),
+            false,
+        )
+        .unwrap();
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename).unwrap();
+            let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename)
+                .unwrap();
             rt.block_on(nc.execute());
         });
 
@@ -873,9 +1067,17 @@ mod nextcloud_tests {
 
         // Execute the synchronizer
         let password = "password".to_string();
-        let (tx, rx): (SyncSender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::sync_channel(10);
-        let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8083".to_string(), "username".to_string(), password.clone(), false)
-            .unwrap();
+        let (tx, rx): (
+            SyncSender<errors::Result<super::SyncStatus>>,
+            Receiver<errors::Result<super::SyncStatus>>,
+        ) = mpsc::sync_channel(10);
+        let ncc = super::NextcloudConfiguration::new(
+            "http://127.0.0.1:8083".to_string(),
+            "username".to_string(),
+            password.clone(),
+            false,
+        )
+        .unwrap();
         let sys_config = SystemConfiguration::new(Some(123), Some(1), None);
 
         thread::spawn(move || {
@@ -914,9 +1116,17 @@ mod nextcloud_tests {
 
         // Execute the synchronizer
         let password = "password".to_string();
-        let (tx, rx): (SyncSender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::sync_channel(10);
-        let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8084".to_string(), "username".to_string(), password.clone(), false)
-            .unwrap();
+        let (tx, rx): (
+            SyncSender<errors::Result<super::SyncStatus>>,
+            Receiver<errors::Result<super::SyncStatus>>,
+        ) = mpsc::sync_channel(10);
+        let ncc = super::NextcloudConfiguration::new(
+            "http://127.0.0.1:8084".to_string(),
+            "username".to_string(),
+            password.clone(),
+            false,
+        )
+        .unwrap();
         let sys_config = SystemConfiguration::new(Some(123), Some(1), None);
 
         thread::spawn(move || {
@@ -957,12 +1167,21 @@ mod nextcloud_tests {
 
         // Execute the synchronizer
         let password = "password".to_string();
-        let (tx, rx): (SyncSender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::sync_channel(10);
-        let ncc = super::NextcloudConfiguration::new("http://127.0.0.1:8085".to_string(), "username".to_string(), password.clone(), false)
-            .unwrap();
+        let (tx, rx): (
+            SyncSender<errors::Result<super::SyncStatus>>,
+            Receiver<errors::Result<super::SyncStatus>>,
+        ) = mpsc::sync_channel(10);
+        let ncc = super::NextcloudConfiguration::new(
+            "http://127.0.0.1:8085".to_string(),
+            "username".to_string(),
+            password.clone(),
+            false,
+        )
+        .unwrap();
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename).unwrap();
+            let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename)
+                .unwrap();
             rt.block_on(nc.execute());
         });
 
@@ -988,12 +1207,21 @@ mod nextcloud_tests {
         // Do not start the HTTP server
         // Execute the synchronizer
         let password = "password".to_string();
-        let (tx, rx): (SyncSender<errors::Result<super::SyncStatus>>, Receiver<errors::Result<super::SyncStatus>>) = mpsc::sync_channel(10);
-        let ncc = super::NextcloudConfiguration::new("http://127.0.0.1".to_string(), "username".to_string(), password.clone(), false)
-            .unwrap();
+        let (tx, rx): (
+            SyncSender<errors::Result<super::SyncStatus>>,
+            Receiver<errors::Result<super::SyncStatus>>,
+        ) = mpsc::sync_channel(10);
+        let ncc = super::NextcloudConfiguration::new(
+            "http://127.0.0.1".to_string(),
+            "username".to_string(),
+            password.clone(),
+            false,
+        )
+        .unwrap();
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename).unwrap();
+            let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename)
+                .unwrap();
             rt.block_on(nc.execute());
         });
 
@@ -1010,7 +1238,8 @@ mod nextcloud_tests {
     #[test]
     fn parse_xml_success() {
         let filename = "afilename";
-        let xml = format!(r#"<?xml version="1.0"?>
+        let xml = format!(
+            r#"<?xml version="1.0"?>
                             <d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">
                              <d:response>
                               <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/{}</d:href>
@@ -1023,12 +1252,17 @@ mod nextcloud_tests {
                               </d:propstat>
                              </d:response>
                             </d:multistatus>
-                        "#, filename);
+                        "#,
+            filename
+        );
 
         let res = super::Synchronizer::parse_xml(xml.as_bytes(), filename);
 
         assert!(res.is_ok());
-        assert!(res.as_ref().unwrap().href == "/nextcloud/remote.php/dav/files/user/.rust-keylock/afilename");
+        assert!(
+            res.as_ref().unwrap().href
+                == "/nextcloud/remote.php/dav/files/user/.rust-keylock/afilename"
+        );
         assert!(res.as_ref().unwrap().last_modified == "1234567");
         assert!(res.as_ref().unwrap().status == "HTTP/1.1 200 OK");
         assert!(res.as_ref().unwrap().version == "1");
@@ -1067,7 +1301,8 @@ mod nextcloud_tests {
     fn parse_xml_error_not_all_elements_are_present() {
         let filename = "afilename";
         // The oc:rklsavedat element is not present
-        let xml = format!(r#"<?xml version="1.0"?>
+        let xml = format!(
+            r#"<?xml version="1.0"?>
                             <d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">
                              <d:response>
                               <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/{}</d:href>
@@ -1078,7 +1313,9 @@ mod nextcloud_tests {
                               </d:propstat>
                              </d:response>
                             </d:multistatus>
-                        "#, filename);
+                        "#,
+            filename
+        );
 
         let res = super::Synchronizer::parse_xml(xml.as_bytes(), filename);
 
@@ -1088,7 +1325,8 @@ mod nextcloud_tests {
     #[test]
     fn parse_xml_error_in_web_dav_response() {
         let filename = "afilename";
-        let xml = format!(r#"<?xml version="1.0"?>
+        let xml = format!(
+            r#"<?xml version="1.0"?>
                             <d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">
                              <d:response>
                               <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/{}</d:href>
@@ -1101,36 +1339,57 @@ mod nextcloud_tests {
                               </d:propstat>
                              </d:response>
                             </d:multistatus>
-                        "#, filename);
+                        "#,
+            filename
+        );
 
         let res = super::Synchronizer::parse_xml(xml.as_bytes(), filename);
 
         assert!(res.is_err());
     }
 
-    async fn run_col_not_exists_web_dav_service(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    async fn run_col_not_exists_web_dav_service(
+        req: Request<impl hyper::body::Body>,
+    ) -> Result<Response<String>, Infallible> {
         let tx_assert = get_tx_for("run_col_not_exists");
-        let resp_builder = Response::builder();
+        let resp_builder = hyper::Response::builder();
 
         if req.method() == &hyper::Method::from_bytes("PROPFIND".as_ref()).unwrap() {
             let _ = tx_assert.send(true);
-            Ok(resp_builder.status(StatusCode::NOT_FOUND).body(Body::empty()).unwrap())
+            Ok(resp_builder
+                .status(StatusCode::NOT_FOUND)
+                .body("".to_owned())
+                .unwrap())
         } else if req.method() == &hyper::Method::from_bytes("MKCOL".as_ref()).unwrap() {
             let _ = tx_assert.send(true);
-            Ok(resp_builder.status(StatusCode::OK).body(Body::empty()).unwrap())
+            Ok(resp_builder
+                .status(StatusCode::OK)
+                .body("".to_owned())
+                .unwrap())
         } else if req.method() == &hyper::Method::PUT {
             let _ = tx_assert.send(true);
-            Ok(resp_builder.status(StatusCode::OK).body(Body::empty()).unwrap())
+            Ok(resp_builder
+                .status(StatusCode::OK)
+                .body("".to_owned())
+                .unwrap())
         } else if req.method() == &hyper::Method::from_bytes("PROPPATCH".as_ref()).unwrap() {
             let _ = tx_assert.send(true);
-            Ok(resp_builder.status(StatusCode::OK).body(Body::empty()).unwrap())
+            Ok(resp_builder
+                .status(StatusCode::OK)
+                .body("".to_owned())
+                .unwrap())
         } else {
             let _ = tx_assert.send(false);
-            Ok(resp_builder.status(StatusCode::BAD_REQUEST).body(Body::empty()).unwrap())
+            Ok(resp_builder
+                .status(StatusCode::BAD_REQUEST)
+                .body("".to_owned())
+                .unwrap())
         }
     }
 
-    async fn run_download_a_file_from_the_server_web_dav_service(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    async fn run_download_a_file_from_the_server_web_dav_service(
+        req: Request<impl hyper::body::Body>,
+    ) -> Result<Response<String>, Infallible> {
         let tx_assert = get_tx_for("run_download_a_file_from_the_server");
         let resp_builder = Response::builder();
 
@@ -1150,62 +1409,103 @@ mod nextcloud_tests {
                                  </d:response>
                                 </d:multistatus>
                             "#;
-            Ok(resp_builder.status(StatusCode::MULTI_STATUS).body(Body::from(xml)).unwrap())
+            Ok(resp_builder
+                .status(StatusCode::MULTI_STATUS)
+                .body(xml.to_owned())
+                .unwrap())
         } else if req.method() == &hyper::Method::GET {
             let _ = tx_assert.send(true);
-            Ok(resp_builder.status(StatusCode::MULTI_STATUS).body(Body::from("This is a file from the server")).unwrap())
+            Ok(resp_builder
+                .status(StatusCode::MULTI_STATUS)
+                .body("This is a file from the server".to_owned())
+                .unwrap())
         } else {
             let _ = tx_assert.send(false);
-            Ok(resp_builder.status(StatusCode::BAD_REQUEST).body(Body::empty()).unwrap())
+            Ok(resp_builder
+                .status(StatusCode::BAD_REQUEST)
+                .body("".to_owned())
+                .unwrap())
         }
     }
 
-    async fn run_http_error_response_on_propfind_web_dav_service(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    async fn run_http_error_response_on_propfind_web_dav_service(
+        req: Request<impl hyper::body::Body>,
+    ) -> Result<Response<String>, Infallible> {
         let tx_assert = get_tx_for("run_http_error_response_on_propfind");
         let resp_builder = Response::builder();
 
         if req.method() == &hyper::Method::from_bytes("PROPFIND".as_ref()).unwrap() {
             let _ = tx_assert.send(true);
         }
-        Ok(resp_builder.status(StatusCode::BAD_REQUEST).body(Body::empty()).unwrap())
+        Ok(resp_builder
+            .status(StatusCode::BAD_REQUEST)
+            .body("".to_owned())
+            .unwrap())
     }
 
-    async fn run_http_error_response_on_mkcol_web_dav_service(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    async fn run_http_error_response_on_mkcol_web_dav_service(
+        req: Request<impl hyper::body::Body>,
+    ) -> Result<Response<String>, Infallible> {
         let tx_assert = get_tx_for("run_http_error_response_on_mkcol");
         let resp_builder = Response::builder();
 
         if req.method() == &hyper::Method::from_bytes("PROPFIND".as_ref()).unwrap() {
             let _ = tx_assert.send(true);
-            Ok(resp_builder.status(StatusCode::NOT_FOUND).body(Body::empty()).unwrap())
+            Ok(resp_builder
+                .status(StatusCode::NOT_FOUND)
+                .body("".to_owned())
+                .unwrap())
         } else if req.method() == &hyper::Method::from_bytes("MKCOL".as_ref()).unwrap() {
             let _ = tx_assert.send(true);
-            Ok(resp_builder.status(StatusCode::BAD_REQUEST).body(Body::empty()).unwrap())
+            Ok(resp_builder
+                .status(StatusCode::BAD_REQUEST)
+                .body("".to_owned())
+                .unwrap())
         } else {
             let _ = tx_assert.send(false);
-            Ok(resp_builder.status(StatusCode::BAD_REQUEST).body(Body::empty()).unwrap())
+            Ok(resp_builder
+                .status(StatusCode::BAD_REQUEST)
+                .body("".to_owned())
+                .unwrap())
         }
     }
 
-    async fn run_http_error_response_on_put_web_dav_service(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    async fn run_http_error_response_on_put_web_dav_service(
+        req: Request<impl hyper::body::Body>,
+    ) -> Result<Response<String>, Infallible> {
         let tx_assert = get_tx_for("run_http_error_response_on_put");
         let resp_builder = Response::builder();
 
         if req.method() == &hyper::Method::from_bytes("PROPFIND".as_ref()).unwrap() {
             let _ = tx_assert.send(true);
-            Ok(resp_builder.status(StatusCode::NOT_FOUND).body(Body::empty()).unwrap())
+            Ok(resp_builder
+                .status(StatusCode::NOT_FOUND)
+                .body("".to_owned())
+                .unwrap())
         } else if req.method() == &hyper::Method::from_bytes("MKCOL".as_ref()).unwrap() {
             let _ = tx_assert.send(true);
-            Ok(resp_builder.status(StatusCode::OK).body(Body::empty()).unwrap())
+            Ok(resp_builder
+                .status(StatusCode::OK)
+                .body("".to_owned())
+                .unwrap())
         } else if req.method() == &hyper::Method::PUT {
             let _ = tx_assert.send(true);
-            Ok(resp_builder.status(StatusCode::BAD_REQUEST).body(Body::empty()).unwrap())
+            Ok(resp_builder
+                .status(StatusCode::BAD_REQUEST)
+                .body("".to_owned())
+                .unwrap())
         } else {
             let _ = tx_assert.send(false);
-            Ok(resp_builder.status(StatusCode::BAD_REQUEST).body(Body::empty()).unwrap())
+            Ok(resp_builder
+                .status(StatusCode::BAD_REQUEST)
+                .body("".to_owned())
+                .unwrap())
         }
     }
 
-    async fn run_http_error_response_on_get_web_dav_service(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    async fn run_http_error_response_on_get_web_dav_service(
+        req: Request<impl hyper::body::Body>,
+    ) -> Result<Response<String>, Infallible> {
         let tx_assert = get_tx_for("run_http_error_response_on_get");
         let resp_builder = Response::builder();
 
@@ -1225,68 +1525,108 @@ mod nextcloud_tests {
                                  </d:response>
                                 </d:multistatus>
                             "#;
-            Ok(resp_builder.status(StatusCode::MULTI_STATUS).body(Body::from(xml)).unwrap())
+            Ok(resp_builder
+                .status(StatusCode::MULTI_STATUS)
+                .body(xml.to_owned())
+                .unwrap())
         } else if req.method() == &hyper::Method::GET {
             let _ = tx_assert.send(true);
-            Ok(resp_builder.status(StatusCode::BAD_REQUEST).body(Body::empty()).unwrap())
+            Ok(resp_builder
+                .status(StatusCode::BAD_REQUEST)
+                .body("".to_owned())
+                .unwrap())
         } else {
             let _ = tx_assert.send(false);
-            Ok(resp_builder.status(StatusCode::BAD_REQUEST).body(Body::empty()).unwrap())
+            Ok(resp_builder
+                .status(StatusCode::BAD_REQUEST)
+                .body("".to_owned())
+                .unwrap())
         }
     }
 
     async fn start_web_dav_server(command: &'static str, port: u16) {
-        match command {
-            "run_col_not_exists" => {
-                let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
-                let make_svc = make_service_fn(|_conn| async {
-                    Ok::<_, Infallible>(service_fn(run_col_not_exists_web_dav_service))
-                });
-                let server = Server::bind(&addr).serve(make_svc);
-                server.await.unwrap();
-            }
-            "run_download_a_file_from_the_server" => {
-                let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
-                let make_svc = make_service_fn(|_conn| async {
-                    Ok::<_, Infallible>(service_fn(run_download_a_file_from_the_server_web_dav_service))
-                });
-                let server = Server::bind(&addr).serve(make_svc);
-                server.await.unwrap();
-            }
-            "run_http_error_response_on_propfind" => {
-                let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
-                let make_svc = make_service_fn(|_conn| async {
-                    Ok::<_, Infallible>(service_fn(run_http_error_response_on_propfind_web_dav_service))
-                });
-                let server = Server::bind(&addr).serve(make_svc);
-                server.await.unwrap();
-            }
-            "run_http_error_response_on_mkcol" => {
-                let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
-                let make_svc = make_service_fn(|_conn| async {
-                    Ok::<_, Infallible>(service_fn(run_http_error_response_on_mkcol_web_dav_service))
-                });
-                let server = Server::bind(&addr).serve(make_svc);
-                server.await.unwrap();
-            }
-            "run_http_error_response_on_put" => {
-                let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
-                let make_svc = make_service_fn(|_conn| async {
-                    Ok::<_, Infallible>(service_fn(run_http_error_response_on_put_web_dav_service))
-                });
-                let server = Server::bind(&addr).serve(make_svc);
-                server.await.unwrap();
-            }
-            "run_http_error_response_on_get" => {
-                let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
-                let make_svc = make_service_fn(|_conn| async {
-                    Ok::<_, Infallible>(service_fn(run_http_error_response_on_get_web_dav_service))
-                });
-                let server = Server::bind(&addr).serve(make_svc);
-                server.await.unwrap();
-            }
-            test_case => {
-                panic!("Unknown test case: {}", test_case);
+        loop {
+            let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
+            let listener = TcpListener::bind(addr).await.unwrap();
+            let (tcp, _) = listener.accept().await.unwrap();
+            let io = TokioIo::new(tcp);
+
+            match command {
+                "run_col_not_exists" => {
+                    if let Err(err) = http1::Builder::new()
+                        .timer(TokioTimer::new())
+                        .serve_connection(io, service_fn(run_col_not_exists_web_dav_service))
+                        .await
+                    {
+                        println!(
+                            "Error serving connection for run_col_not_exists_web_dav_service: {:?}",
+                            err
+                        );
+                    }
+                }
+                "run_download_a_file_from_the_server" => {
+                    if let Err(err) = http1::Builder::new()
+                        .timer(TokioTimer::new())
+                        .serve_connection(
+                            io,
+                            service_fn(run_download_a_file_from_the_server_web_dav_service),
+                        )
+                        .await
+                    {
+                        println!("Error serving connection for run_download_a_file_from_the_server_web_dav_service: {:?}", err);
+                    }
+                }
+                "run_http_error_response_on_propfind" => {
+                    if let Err(err) = http1::Builder::new()
+                        .timer(TokioTimer::new())
+                        .serve_connection(
+                            io,
+                            service_fn(run_http_error_response_on_propfind_web_dav_service),
+                        )
+                        .await
+                    {
+                        println!("Error serving connection for run_http_error_response_on_propfind_web_dav_service: {:?}", err);
+                    }
+                }
+                "run_http_error_response_on_mkcol" => {
+                    if let Err(err) = http1::Builder::new()
+                        .timer(TokioTimer::new())
+                        .serve_connection(
+                            io,
+                            service_fn(run_http_error_response_on_mkcol_web_dav_service),
+                        )
+                        .await
+                    {
+                        println!("Error serving connection for run_http_error_response_on_mkcol_web_dav_service: {:?}", err);
+                    }
+                }
+                "run_http_error_response_on_put" => {
+                    if let Err(err) = http1::Builder::new()
+                        .timer(TokioTimer::new())
+                        .serve_connection(
+                            io,
+                            service_fn(run_http_error_response_on_put_web_dav_service),
+                        )
+                        .await
+                    {
+                        println!("Error serving connection for run_http_error_response_on_put_web_dav_service: {:?}", err);
+                    }
+                }
+                "run_http_error_response_on_get" => {
+                    if let Err(err) = http1::Builder::new()
+                        .timer(TokioTimer::new())
+                        .serve_connection(
+                            io,
+                            service_fn(run_http_error_response_on_get_web_dav_service),
+                        )
+                        .await
+                    {
+                        println!("Error serving connection for run_http_error_response_on_get_web_dav_service: {:?}", err);
+                    }
+                }
+                test_case => {
+                    panic!("Unknown test case: {}", test_case);
+                }
             }
         }
     }

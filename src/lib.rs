@@ -22,7 +22,6 @@
 
 extern crate async_trait;
 extern crate base64;
-extern crate terminal_clipboard;
 extern crate dirs;
 extern crate futures;
 extern crate http;
@@ -37,6 +36,7 @@ extern crate rand;
 extern crate rs_password_utils;
 extern crate secstr;
 extern crate sha3;
+extern crate terminal_clipboard;
 extern crate toml;
 extern crate xml;
 
@@ -55,34 +55,24 @@ use crate::asynch::dropbox::DropboxConfiguration;
 use crate::asynch::nextcloud::NextcloudConfiguration;
 use crate::asynch::ReqwestClientFactory;
 
-use self::api::{
-    Props,
-    RklConfiguration,
-    RklContent,
-    SystemConfiguration,
-};
-pub use self::api::{
-    AllConfigurations,
-    Entry,
-    EntryMeta,
-    EntryPresentationType,
-    Menu,
-    MessageSeverity,
-    UserOption,
-    UserSelection,
-};
 use self::api::safe::Safe;
 use self::api::UiCommand;
-use self::asynch::AsyncEditorFacade;
+pub use self::api::{
+    AllConfigurations, Entry, EntryMeta, EntryPresentationType, Menu, MessageSeverity, UserOption,
+    UserSelection,
+};
+use self::api::{Props, RklConfiguration, RklContent, SystemConfiguration};
 pub use self::asynch::dropbox;
 pub use self::asynch::nextcloud;
+use self::asynch::AsyncEditorFacade;
 
-mod file_handler;
-mod errors;
-mod protected;
-mod datacrypt;
-mod asynch;
 mod api;
+mod asynch;
+mod datacrypt;
+mod errors;
+mod file_handler;
+mod protected;
+mod rest_server;
 mod selection_handling;
 mod utils;
 
@@ -91,33 +81,44 @@ const PROPS_FILENAME: &str = ".props";
 
 /// Takes a reference of `Editor` implementation as argument and executes the _rust-keylock_ logic.
 /// The `Editor` is responsible for the interaction with the user. Currently there are `Editor` implementations for __shell__ and for __Android__.
-pub fn execute_async(editor: Box<dyn AsyncEditor>) {
+pub async fn execute_async(editor: Box<dyn AsyncEditor>) {
+    // Channel to send commands to the UI. The user responses (what the user selects in the current UI presentation)
     let (command_tx, command_rx) = mpsc::channel();
+    // tx used to send force exit to the UI (the UI should close)
     let (ui_tx, ui_rx) = mpsc::channel();
     let mut ui_rx_vec = Vec::new();
 
-    thread::spawn(move || {
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            openssl_probe::init_ssl_cert_env_vars();
-            info!("Starting rust-keylock...");
-            let props = match file_handler::load_properties(PROPS_FILENAME) {
-                Ok(m) => m,
-                Err(error) => {
-                    error!("Could not load properties. Using defaults. The error was: {}", error);
-                    Props::default()
-                }
-            };
+    tokio::task::spawn(async {
+        rest_server::init()
+            .await
+            .expect("Could not start the HTTP server")
+    });
 
-            let editor_facade = asynch::AsyncEditorFacade::new(ui_rx, command_tx, props.clone());
-            let mut executor = CoreLogicHandler::new(editor_facade, props);
-            loop {
-                let (new_executor, stop) = executor.handle().await.unwrap();
-                executor = new_executor;
-                if stop {
-                    break;
-                }
+    tokio::task::spawn(async {
+        unsafe {
+            openssl_probe::init_openssl_env_vars();
+        }
+        info!("Starting rust-keylock...");
+        let props = match file_handler::load_properties(PROPS_FILENAME) {
+            Ok(m) => m,
+            Err(error) => {
+                error!(
+                    "Could not load properties. Using defaults. The error was: {}",
+                    error
+                );
+                Props::default()
             }
-        });
+        };
+
+        let editor_facade = asynch::AsyncEditorFacade::new(ui_rx, command_tx, props.clone());
+        let mut executor = CoreLogicHandler::new(editor_facade, props);
+        loop {
+            let (new_executor, stop) = executor.handle().await.unwrap();
+            executor = new_executor;
+            if stop {
+                break;
+            }
+        }
     });
 
     // The select macro is a nightly feature and is going to be deprecated. Use polling until a better solution is found.
@@ -125,34 +126,32 @@ pub fn execute_async(editor: Box<dyn AsyncEditor>) {
     loop {
         thread::park_timeout(asynch::ASYNC_EDITOR_PARK_TIMEOUT);
         match command_rx.try_recv() {
-            Ok(command) => {
-                match command {
-                    UiCommand::ShowPasswordEnter => {
-                        ui_rx_vec.push(editor.show_password_enter());
-                    }
-                    UiCommand::ShowChangePassword => {
-                        ui_rx_vec.push(editor.show_change_password());
-                    }
-                    UiCommand::ShowMenu(menu) => {
-                        ui_rx_vec.push(editor.show_menu(&menu));
-                    }
-                    UiCommand::ShowEntries(entries, filter) => {
-                        ui_rx_vec.push(editor.show_entries(entries, filter));
-                    }
-                    UiCommand::ShowEntry(entry, index, presentation_type) => {
-                        ui_rx_vec.push(editor.show_entry(entry, index, presentation_type));
-                    }
-                    UiCommand::ShowConfiguration(nextcloud, dropbox) => {
-                        ui_rx_vec.push(editor.show_configuration(nextcloud, dropbox));
-                    }
-                    UiCommand::ShowMessage(message, options, severity) => {
-                        ui_rx_vec.push(editor.show_message(&message, options, severity));
-                    }
-                    UiCommand::Exit(contents_changed) => {
-                        ui_rx_vec.push(editor.exit(contents_changed));
-                    }
+            Ok(command) => match command {
+                UiCommand::ShowPasswordEnter => {
+                    ui_rx_vec.push(editor.show_password_enter());
                 }
-            }
+                UiCommand::ShowChangePassword => {
+                    ui_rx_vec.push(editor.show_change_password());
+                }
+                UiCommand::ShowMenu(menu) => {
+                    ui_rx_vec.push(editor.show_menu(&menu));
+                }
+                UiCommand::ShowEntries(entries, filter) => {
+                    ui_rx_vec.push(editor.show_entries(entries, filter));
+                }
+                UiCommand::ShowEntry(entry, index, presentation_type) => {
+                    ui_rx_vec.push(editor.show_entry(entry, index, presentation_type));
+                }
+                UiCommand::ShowConfiguration(nextcloud, dropbox) => {
+                    ui_rx_vec.push(editor.show_configuration(nextcloud, dropbox));
+                }
+                UiCommand::ShowMessage(message, options, severity) => {
+                    ui_rx_vec.push(editor.show_message(&message, options, severity));
+                }
+                UiCommand::Exit(contents_changed) => {
+                    ui_rx_vec.push(editor.exit(contents_changed));
+                }
+            },
             Err(TryRecvError::Disconnected) => {
                 break;
             }
@@ -200,7 +199,9 @@ fn try_recv_from_vec(rxs: &mut Vec<Receiver<UserSelection>>) -> Option<UserSelec
 }
 
 pub fn execute(editor: Box<dyn Editor>) {
-    openssl_probe::init_ssl_cert_env_vars();
+    unsafe {
+        openssl_probe::init_openssl_env_vars();
+    }
     info!("Starting rust-keylock...");
     let (command_tx, command_rx) = mpsc::channel();
     let (ui_tx, ui_rx) = mpsc::channel();
@@ -210,7 +211,10 @@ pub fn execute(editor: Box<dyn Editor>) {
             let props = match file_handler::load_properties(PROPS_FILENAME) {
                 Ok(m) => m,
                 Err(error) => {
-                    error!("Could not load properties. Using defaults. The error was: {}", error);
+                    error!(
+                        "Could not load properties. Using defaults. The error was: {}",
+                        error
+                    );
                     Props::default()
                 }
             };
@@ -230,54 +234,55 @@ pub fn execute(editor: Box<dyn Editor>) {
 
     loop {
         match command_rx.recv() {
-            Ok(command) => {
-                match command {
-                    UiCommand::ShowPasswordEnter => {
-                        debug!("Showing password");
-                        send(&ui_tx, editor.show_password_enter())
-                    }
-                    UiCommand::ShowChangePassword => {
-                        debug!("Showing change password");
-                        send(&ui_tx, editor.show_change_password())
-                    }
-                    UiCommand::ShowMenu(menu) => {
-                        debug!("Showing menu {:?}", menu);
-                        let sel = editor.show_menu(&menu);
-                        let should_break = sel == UserSelection::GoTo(Menu::ForceExit);
-                        send(&ui_tx, sel);
-                        if should_break {
-                            break;
-                        }
-                    }
-                    UiCommand::ShowEntries(entries, filter) => {
-                        debug!("Showing entries");
-                        send(&ui_tx, editor.show_entries(entries, filter))
-                    }
-                    UiCommand::ShowEntry(entry, index, presentation_type) => {
-                        debug!("Showing entry");
-                        send(&ui_tx, editor.show_entry(entry, index, presentation_type))
-                    }
-                    UiCommand::ShowConfiguration(nextcloud, dropbox) => {
-                        debug!("Showing configuration");
-                        send(&ui_tx, editor.show_configuration(nextcloud, dropbox))
-                    }
-                    UiCommand::ShowMessage(message, options, severity) => {
-                        debug!("Showing message");
-                        send(&ui_tx, editor.show_message(&message, options, severity))
-                    }
-                    UiCommand::Exit(contents_changed) => {
-                        debug!("Exiting");
-                        let sel = editor.exit(contents_changed);
-                        let should_break = sel == UserSelection::GoTo(Menu::ForceExit);
-                        send(&ui_tx, sel);
-                        if should_break {
-                            break;
-                        }
+            Ok(command) => match command {
+                UiCommand::ShowPasswordEnter => {
+                    debug!("Showing password");
+                    send(&ui_tx, editor.show_password_enter())
+                }
+                UiCommand::ShowChangePassword => {
+                    debug!("Showing change password");
+                    send(&ui_tx, editor.show_change_password())
+                }
+                UiCommand::ShowMenu(menu) => {
+                    debug!("Showing menu {:?}", menu);
+                    let sel = editor.show_menu(&menu);
+                    let should_break = sel == UserSelection::GoTo(Menu::ForceExit);
+                    send(&ui_tx, sel);
+                    if should_break {
+                        break;
                     }
                 }
-            }
+                UiCommand::ShowEntries(entries, filter) => {
+                    debug!("Showing entries");
+                    send(&ui_tx, editor.show_entries(entries, filter))
+                }
+                UiCommand::ShowEntry(entry, index, presentation_type) => {
+                    debug!("Showing entry");
+                    send(&ui_tx, editor.show_entry(entry, index, presentation_type))
+                }
+                UiCommand::ShowConfiguration(nextcloud, dropbox) => {
+                    debug!("Showing configuration");
+                    send(&ui_tx, editor.show_configuration(nextcloud, dropbox))
+                }
+                UiCommand::ShowMessage(message, options, severity) => {
+                    debug!("Showing message");
+                    send(&ui_tx, editor.show_message(&message, options, severity))
+                }
+                UiCommand::Exit(contents_changed) => {
+                    debug!("Exiting");
+                    let sel = editor.exit(contents_changed);
+                    let should_break = sel == UserSelection::GoTo(Menu::ForceExit);
+                    send(&ui_tx, sel);
+                    if should_break {
+                        break;
+                    }
+                }
+            },
             Err(error) => {
-                error!("Error while receiving command from spawned execution: {:?}", error);
+                error!(
+                    "Error while receiving command from spawned execution: {:?}",
+                    error
+                );
                 break;
             }
         }
@@ -319,7 +324,8 @@ impl CoreLogicHandler {
         let mut configuration = RklConfiguration::from((
             nextcloud::NextcloudConfiguration::default(),
             dropbox::DropboxConfiguration::default(),
-            SystemConfiguration::default()));
+            SystemConfiguration::default(),
+        ));
         // Signals changes that are not saved
         let contents_changed = false;
         let mut async_task_handles = HashMap::new();
@@ -333,16 +339,24 @@ impl CoreLogicHandler {
             };
 
             // Take the provided password and do the initialization
-            let (us, cr) = handle_provided_password_for_init(provided_password, FILENAME, &mut safe, &mut configuration, &editor);
+            let (us, cr) = handle_provided_password_for_init(
+                provided_password,
+                FILENAME,
+                &mut safe,
+                &mut configuration,
+                &editor,
+            );
             // If a valid nextcloud configuration is in place, spawn the background async execution
             if configuration.nextcloud.is_filled() {
-                let (handle, nextcloud_sync_status_rx) = spawn_nextcloud_async_task(FILENAME, &configuration, &async_task_handles);
+                let (handle, nextcloud_sync_status_rx) =
+                    spawn_nextcloud_async_task(FILENAME, &configuration, &async_task_handles);
                 async_task_handles.insert("nextcloud", handle);
                 editor.update_nextcloud_rx(Some(nextcloud_sync_status_rx));
             }
             // If a valid dropbox configuration is in place, spawn the background async execution
             if configuration.dropbox.is_filled() {
-                let (handle, dropbox_sync_status_rx) = spawn_dropbox_async_task(FILENAME, &configuration, &async_task_handles);
+                let (handle, dropbox_sync_status_rx) =
+                    spawn_dropbox_async_task(FILENAME, &configuration, &async_task_handles);
                 async_task_handles.insert("dropbox", handle);
                 editor.update_dropbox_rx(Some(dropbox_sync_status_rx));
             }
@@ -382,23 +396,35 @@ impl CoreLogicHandler {
                     FILENAME,
                     &mut s.safe,
                     &mut s.configuration,
-                    &s.editor);
+                    &s.editor,
+                );
                 if update_last_sync_version {
                     s.configuration.update_system_last_sync();
-                    let rkl_content = RklContent::from((&s.safe, &s.configuration.nextcloud, &s.configuration.dropbox, &s.configuration.system));
-                    let _ = rkl_content.and_then(|c| file_handler::save(c, FILENAME, &s.cryptor, true));
+                    let rkl_content = RklContent::from((
+                        &s.safe,
+                        &s.configuration.nextcloud,
+                        &s.configuration.dropbox,
+                        &s.configuration.system,
+                    ));
+                    let _ =
+                        rkl_content.and_then(|c| file_handler::save(c, FILENAME, &s.cryptor, true));
                 }
                 // If a valid nextcloud configuration is in place, spawn the background async execution
                 if s.configuration.nextcloud.is_filled() {
                     debug!("A valid configuration for Nextcloud synchronization was found. Spawning async tasks");
-                    let (handle, nextcloud_sync_status_rx) = spawn_nextcloud_async_task(FILENAME, &s.configuration, &s.async_task_handles);
+                    let (handle, nextcloud_sync_status_rx) = spawn_nextcloud_async_task(
+                        FILENAME,
+                        &s.configuration,
+                        &s.async_task_handles,
+                    );
                     s.async_task_handles.insert("nextcloud", handle);
                     s.editor.update_nextcloud_rx(Some(nextcloud_sync_status_rx));
                 }
                 // If a valid dropbox configuration is in place, spawn the background async execution
                 if s.configuration.dropbox.is_filled() {
                     debug!("A valid configuration for dropbox synchronization was found. Spawning async tasks");
-                    let (handle, dropbox_sync_status_rx) = spawn_dropbox_async_task(FILENAME, &s.configuration, &s.async_task_handles);
+                    let (handle, dropbox_sync_status_rx) =
+                        spawn_dropbox_async_task(FILENAME, &s.configuration, &s.async_task_handles);
                     s.async_task_handles.insert("dropbox", handle);
                     s.editor.update_nextcloud_rx(Some(dropbox_sync_status_rx));
                 }
@@ -418,13 +444,19 @@ impl CoreLogicHandler {
             }
             UserSelection::ProvidedPassword(pwd, salt_pos) => {
                 debug!("UserSelection::GoTo(Menu::ProvidedPassword)");
-                s.cryptor = file_handler::create_bcryptor(FILENAME, pwd.to_string(), *salt_pos, true, true).unwrap();
+                s.cryptor =
+                    file_handler::create_bcryptor(FILENAME, pwd.to_string(), *salt_pos, true, true)
+                        .unwrap();
                 UserSelection::GoTo(Menu::Main)
             }
             UserSelection::GoTo(Menu::EntriesList(filter)) => {
-                debug!("UserSelection::GoTo(Menu::EntriesList) with filter '{}'", &filter);
+                debug!(
+                    "UserSelection::GoTo(Menu::EntriesList) with filter '{}'",
+                    &filter
+                );
                 s.safe.set_filter(filter.clone());
-                s.editor.show_entries(s.safe.get_entries().to_vec(), s.safe.get_filter())
+                s.editor
+                    .show_entries(s.safe.get_entries().to_vec(), s.safe.get_filter())
             }
             UserSelection::GoTo(Menu::NewEntry(opt)) => {
                 debug!("UserSelection::GoTo(Menu::NewEntry)");
@@ -432,30 +464,53 @@ impl CoreLogicHandler {
             }
             UserSelection::GoTo(Menu::ShowEntry(index)) => {
                 debug!("UserSelection::GoTo(Menu::ShowEntry(index))");
-                s.editor.show_entry(s.safe.get_entry_decrypted(index), index, EntryPresentationType::View)
+                s.editor.show_entry(
+                    s.safe.get_entry_decrypted(index),
+                    index,
+                    EntryPresentationType::View,
+                )
             }
             UserSelection::GoTo(Menu::EditEntry(index)) => {
                 debug!("UserSelection::GoTo(Menu::EditEntry(index))");
-                s.editor.show_entry(s.safe.get_entry_decrypted(index), index, EntryPresentationType::Edit)
+                s.editor.show_entry(
+                    s.safe.get_entry_decrypted(index),
+                    index,
+                    EntryPresentationType::Edit,
+                )
             }
             UserSelection::GoTo(Menu::DeleteEntry(index)) => {
                 debug!("UserSelection::GoTo(Menu::DeleteEntry(index))");
-                s.editor.show_entry(s.safe.get_entry_decrypted(index), index, EntryPresentationType::Delete)
+                s.editor.show_entry(
+                    s.safe.get_entry_decrypted(index),
+                    index,
+                    EntryPresentationType::Delete,
+                )
             }
             UserSelection::GoTo(Menu::Save(update_last_sync_version)) => {
-                debug!("UserSelection::GoTo(Menu::Save({}))", update_last_sync_version);
-                if s.configuration.nextcloud.is_filled() &&
-                    s.configuration.dropbox.is_filled() {
+                debug!(
+                    "UserSelection::GoTo(Menu::Save({}))",
+                    update_last_sync_version
+                );
+                if s.configuration.nextcloud.is_filled() && s.configuration.dropbox.is_filled() {
                     error!("Cannot save because both Nextcloud and Dropbox are configured");
                     s.editor.show_message("Having both Nextcloud and Dropbox configured may lead to unexpected state and currently is not allowed.\
                     Please configure only one of them.", vec![UserOption::ok()], MessageSeverity::Error);
                     UserSelection::GoTo(Menu::Current)
                 } else {
-                    let _ = s.configuration.update_system_for_save(update_last_sync_version).map_err(|error| error!("Cannot update system for save: {:?}", error));
+                    let _ = s
+                        .configuration
+                        .update_system_for_save(update_last_sync_version)
+                        .map_err(|error| error!("Cannot update system for save: {:?}", error));
                     // Reset the filter
                     s.safe.set_filter("".to_string());
-                    let rkl_content = RklContent::from((&s.safe, &s.configuration.nextcloud, &s.configuration.dropbox, &s.configuration.system));
-                    let res = rkl_content.and_then(|c| file_handler::save(c, FILENAME, &s.cryptor, true));
+                    let rkl_content = RklContent::from((
+                        &s.safe,
+                        &s.configuration.nextcloud,
+                        &s.configuration.dropbox,
+                        &s.configuration.system,
+                    ));
+                    let res =
+                        rkl_content.and_then(|c| file_handler::save(c, FILENAME, &s.cryptor, true));
                     match res {
                         Ok(_) => {
                             // Cancel any pending background tasks
@@ -466,22 +521,38 @@ impl CoreLogicHandler {
                             s.contents_changed = false;
                             if s.configuration.nextcloud.is_filled() {
                                 // Start a new background async task
-                                let (handle, nextcloud_sync_status_rx) = spawn_nextcloud_async_task(FILENAME, &s.configuration, &s.async_task_handles);
+                                let (handle, nextcloud_sync_status_rx) = spawn_nextcloud_async_task(
+                                    FILENAME,
+                                    &s.configuration,
+                                    &s.async_task_handles,
+                                );
                                 s.async_task_handles.insert("nextcloud", handle);
                                 s.editor.update_nextcloud_rx(Some(nextcloud_sync_status_rx));
                             }
                             if s.configuration.dropbox.is_filled() {
                                 // Start a new background async task
-                                let (handle, dropbox_sync_status_rx) = spawn_dropbox_async_task(FILENAME, &s.configuration, &s.async_task_handles);
+                                let (handle, dropbox_sync_status_rx) = spawn_dropbox_async_task(
+                                    FILENAME,
+                                    &s.configuration,
+                                    &s.async_task_handles,
+                                );
                                 s.async_task_handles.insert("dropbox", handle);
                                 s.editor.update_dropbox_rx(Some(dropbox_sync_status_rx));
                             }
                             if !update_last_sync_version {
-                                let _ = s.editor.show_message("Encrypted and saved successfully!", vec![UserOption::ok()], MessageSeverity::default());
+                                let _ = s.editor.show_message(
+                                    "Encrypted and saved successfully!",
+                                    vec![UserOption::ok()],
+                                    MessageSeverity::default(),
+                                );
                             }
                         }
                         Err(error) => {
-                            let _ = s.editor.show_message("Could not save...", vec![UserOption::ok()], MessageSeverity::Error);
+                            let _ = s.editor.show_message(
+                                "Could not save...",
+                                vec![UserOption::ok()],
+                                MessageSeverity::Error,
+                            );
                             error!("Could not save... {:?}", error);
                         }
                     };
@@ -504,7 +575,10 @@ impl CoreLogicHandler {
             UserSelection::NewEntry(mut entry) => {
                 debug!("UserSelection::NewEntry(entry)");
 
-                let entry_to_replace_opt = match RklPasswordChecker::default().is_unsafe(&entry.pass).await {
+                let entry_to_replace_opt = match RklPasswordChecker::default()
+                    .is_unsafe(&entry.pass)
+                    .await
+                {
                     Ok(true) => {
                         warn!("The password for entry {} has leaked!", entry.name);
                         let sel = s.editor.show_message(
@@ -513,7 +587,10 @@ impl CoreLogicHandler {
                             MessageSeverity::Warn);
 
                         if sel == UserSelection::UserOption(UserOption::yes()) {
-                            warn!("The user accepted that entry {} will have leaked password.", entry.name);
+                            warn!(
+                                "The user accepted that entry {} will have leaked password.",
+                                entry.name
+                            );
                             entry.meta.leaked_password = true;
                             Some(entry)
                         } else {
@@ -526,7 +603,10 @@ impl CoreLogicHandler {
                         Some(entry)
                     }
                     Err(error) => {
-                        debug!("No information about password leakage for entry {}. Reason: {}", entry.name, error);
+                        debug!(
+                            "No information about password leakage for entry {}. Reason: {}",
+                            entry.name, error
+                        );
                         Some(entry)
                     }
                 };
@@ -542,7 +622,10 @@ impl CoreLogicHandler {
             UserSelection::ReplaceEntry(index, mut entry) => {
                 debug!("UserSelection::ReplaceEntry(index, entry)");
 
-                let entry_to_replace_opt = match RklPasswordChecker::default().is_unsafe(&entry.pass).await {
+                let entry_to_replace_opt = match RklPasswordChecker::default()
+                    .is_unsafe(&entry.pass)
+                    .await
+                {
                     Ok(true) => {
                         warn!("The password for entry {} has leaked!", entry.name);
                         let sel = s.editor.show_message(
@@ -551,7 +634,10 @@ impl CoreLogicHandler {
                             MessageSeverity::Warn);
 
                         if sel == UserSelection::UserOption(UserOption::yes()) {
-                            warn!("The user accepted that entry {} will have leaked password.", entry.name);
+                            warn!(
+                                "The user accepted that entry {} will have leaked password.",
+                                entry.name
+                            );
                             entry.meta.leaked_password = true;
                             Some(entry)
                         } else {
@@ -564,7 +650,10 @@ impl CoreLogicHandler {
                         Some(entry)
                     }
                     Err(error) => {
-                        debug!("No information about password leakage for entry {}. Reason: {}", entry.name, error);
+                        debug!(
+                            "No information about password leakage for entry {}. Reason: {}",
+                            entry.name, error
+                        );
                         Some(entry)
                     }
                 };
@@ -587,16 +676,22 @@ impl CoreLogicHandler {
                 debug!("UserSelection::DeleteEntry(index)");
                 let _ = s.safe.remove_entry(index).map_err(|err| {
                     error!("Could not delete entry {:?}", err);
-                    let _ = s.editor.show_message("Could not delete entry. Please see the logs for more details.", vec![UserOption::ok()], MessageSeverity::Error);
+                    let _ = s.editor.show_message(
+                        "Could not delete entry. Please see the logs for more details.",
+                        vec![UserOption::ok()],
+                        MessageSeverity::Error,
+                    );
                 });
                 s.contents_changed = true;
                 UserSelection::GoTo(Menu::EntriesList("".to_string()))
             }
             UserSelection::GoTo(Menu::TryFileRecovery) => {
                 debug!("UserSelection::GoTo(Menu::TryFileRecovery)");
-                let _ = s.editor.show_message("The password entries are corrupted.\n\nPress Enter to attempt recovery...",
-                                              vec![UserOption::ok()],
-                                              MessageSeverity::Error);
+                let _ = s.editor.show_message(
+                    "The password entries are corrupted.\n\nPress Enter to attempt recovery...",
+                    vec![UserOption::ok()],
+                    MessageSeverity::Error,
+                );
                 let mut rec_entries = match file_handler::recover(FILENAME, &s.cryptor) {
                     Ok(recovered_entries) => {
                         let message = r#"
@@ -607,7 +702,11 @@ Press Enter to show the Recovered Entries and if you are ok with it, save them.
 
 Warning: Saving will discard all the entries that could not be recovered.
 "#;
-                        let _ = s.editor.show_message(message, vec![UserOption::ok()], MessageSeverity::default());
+                        let _ = s.editor.show_message(
+                            message,
+                            vec![UserOption::ok()],
+                            MessageSeverity::default(),
+                        );
                         s.contents_changed = true;
                         s.safe.entries.clear();
                         recovered_entries
@@ -615,7 +714,11 @@ Warning: Saving will discard all the entries that could not be recovered.
                     Err(error) => {
                         let message = format!("Recovery failed... Reason {:?}", error);
                         error!("{}", &message);
-                        let _ = s.editor.show_message("Recovery failed...", vec![UserOption::ok()], MessageSeverity::Error);
+                        let _ = s.editor.show_message(
+                            "Recovery failed...",
+                            vec![UserOption::ok()],
+                            MessageSeverity::Error,
+                        );
                         s.safe.entries.clone()
                     }
                 };
@@ -630,30 +733,52 @@ Warning: Saving will discard all the entries that could not be recovered.
             UserSelection::ExportTo(path) => {
                 debug!("UserSelection::ExportTo(path)");
                 let do_export = if file_handler::file_exists(&PathBuf::from(&path)) {
-                    let selection = s.editor.show_message("This will overwrite an existing file. Do you want to proceed?",
-                                                          vec![UserOption::yes(), UserOption::no()],
-                                                          MessageSeverity::Warn);
+                    let selection = s.editor.show_message(
+                        "This will overwrite an existing file. Do you want to proceed?",
+                        vec![UserOption::yes(), UserOption::no()],
+                        MessageSeverity::Warn,
+                    );
 
-                    debug!("The user selected {:?} as an answer for overwriting the file {}", selection, path);
+                    debug!(
+                        "The user selected {:?} as an answer for overwriting the file {}",
+                        selection, path
+                    );
                     selection == UserSelection::UserOption(UserOption::yes())
                 } else {
                     true
                 };
 
                 if do_export {
-                    match RklContent::from((&s.safe, &s.configuration.nextcloud, &s.configuration.dropbox, &s.configuration.system)) {
-                        Ok(c) => {
-                            match file_handler::save(c, &path, &s.cryptor, false) {
-                                Ok(_) => { let _ = s.editor.show_message("Export completed successfully!", vec![UserOption::ok()], MessageSeverity::default()); }
-                                Err(error) => {
-                                    error!("Could not export... {:?}", error);
-                                    let _ = s.editor.show_message("Could not export...", vec![UserOption::ok()], MessageSeverity::Error);
-                                }
+                    match RklContent::from((
+                        &s.safe,
+                        &s.configuration.nextcloud,
+                        &s.configuration.dropbox,
+                        &s.configuration.system,
+                    )) {
+                        Ok(c) => match file_handler::save(c, &path, &s.cryptor, false) {
+                            Ok(_) => {
+                                let _ = s.editor.show_message(
+                                    "Export completed successfully!",
+                                    vec![UserOption::ok()],
+                                    MessageSeverity::default(),
+                                );
                             }
-                        }
+                            Err(error) => {
+                                error!("Could not export... {:?}", error);
+                                let _ = s.editor.show_message(
+                                    "Could not export...",
+                                    vec![UserOption::ok()],
+                                    MessageSeverity::Error,
+                                );
+                            }
+                        },
                         Err(error) => {
                             error!("Could not export... {:?}", error);
-                            let _ = s.editor.show_message("Could not export...", vec![UserOption::ok()], MessageSeverity::Error);
+                            let _ = s.editor.show_message(
+                                "Could not export...",
+                                vec![UserOption::ok()],
+                                MessageSeverity::Error,
+                            );
                         }
                     };
                     UserSelection::GoTo(Menu::Main)
@@ -665,26 +790,38 @@ Warning: Saving will discard all the entries that could not be recovered.
                 debug!("UserSelection::GoTo(Menu::ImportEntries)");
                 s.editor.show_menu(&Menu::ImportEntries)
             }
-            us @ UserSelection::ImportFrom(_, _, _) |
-            us @ UserSelection::ImportFromDefaultLocation(_, _, _) => {
+            us @ UserSelection::ImportFrom(_, _, _)
+            | us @ UserSelection::ImportFromDefaultLocation(_, _, _) => {
                 let import_from_default_location = match us {
                     UserSelection::ImportFrom(_, _, _) => false,
                     UserSelection::ImportFromDefaultLocation(_, _, _) => true,
                     _ => false,
                 };
                 match us {
-                    UserSelection::ImportFrom(path, pwd, salt_pos) |
-                    UserSelection::ImportFromDefaultLocation(path, pwd, salt_pos) => {
-                        let cr = file_handler::create_bcryptor(&path, pwd.to_string(), *salt_pos, false, import_from_default_location).unwrap();
+                    UserSelection::ImportFrom(path, pwd, salt_pos)
+                    | UserSelection::ImportFromDefaultLocation(path, pwd, salt_pos) => {
+                        let cr = file_handler::create_bcryptor(
+                            &path,
+                            pwd.to_string(),
+                            *salt_pos,
+                            false,
+                            import_from_default_location,
+                        )
+                        .unwrap();
                         debug!("UserSelection::ImportFrom(path, pwd, salt_pos)");
 
                         match file_handler::load(&path, &cr, import_from_default_location) {
                             Err(error) => {
                                 error!("Could not import... {:?}", error);
-                                let _ = s.editor.show_message("Could not import...", vec![UserOption::ok()], MessageSeverity::Error);
+                                let _ = s.editor.show_message(
+                                    "Could not import...",
+                                    vec![UserOption::ok()],
+                                    MessageSeverity::Error,
+                                );
                             }
                             Ok(rkl_content) => {
-                                let message = format!("Imported {} entries!", &rkl_content.entries.len());
+                                let message =
+                                    format!("Imported {} entries!", &rkl_content.entries.len());
                                 debug!("{}", message);
                                 // Mark contents changed
                                 s.contents_changed = true;
@@ -695,7 +832,11 @@ Warning: Saving will discard all the entries that could not be recovered.
                                 // Make the last_sync_version equal to the local one.
                                 s.configuration.update_system_last_sync();
 
-                                let _ = s.editor.show_message(&message, vec![UserOption::ok()], MessageSeverity::default());
+                                let _ = s.editor.show_message(
+                                    &message,
+                                    vec![UserOption::ok()],
+                                    MessageSeverity::default(),
+                                );
                             }
                         };
                     }
@@ -706,12 +847,14 @@ Warning: Saving will discard all the entries that could not be recovered.
             }
             UserSelection::GoTo(Menu::ShowConfiguration) => {
                 debug!("UserSelection::GoTo(Menu::ShowConfiguration)");
-                s.editor.show_configuration(s.configuration.nextcloud.clone(), s.configuration.dropbox.clone())
+                s.editor.show_configuration(
+                    s.configuration.nextcloud.clone(),
+                    s.configuration.dropbox.clone(),
+                )
             }
             UserSelection::UpdateConfiguration(new_conf) => {
                 debug!("UserSelection::UpdateConfiguration");
-                if new_conf.nextcloud.is_filled() &&
-                    new_conf.dropbox.is_filled() {
+                if new_conf.nextcloud.is_filled() && new_conf.dropbox.is_filled() {
                     error!("Cannot update the configuration because both Nextcloud and Dropbox are configured");
                     s.editor.show_message("Having both Nextcloud and Dropbox configured may lead to unexpected state and currently is not allowed.\
                     Please configure only one of them.", vec![UserOption::ok()], MessageSeverity::Error);
@@ -722,7 +865,11 @@ Warning: Saving will discard all the entries that could not be recovered.
                     if s.configuration.nextcloud.is_filled() {
                         debug!("A valid configuration for Nextcloud synchronization was found after being updated by the User. Spawning \
                             nextcloud sync task");
-                        let (handle, nextcloud_sync_status_rx) = spawn_nextcloud_async_task(FILENAME, &s.configuration, &s.async_task_handles);
+                        let (handle, nextcloud_sync_status_rx) = spawn_nextcloud_async_task(
+                            FILENAME,
+                            &s.configuration,
+                            &s.async_task_handles,
+                        );
                         s.async_task_handles.insert("nextcloud", handle);
                         s.editor.update_nextcloud_rx(Some(nextcloud_sync_status_rx));
                         s.contents_changed = true;
@@ -730,7 +877,11 @@ Warning: Saving will discard all the entries that could not be recovered.
                     if s.configuration.dropbox.is_filled() {
                         debug!("A valid configuration for dropbox synchronization was found after being updated by the User. Spawning \
                             dropbox sync task");
-                        let (handle, dropbox_sync_status_rx) = spawn_dropbox_async_task(FILENAME, &s.configuration, &s.async_task_handles);
+                        let (handle, dropbox_sync_status_rx) = spawn_dropbox_async_task(
+                            FILENAME,
+                            &s.configuration,
+                            &s.async_task_handles,
+                        );
                         s.async_task_handles.insert("dropbox", handle);
                         s.editor.update_dropbox_rx(Some(dropbox_sync_status_rx));
                         s.contents_changed = true;
@@ -747,15 +898,29 @@ Warning: Saving will discard all the entries that could not be recovered.
                 match dropbox::retrieve_token(url) {
                     Ok(token) => {
                         if token.is_empty() {
-                            let _ = s.editor.show_message("Empty Dropbox Authentication token was retrieved.", vec![UserOption::ok()], MessageSeverity::Error);
+                            let _ = s.editor.show_message(
+                                "Empty Dropbox Authentication token was retrieved.",
+                                vec![UserOption::ok()],
+                                MessageSeverity::Error,
+                            );
                             UserSelection::GoTo(Menu::ShowConfiguration)
                         } else {
                             UserSelection::GoTo(Menu::SetDbxToken(token))
                         }
                     }
                     Err(error) => {
-                        error!("Error while retrieving Dropbox Authentication token: {} ({:?})", error, error);
-                        let _ = s.editor.show_message(&format!("Error while retrieving Dropbox Authentication token: {}", error), vec![UserOption::ok()], MessageSeverity::Error);
+                        error!(
+                            "Error while retrieving Dropbox Authentication token: {} ({:?})",
+                            error, error
+                        );
+                        let _ = s.editor.show_message(
+                            &format!(
+                                "Error while retrieving Dropbox Authentication token: {}",
+                                error
+                            ),
+                            vec![UserOption::ok()],
+                            MessageSeverity::Error,
+                        );
                         UserSelection::GoTo(Menu::ShowConfiguration)
                     }
                 }
@@ -778,9 +943,13 @@ Warning: Saving will discard all the entries that could not be recovered.
             }
             UserSelection::GeneratePassphrase(index_opt, mut entry) => {
                 debug!("UserSelection::GoTo(Menu::GeneratePassphrase)");
-                entry.pass = rs_password_utils::dice::generate(s.props.generated_passphrases_words_count() as usize);
+                entry.pass = rs_password_utils::dice::generate(
+                    s.props.generated_passphrases_words_count() as usize,
+                );
                 match index_opt {
-                    Some(index) => s.editor.show_entry(entry, index, EntryPresentationType::Edit),
+                    Some(index) => s
+                        .editor
+                        .show_entry(entry, index, EntryPresentationType::Edit),
                     None => s.editor.show_menu(&Menu::NewEntry(Some(entry))),
                 }
             }
@@ -788,15 +957,20 @@ Warning: Saving will discard all the entries that could not be recovered.
                 debug!("UserSelection::CheckPasswords");
                 match handle_check_passwords(&mut s.safe, &RklPasswordChecker::default()).await {
                     Ok(mr) => {
-                        let _ = s.editor.show_message(&mr.message, mr.user_options, mr.severity);
+                        let _ = s
+                            .editor
+                            .show_message(&mr.message, mr.user_options, mr.severity);
                         UserSelection::GoTo(Menu::EntriesList("".to_string()))
                     }
                     Err(error) => {
-                        let _ = s.editor.show_message(error.to_string().as_str(), vec![UserOption::ok()], MessageSeverity::Error);
+                        let _ = s.editor.show_message(
+                            error.to_string().as_str(),
+                            vec![UserOption::ok()],
+                            MessageSeverity::Error,
+                        );
                         UserSelection::GoTo(Menu::EntriesList("".to_string()))
                     }
                 }
-
             }
             UserSelection::GoTo(Menu::Current) => {
                 debug!("UserSelection::GoTo(Menu::Current)");
@@ -815,8 +989,13 @@ Warning: Saving will discard all the entries that could not be recovered.
     }
 }
 
-async fn handle_check_passwords<T>(safe: &mut Safe, password_checker: &T) -> errors::Result<EditorShowMessageWrapper>
-    where T: PasswordChecker {
+async fn handle_check_passwords<T>(
+    safe: &mut Safe,
+    password_checker: &T,
+) -> errors::Result<EditorShowMessageWrapper>
+where
+    T: PasswordChecker,
+{
     let mut pwned_passwords_found: Option<Vec<String>> = None;
     for index in 0..safe.get_entries().len() {
         let mut entry = safe.get_entry_decrypted(index);
@@ -827,13 +1006,15 @@ async fn handle_check_passwords<T>(safe: &mut Safe, password_checker: &T) -> err
                 pwned_passwords_found = Some(Vec::new());
             }
             if is_pwned {
-                pwned_passwords_found.as_mut().unwrap().push(entry.name.clone());
+                pwned_passwords_found
+                    .as_mut()
+                    .unwrap()
+                    .push(entry.name.clone());
             }
             if is_pwned != entry.meta.leaked_password {
                 entry.meta.leaked_password = is_pwned;
                 safe.replace_entry(index, entry)?;
             }
-
         } else {
             error!("Error while checking passwords: {}", pwned_res.unwrap_err());
             pwned_passwords_found = None;
@@ -842,50 +1023,67 @@ async fn handle_check_passwords<T>(safe: &mut Safe, password_checker: &T) -> err
     }
     if pwned_passwords_found.is_none() {
         if !safe.get_entries().is_empty() {
-            Ok(EditorShowMessageWrapper::new("Error while checking passwords health. Please see the logs for more details.",
-                                          vec![UserOption::ok()],
-                                          MessageSeverity::Error))
+            Ok(EditorShowMessageWrapper::new(
+                "Error while checking passwords health. Please see the logs for more details.",
+                vec![UserOption::ok()],
+                MessageSeverity::Error,
+            ))
         } else {
-            Ok(EditorShowMessageWrapper::new("No entries to check",
-                                          vec![UserOption::ok()],
-                                          MessageSeverity::Info))
+            Ok(EditorShowMessageWrapper::new(
+                "No entries to check",
+                vec![UserOption::ok()],
+                MessageSeverity::Info,
+            ))
         }
     } else {
         if !pwned_passwords_found.as_ref().unwrap().is_empty() {
-            let message = format!("The following entries have leaked passwords: {}! Please change them immediately!",
-                                  pwned_passwords_found.unwrap().join(","));
+            let message = format!(
+                "The following entries have leaked passwords: {}! Please change them immediately!",
+                pwned_passwords_found.unwrap().join(",")
+            );
             info!("{}", message);
-            Ok(EditorShowMessageWrapper::new(&message,
-                                          vec![UserOption::ok()],
-                                          MessageSeverity::Warn))
+            Ok(EditorShowMessageWrapper::new(
+                &message,
+                vec![UserOption::ok()],
+                MessageSeverity::Warn,
+            ))
         } else {
             let message = format!("The passwords of the entries look ok!");
             debug!("{}", message);
-            Ok(EditorShowMessageWrapper::new(&message,
-                                          vec![UserOption::ok()],
-                                          MessageSeverity::Info))
+            Ok(EditorShowMessageWrapper::new(
+                &message,
+                vec![UserOption::ok()],
+                MessageSeverity::Info,
+            ))
         }
     }
 }
 
-fn handle_provided_password_for_init(provided_password: UserSelection,
-                                     filename: &str,
-                                     safe: &mut Safe,
-                                     configuration: &mut RklConfiguration,
-                                     editor: &dyn Editor)
-                                     -> (UserSelection, datacrypt::BcryptAes) {
+fn handle_provided_password_for_init(
+    provided_password: UserSelection,
+    filename: &str,
+    safe: &mut Safe,
+    configuration: &mut RklConfiguration,
+    editor: &dyn Editor,
+) -> (UserSelection, datacrypt::BcryptAes) {
     let user_selection: UserSelection;
     match provided_password {
         UserSelection::ProvidedPassword(pwd, salt_pos) => {
             // New Cryptor here
-            let cr = file_handler::create_bcryptor(filename, pwd.to_string(), *salt_pos, false, true).unwrap();
+            let cr =
+                file_handler::create_bcryptor(filename, pwd.to_string(), *salt_pos, false, true)
+                    .unwrap();
             // Try to decrypt and load the Entries
             let retrieved_entries = match file_handler::load(filename, &cr, true) {
                 // Success, go to the List of entries
                 Ok(rkl_content) => {
                     user_selection = UserSelection::GoTo(Menu::EntriesList("".to_string()));
                     // Set the retrieved configuration
-                    let new_rkl_conf = RklConfiguration::from((rkl_content.nextcloud_conf, rkl_content.dropbox_conf, rkl_content.system_conf));
+                    let new_rkl_conf = RklConfiguration::from((
+                        rkl_content.nextcloud_conf,
+                        rkl_content.dropbox_conf,
+                        rkl_content.system_conf,
+                    ));
                     *configuration = new_rkl_conf;
                     rkl_content.entries
                 }
@@ -919,12 +1117,17 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
 
             safe.clear();
             safe.add_all(retrieved_entries);
-            debug!("Retrieved entries. Returning {:?} with {} entries ", &user_selection, safe.entries.len());
+            debug!(
+                "Retrieved entries. Returning {:?} with {} entries ",
+                &user_selection,
+                safe.entries.len()
+            );
             (user_selection, cr)
         }
         UserSelection::GoTo(Menu::Exit) => {
             debug!("UserSelection::GoTo(Menu::Exit) was called before providing credentials");
-            let cr = file_handler::create_bcryptor(filename, "dummy".to_string(), 33, false, true).unwrap();
+            let cr = file_handler::create_bcryptor(filename, "dummy".to_string(), 33, false, true)
+                .unwrap();
             let exit_selection = UserSelection::GoTo(Menu::ForceExit);
             (exit_selection, cr)
         }
@@ -935,10 +1138,14 @@ fn handle_provided_password_for_init(provided_password: UserSelection,
     }
 }
 
-fn spawn_nextcloud_async_task(filename: &str,
-                              configuration: &RklConfiguration,
-                              async_task_handles: &HashMap<&'static str, asynch::AsyncTaskHandle>)
-                              -> (asynch::AsyncTaskHandle, Receiver<errors::Result<asynch::SyncStatus>>) {
+fn spawn_nextcloud_async_task(
+    filename: &str,
+    configuration: &RklConfiguration,
+    async_task_handles: &HashMap<&'static str, asynch::AsyncTaskHandle>,
+) -> (
+    asynch::AsyncTaskHandle,
+    Receiver<errors::Result<asynch::SyncStatus>>,
+) {
     if let Some(async_task) = async_task_handles.get("nextcloud") {
         debug!("Stopping a previously spawned nextcloud async task");
         let _ = async_task.stop();
@@ -948,14 +1155,24 @@ fn spawn_nextcloud_async_task(filename: &str,
     // Create a new channel
     let (tx, rx) = mpsc::sync_channel(10);
     let every = time::Duration::from_millis(10000);
-    let nc = nextcloud::Synchronizer::new(&configuration.nextcloud, &configuration.system, tx, filename).unwrap();
+    let nc = nextcloud::Synchronizer::new(
+        &configuration.nextcloud,
+        &configuration.system,
+        tx,
+        filename,
+    )
+    .unwrap();
     (asynch::execute_task(Box::new(nc), every), rx)
 }
 
-fn spawn_dropbox_async_task(filename: &str,
-                            configuration: &RklConfiguration,
-                            async_task_handles: &HashMap<&'static str, asynch::AsyncTaskHandle>)
-                            -> (asynch::AsyncTaskHandle, Receiver<errors::Result<asynch::SyncStatus>>) {
+fn spawn_dropbox_async_task(
+    filename: &str,
+    configuration: &RklConfiguration,
+    async_task_handles: &HashMap<&'static str, asynch::AsyncTaskHandle>,
+) -> (
+    asynch::AsyncTaskHandle,
+    Receiver<errors::Result<asynch::SyncStatus>>,
+) {
     if let Some(async_task) = async_task_handles.get("dropbox") {
         debug!("Stopping a previously spawned dropbox async task");
         let _ = async_task.stop();
@@ -971,7 +1188,8 @@ fn spawn_dropbox_async_task(filename: &str,
         tx,
         filename,
         Box::new(ReqwestClientFactory::new()),
-    ).unwrap();
+    )
+    .unwrap();
     (asynch::execute_task(Box::new(dbx), every), rx)
 }
 
@@ -988,21 +1206,34 @@ pub trait Editor {
     /// Shows the provided entries to the User. The provided entries are already filtered with the filter argument.
     fn show_entries(&self, entries: Vec<Entry>, filter: String) -> UserSelection;
     /// Shows the provided entry details to the User following a PresentationType.
-    fn show_entry(&self, entry: Entry, index: usize, presentation_type: EntryPresentationType) -> UserSelection;
+    fn show_entry(
+        &self,
+        entry: Entry,
+        index: usize,
+        presentation_type: EntryPresentationType,
+    ) -> UserSelection;
     /// Shows the Exit `Menu` to the User.
     fn exit(&self, contents_changed: bool) -> UserSelection;
     /// Shows the configuration screen.
-    fn show_configuration(&self, nextcloud: NextcloudConfiguration, dropbox: DropboxConfiguration) -> UserSelection;
+    fn show_configuration(
+        &self,
+        nextcloud: NextcloudConfiguration,
+        dropbox: DropboxConfiguration,
+    ) -> UserSelection;
     /// Shows a message to the User.
     /// Along with the message, the user should select one of the offered `UserOption`s.
-    fn show_message(&self, message: &str, options: Vec<UserOption>, severity: MessageSeverity) -> UserSelection;
+    fn show_message(
+        &self,
+        message: &str,
+        options: Vec<UserOption>,
+        severity: MessageSeverity,
+    ) -> UserSelection;
 
     /// Sorts the supplied entries.
     fn sort_entries(&self, entries: &mut [Entry]) {
         entries.sort_by(|a, b| a.name.to_uppercase().cmp(&b.name.to_uppercase()));
     }
 }
-
 
 /// Trait to be implemented by various different `Editor`s (Shell, Web, Android, other...).
 ///
@@ -1017,14 +1248,28 @@ pub trait AsyncEditor {
     /// Shows the provided entries to the User. The provided entries are already filtered with the filter argument.
     fn show_entries(&self, entries: Vec<Entry>, filter: String) -> Receiver<UserSelection>;
     /// Shows the provided entry details to the User following a presentation type.
-    fn show_entry(&self, entry: Entry, index: usize, presentation_type: EntryPresentationType) -> Receiver<UserSelection>;
+    fn show_entry(
+        &self,
+        entry: Entry,
+        index: usize,
+        presentation_type: EntryPresentationType,
+    ) -> Receiver<UserSelection>;
     /// Shows the Exit `Menu` to the User.
     fn exit(&self, contents_changed: bool) -> Receiver<UserSelection>;
     /// Shows the configuration screen.
-    fn show_configuration(&self, nextcloud: NextcloudConfiguration, dropbox: DropboxConfiguration) -> Receiver<UserSelection>;
+    fn show_configuration(
+        &self,
+        nextcloud: NextcloudConfiguration,
+        dropbox: DropboxConfiguration,
+    ) -> Receiver<UserSelection>;
     /// Shows a message to the User.
     /// Along with the message, the user should select one of the offered `UserOption`s.
-    fn show_message(&self, message: &str, options: Vec<UserOption>, severity: MessageSeverity) -> Receiver<UserSelection>;
+    fn show_message(
+        &self,
+        message: &str,
+        options: Vec<UserOption>,
+        severity: MessageSeverity,
+    ) -> Receiver<UserSelection>;
 
     /// Sorts the supplied entries.
     fn sort_entries(&self, entries: &mut [Entry]) {
@@ -1038,11 +1283,11 @@ mod unit_tests {
 
     use async_trait::async_trait;
 
-    use crate::api::EntryMeta;
     use crate::api::safe::Safe;
+    use crate::api::EntryMeta;
 
-    use super::*;
     use super::api::{Entry, Menu, UserSelection};
+    use super::*;
 
     #[test]
     fn try_recv_from_vec() {
@@ -1131,26 +1376,38 @@ mod unit_tests {
         let mut safe = Safe::default();
 
         // No entries to check
-        let smw = handle_check_passwords(&mut safe, &AlwaysOkTruePasswordChecker {}).await.unwrap();
+        let smw = handle_check_passwords(&mut safe, &AlwaysOkTruePasswordChecker {})
+            .await
+            .unwrap();
         assert!(&smw.message == "No entries to check");
 
         // Entries Ok and healthy
-        safe.add_entry(
-            Entry::new("name".to_string(),
-                       "url".to_string(),
-                       "user".to_string(),
-                       "pass".to_string(),
-                       "desc".to_string(),
-                       EntryMeta::default()));
-        let smw = handle_check_passwords(&mut safe, &AlwaysOkFalsePasswordChecker {}).await.unwrap();
+        safe.add_entry(Entry::new(
+            "name".to_string(),
+            "url".to_string(),
+            "user".to_string(),
+            "pass".to_string(),
+            "desc".to_string(),
+            EntryMeta::default(),
+        ));
+        let smw = handle_check_passwords(&mut safe, &AlwaysOkFalsePasswordChecker {})
+            .await
+            .unwrap();
         assert!(&smw.message == "The passwords of the entries look ok!");
 
         // Entries Ok but not healthy
-        let smw = handle_check_passwords(&mut safe, &AlwaysOkTruePasswordChecker {}).await.unwrap();
+        let smw = handle_check_passwords(&mut safe, &AlwaysOkTruePasswordChecker {})
+            .await
+            .unwrap();
         assert!(&smw.message == "The following entries have leaked passwords: name! Please change them immediately!");
 
         // Entries Error
-        let smw = handle_check_passwords(&mut safe, &AlwaysErrorPasswordChecker {}).await.unwrap();
-        assert!(&smw.message == "Error while checking passwords health. Please see the logs for more details.");
+        let smw = handle_check_passwords(&mut safe, &AlwaysErrorPasswordChecker {})
+            .await
+            .unwrap();
+        assert!(
+            &smw.message
+                == "Error while checking passwords health. Please see the logs for more details."
+        );
     }
 }

@@ -16,6 +16,7 @@
 
 use base64::DecodeError;
 use http;
+use http::method::InvalidMethod;
 use hyper;
 use native_tls;
 use std::{fmt, result, time, sync};
@@ -202,3 +203,10 @@ impl From<rs_password_utils::PasswordUtilsError> for RustKeylockError {
         RustKeylockError::GeneralError(format!("{:?}", err))
     }
 }
+
+impl From<InvalidMethod> for RustKeylockError {
+    fn from(err: InvalidMethod) -> RustKeylockError {
+        RustKeylockError::HttpError(format!("{:?}", err))
+    }
+}
+

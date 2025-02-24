@@ -16,34 +16,40 @@
 
 use std::io::Read;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self, SyncSender};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time;
 
 use async_trait::async_trait;
-use futures::channel::oneshot;
-use std::convert::Infallible;
-use futures::TryFutureExt;
 use http::{StatusCode, Uri};
-use hyper::{self, Body, Request, Response, Server};
-use hyper::server::conn::AddrStream;
-use hyper::service::{make_service_fn, service_fn};
+use http_body_util::BodyExt;
+use reqwest::Body;
+use std::convert::Infallible;
+
+use hyper::server::conn::http1;
+use hyper::service::service_fn;
+use hyper::{Request, Response};
+use hyper_util::rt::{TokioIo, TokioTimer};
 use log::*;
-use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
+use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 use serde::{Deserialize, Serialize};
+use tokio::net::TcpListener;
 use toml;
 use toml::value::Table;
 use url::Url;
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::asynch::{self, BoxedRklHttpAsyncClient, RklHttpAsyncFactory, ServerVersionData, SynchronizerAction, SyncStatus, ReqwestClientFactory};
-use crate::datacrypt::{EntryPasswordCryptor, create_random_utf_string};
+use crate::asynch::{
+    self, BoxedRklHttpAsyncClient, ReqwestClientFactory, RklHttpAsyncFactory, ServerVersionData,
+    SyncStatus, SynchronizerAction,
+};
+use crate::datacrypt::{create_random_utf_string, EntryPasswordCryptor};
 use crate::errors;
 use crate::errors::RustKeylockError;
 use crate::file_handler;
-use crate::SystemConfiguration;
 use crate::utils;
+use crate::SystemConfiguration;
 use std::collections::HashMap;
 
 const FRAGMENT: &AsciiSet = &CONTROLS.add(b'+').add(b'/');
@@ -82,16 +88,17 @@ pub(crate) struct Synchronizer {
     /// The version that was set during the last sync
     last_sync_version: Option<i64>,
     /// The factory that creates HTTP clients
-    client_factory: Box<dyn RklHttpAsyncFactory<ClientResType=Vec<u8>>>,
+    client_factory: Box<dyn RklHttpAsyncFactory<ClientResType = Vec<u8>>>,
 }
 
 impl Synchronizer {
-    pub(crate) fn new(dbc: &DropboxConfiguration,
-                      sys_conf: &SystemConfiguration,
-                      tx: SyncSender<errors::Result<SyncStatus>>,
-                      f: &str,
-                      client_factory: Box<dyn RklHttpAsyncFactory<ClientResType=Vec<u8>>>)
-                      -> errors::Result<Synchronizer> {
+    pub(crate) fn new(
+        dbc: &DropboxConfiguration,
+        sys_conf: &SystemConfiguration,
+        tx: SyncSender<errors::Result<SyncStatus>>,
+        f: &str,
+        client_factory: Box<dyn RklHttpAsyncFactory<ClientResType = Vec<u8>>>,
+    ) -> errors::Result<Synchronizer> {
         let s = Synchronizer {
             conf: dbc.clone(),
             tx,
@@ -120,38 +127,63 @@ impl Synchronizer {
         let version_local = self.version_local.clone();
         let last_sync_version = self.last_sync_version.clone();
         let mut client = self.client_factory.create();
-        client.header("Authorization", &format!("Bearer {}", self.use_short_lived_token()?.as_str()));
+        client.header(
+            "Authorization",
+            &format!("Bearer {}", self.use_short_lived_token()?.as_str()),
+        );
         let server_version = Self::get_version(&mut client).await?;
-        let synchronizer_action = asynch::synchronizer_action(&server_version, &file_name, &saved_at_local, &version_local, &last_sync_version)?;
-        Self::parse_synchronizer_action(synchronizer_action, &file_name, &mut client, version_local, saved_at_local).await
+        let synchronizer_action = asynch::synchronizer_action(
+            &server_version,
+            &file_name,
+            &saved_at_local,
+            &version_local,
+            &last_sync_version,
+        )?;
+        Self::parse_synchronizer_action(
+            synchronizer_action,
+            &file_name,
+            &mut client,
+            version_local,
+            saved_at_local,
+        )
+        .await
     }
 
     async fn get_short_lived_token(&self) -> errors::Result<Zeroizing<String>> {
         let mut client = self.client_factory.create();
         debug!("DBX: Retrieving a short-lived token");
 
-        let post_body: Vec<u8> = format!("grant_type=refresh_token&refresh_token={}&client_id={}",
-                                         utf8_percent_encode(&self.use_token()?.as_str(), FRAGMENT),
-                                         APP_KEY).into_bytes();
+        let post_body: Vec<u8> = format!(
+            "grant_type=refresh_token&refresh_token={}&client_id={}",
+            utf8_percent_encode(&self.use_token()?.as_str(), FRAGMENT),
+            APP_KEY
+        )
+        .into_bytes();
 
-        let response_bytes = client.post(
-            "https://api.dropbox.com/oauth2/token",
-            &[
-                ("Content-Type", "application/x-www-form-urlencoded"),
-            ],
-            post_body).await?;
+        let response_bytes = client
+            .post(
+                "https://api.dropbox.com/oauth2/token",
+                &[("Content-Type", "application/x-www-form-urlencoded")],
+                post_body,
+            )
+            .await?;
         let response_string = String::from_utf8(response_bytes)?;
         let dbx_auth_response: DbxAuthResponse = serde_json::from_str(&response_string)?;
 
         Ok(Zeroizing::new(dbx_auth_response.access_token.clone()))
     }
 
-    async fn get_version(client: &mut BoxedRklHttpAsyncClient) -> errors::Result<ServerVersionData> {
+    async fn get_version(
+        client: &mut BoxedRklHttpAsyncClient,
+    ) -> errors::Result<ServerVersionData> {
         debug!("DBX: Getting version");
-        let bytes_res = client.post(
-            "https://content.dropboxapi.com/2/files/download",
-            &[("Dropbox-API-Arg", r#"{"path": "/.version"}"#)],
-            Vec::new()).await;
+        let bytes_res = client
+            .post(
+                "https://content.dropboxapi.com/2/files/download",
+                &[("Dropbox-API-Arg", r#"{"path": "/.version"}"#)],
+                Vec::new(),
+            )
+            .await;
 
         let bytes = bytes_res.unwrap_or("0,0".as_bytes().to_vec());
         let s = std::str::from_utf8(bytes.as_ref())?;
@@ -160,14 +192,23 @@ impl Synchronizer {
         Ok(version_data)
     }
 
-    async fn download(filename: &str, client: &mut BoxedRklHttpAsyncClient) -> errors::Result<String> {
+    async fn download(
+        filename: &str,
+        client: &mut BoxedRklHttpAsyncClient,
+    ) -> errors::Result<String> {
         debug!("DBX: Download");
         let tmp_file_name = format!("tmp_{}", filename);
 
-        let bytes = client.post(
-            "https://content.dropboxapi.com/2/files/download",
-            &[("Dropbox-API-Arg", &format!(r#"{{"path": "/{}"}}"#, filename))],
-            Vec::new()).await?;
+        let bytes = client
+            .post(
+                "https://content.dropboxapi.com/2/files/download",
+                &[(
+                    "Dropbox-API-Arg",
+                    &format!(r#"{{"path": "/{}"}}"#, filename),
+                )],
+                Vec::new(),
+            )
+            .await?;
         file_handler::save_bytes(&tmp_file_name, &bytes, false)?;
         debug!("DBX: Downloaded");
         Ok(tmp_file_name)
@@ -179,19 +220,31 @@ impl Synchronizer {
         let mut file = file_handler::get_file(filename)?;
         let mut post_body: Vec<u8> = Vec::new();
         file.read_to_end(&mut post_body)?;
-        client.post(
-            "https://content.dropboxapi.com/2/files/upload",
-            &[
-                ("Dropbox-API-Arg", &format!(r#"{{"path":"/{}","mode":"overwrite"}}"#, filename_string)),
-                ("Content-Type", "application/octet-stream"),
-            ],
-            post_body).await?;
+        client
+            .post(
+                "https://content.dropboxapi.com/2/files/upload",
+                &[
+                    (
+                        "Dropbox-API-Arg",
+                        &format!(r#"{{"path":"/{}","mode":"overwrite"}}"#, filename_string),
+                    ),
+                    ("Content-Type", "application/octet-stream"),
+                ],
+                post_body,
+            )
+            .await?;
 
         debug!("DBX: Uploaded");
         Ok(())
     }
 
-    async fn parse_synchronizer_action(sa: SynchronizerAction, filename: &str, client: &mut BoxedRklHttpAsyncClient, version_local: Option<i64>, saved_at_local: Option<i64>) -> errors::Result<SyncStatus> {
+    async fn parse_synchronizer_action(
+        sa: SynchronizerAction,
+        filename: &str,
+        client: &mut BoxedRklHttpAsyncClient,
+        version_local: Option<i64>,
+        saved_at_local: Option<i64>,
+    ) -> errors::Result<SyncStatus> {
         match sa {
             SynchronizerAction::Download => {
                 info!("Downloading file from the server");
@@ -213,14 +266,20 @@ impl Synchronizer {
                     Ok(SyncStatus::NewToMerge("dropbox", tmp_file_name))
                 } else {
                     info!("Could not download from the server and do the merge. The files do not exist. Uploading...");
-                    Self::upload_all(&filename_clone, client, version_local, saved_at_local).await?;
+                    Self::upload_all(&filename_clone, client, version_local, saved_at_local)
+                        .await?;
                     Ok(SyncStatus::UploadSuccess("dropbox"))
                 }
             }
         }
     }
 
-    async fn upload_all(filename: &str, client: &mut BoxedRklHttpAsyncClient, version_local: Option<i64>, saved_at_local: Option<i64>) -> errors::Result<()> {
+    async fn upload_all(
+        filename: &str,
+        client: &mut BoxedRklHttpAsyncClient,
+        version_local: Option<i64>,
+        saved_at_local: Option<i64>,
+    ) -> errors::Result<()> {
         debug!("DBX: Uploading all");
         Self::upload(filename, client).await?;
         create_version_file_locally(version_local, saved_at_local)?;
@@ -230,12 +289,14 @@ impl Synchronizer {
         Ok(())
     }
 
-    fn send_to_channel(res: errors::Result<SyncStatus>, tx: SyncSender<errors::Result<SyncStatus>>) {
+    fn send_to_channel(
+        res: errors::Result<SyncStatus>,
+        tx: SyncSender<errors::Result<SyncStatus>>,
+    ) {
         match res {
             Ok(ref r) => debug!("Dropbox Async Task sends to the channel {:?}", r),
             Err(ref error) => error!("Dropbox Async Tasks reported error: {:?}", error),
         };
-
 
         match tx.send(res) {
             Ok(_) => {
@@ -284,7 +345,8 @@ impl super::AsyncTask for Synchronizer {
 }
 
 fn parse_version_str(s: &str) -> errors::Result<ServerVersionData> {
-    let v: Vec<String> = s.split(",")
+    let v: Vec<String> = s
+        .split(",")
         .map(|entry| {
             let s = entry.trim();
             s.to_string()
@@ -297,7 +359,10 @@ fn parse_version_str(s: &str) -> errors::Result<ServerVersionData> {
     })
 }
 
-fn create_version_file_locally(version: Option<i64>, last_modified: Option<i64>) -> errors::Result<()> {
+fn create_version_file_locally(
+    version: Option<i64>,
+    last_modified: Option<i64>,
+) -> errors::Result<()> {
     let contents = format!("{},{}", version.unwrap_or(0), last_modified.unwrap_or(0));
     file_handler::save_bytes(".version", contents.as_bytes(), false)
 }
@@ -323,17 +388,24 @@ impl DropboxConfiguration {
     }
 
     /// Encrypts a short_lived_token and sets it to self
-    pub fn set_short_lived_token<T: Into<Zeroizing<String>>>(&mut self, short_lived_token: T) -> errors::Result<()> {
+    pub fn set_short_lived_token<T: Into<Zeroizing<String>>>(
+        &mut self,
+        short_lived_token: T,
+    ) -> errors::Result<()> {
         self.short_lived_token = self.token_cryptor.encrypt_str(&short_lived_token.into())?;
         Ok(())
     }
 
     pub fn decrypted_token(&self) -> errors::Result<Zeroizing<String>> {
-        self.token_cryptor.decrypt_str(&self.token).map(|token| Zeroizing::new(token))
+        self.token_cryptor
+            .decrypt_str(&self.token)
+            .map(|token| Zeroizing::new(token))
     }
 
     pub fn decrypted_short_lived_token(&self) -> errors::Result<Zeroizing<String>> {
-        self.token_cryptor.decrypt_str(&self.short_lived_token).map(|short_lived_token| Zeroizing::new(short_lived_token))
+        self.token_cryptor
+            .decrypt_str(&self.short_lived_token)
+            .map(|short_lived_token| Zeroizing::new(short_lived_token))
     }
 
     pub fn dropbox_url() -> String {
@@ -347,13 +419,20 @@ impl DropboxConfiguration {
     /// Creates a TOML table form this NextcloudConfiguration. The resulted table contains the decrypted password.
     pub(crate) fn to_table(&self) -> errors::Result<Table> {
         let mut table = Table::new();
-        table.insert("token".to_string(), toml::Value::String(self.decrypted_token()?.as_str().to_string()));
+        table.insert(
+            "token".to_string(),
+            toml::Value::String(self.decrypted_token()?.as_str().to_string()),
+        );
         Ok(table)
     }
 
     /// Creates a NextcloudConfiguration from a TOML table. The password gets encrypted once the `new` function is called.
-    pub(crate) fn from_table(table: &Table) -> Result<DropboxConfiguration, errors::RustKeylockError> {
-        let token = table.get("token").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
+    pub(crate) fn from_table(
+        table: &Table,
+    ) -> Result<DropboxConfiguration, errors::RustKeylockError> {
+        let token = table
+            .get("token")
+            .and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
         match token {
             Some(tok) => DropboxConfiguration::new(tok),
             None => Ok(DropboxConfiguration::default()),
@@ -377,21 +456,16 @@ impl Default for DropboxConfiguration {
     }
 }
 
-
-async fn token_server_shutdown_signal(tx: futures::channel::oneshot::Receiver<()>) {
-    tx.into_future().await.unwrap()
-}
-
 pub(crate) fn retrieve_token(url_string: String) -> errors::Result<Zeroizing<String>> {
     debug!("Retrieving a token for dropbox");
-    // Define the server shutdown handle
-    let (tx_shutdown, rx_shutdown) = oneshot::channel::<()>();
     // Define the channel that will be used by the server to send the retrieved token
     let (tx, rx) = mpsc::channel();
 
     // Spawn the server in a different thread
     thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().expect(
+            "Cannot create tokio runtime to start the server for handling the dropbox token",
+        );
         let f = async {
             // Get the port and state from the URL
             let (port, code_challenge) = parse_url(url_string).unwrap();
@@ -400,93 +474,120 @@ pub(crate) fn retrieve_token(url_string: String) -> errors::Result<Zeroizing<Str
             // The state to be shared between threads (used by the server function).
             let code_challenge_arc = Arc::new(code_challenge);
             // The server function
-            let make_svc = make_service_fn(move |_socket: &AddrStream| {
+            let make_svc = service_fn(move |req: Request<hyper::body::Incoming>| {
                 let shared_tx = tx_arc.clone();
                 let shared_code_challenge = code_challenge_arc.clone();
                 async move {
                     let shared_tx = shared_tx.clone();
                     let shared_code_challenge = shared_code_challenge.clone();
                     Ok::<_, Infallible>({
-                        let shared_tx = shared_tx.clone();
-                        let shared_code_challenge = shared_code_challenge.clone();
-                        service_fn(move |req: Request<Body>| {
-                            let shared_tx = shared_tx.clone();
-                            let shared_code_challenge = shared_code_challenge.clone();
-                            async move {
-                                let shared_tx = shared_tx.clone();
-                                let shared_code_challenge = shared_code_challenge.clone();
-                                Ok::<_, Infallible>({
-                                    let resp_builder = Response::builder();
+                        let resp_builder = Response::builder();
 
-                                    if req.method() == &hyper::Method::GET {
-                                        let code = parse_get_uri(req.uri()).unwrap();
-                                        let reqwest_client_factory = Box::new(ReqwestClientFactory::new());
-                                        let mut client = reqwest_client_factory.create();
-                                        handle_get(&code, &shared_code_challenge, &mut client, port).await
-                                    } else if req.method() == &hyper::Method::POST {
-                                        let error_message = format!("Could not get the body of the request to {}. Using an empty body instead.", req.uri());
-                                        let v = req_to_body(req).await.unwrap_or_else(move |error| {
-                                            error!("{} {}", error_message, error);
-                                            Vec::new()
-                                        });
-                                        let found_token = String::from_utf8(v).unwrap();
-                                        let tx = shared_tx.lock().unwrap();
-                                        let _ = tx.send(Ok(Zeroizing::new(found_token)));
+                        if req.method() == &hyper::Method::GET {
+                            let code = parse_get_uri(req.uri()).unwrap();
+                            let reqwest_client_factory = Box::new(ReqwestClientFactory::new());
+                            let mut client = reqwest_client_factory.create();
+                            handle_get(&code, &shared_code_challenge, &mut client, port).await
+                        } else if req.method() == &hyper::Method::POST {
+                            let error_message = format!("Could not get the body of the request to {}. Using an empty body instead.", req.uri());
+                            let v = req_to_body(req).await.unwrap_or_else(move |error| {
+                                error!("{} {}", error_message, error);
+                                Vec::new()
+                            });
+                            let found_token = String::from_utf8(v).unwrap();
+                            let tx = shared_tx.lock().unwrap();
+                            let _ = tx.send(Ok(Zeroizing::new(found_token)));
 
-                                        resp_builder.status(StatusCode::OK).body(Body::empty()).unwrap()
-                                    } else {
-                                        let tx = shared_tx.lock().unwrap();
-                                        let _ = tx.send(Err(RustKeylockError::GeneralError("error".to_string())));
-                                        resp_builder.status(StatusCode::BAD_REQUEST).body(Body::empty()).unwrap()
-                                    }
-                                })
-                            }
-                        })
+                            resp_builder
+                                .status(StatusCode::OK)
+                                .body(reqwest::Body::from(Vec::new()))
+                                .unwrap()
+                        } else {
+                            let tx = shared_tx.lock().unwrap();
+                            let _ =
+                                tx.send(Err(RustKeylockError::GeneralError("error".to_string())));
+                            resp_builder
+                                .status(StatusCode::BAD_REQUEST)
+                                .body(reqwest::Body::from(Vec::new()))
+                                .unwrap()
+                        }
                     })
                 }
             });
 
             // The server will run on the localhost
             let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
-            // Bind the server
-            let server = Server::bind(&addr).serve(make_svc);
-            // Set the graceful shutdown handle
-            let graceful = server
-                .with_graceful_shutdown(token_server_shutdown_signal(rx_shutdown));
-            graceful.await.unwrap_or_else(|error| error!("HTTP Server Error during retrieving Dropbox token: {}", error));
+            let listener = TcpListener::bind(addr)
+                .await
+                .expect("Cannot bind TcpListener to retrive the dropbox token");
+            let (tcp, _) = listener
+                .accept()
+                .await
+                .expect("Cannot accept TcpStream for listener");
+            let io = TokioIo::new(tcp);
+            if let Err(error) = http1::Builder::new()
+                .timer(TokioTimer::new())
+                .serve_connection(io, make_svc)
+                .await
+            {
+                error!(
+                    "HTTP Server Error during retrieving Dropbox token: {}",
+                    error
+                )
+            }
         };
         rt.block_on(f);
         debug!("Temporary server stopped!");
     });
 
     debug!("Waiting for Dropbox Token...");
-    let rec = rx.recv_timeout(time::Duration::from_millis(600000))
+    let rec = rx
+        .recv_timeout(time::Duration::from_millis(600000))
         .map_err(|error| RustKeylockError::from(error))
         .and_then(|rec_res| rec_res);
     debug!("Dropbox Token retrieved. Stopping temporary server...");
-    // Shutdown the server
-    let _ = tx_shutdown.send(());
 
     rec
 }
 
-async fn handle_get(code: &str, shared_code_challenge: &str, client: &mut BoxedRklHttpAsyncClient, port: u16) -> Response<Body> {
+async fn handle_get(
+    code: &str,
+    shared_code_challenge: &str,
+    client: &mut BoxedRklHttpAsyncClient,
+    port: u16,
+) -> Response<Body> {
     let resp_builder = Response::builder();
     match get_refresh_token(code, shared_code_challenge, client).await {
         Ok(short_lived_token) => {
-            client.post(&format!("http://localhost:{}/", port), &[], short_lived_token.to_string().into_bytes()).await.unwrap();
-            resp_builder.status(StatusCode::OK).body(Body::from(HTTP_GET_RESPONSE_BODY)).unwrap()
+            client
+                .post(
+                    &format!("http://localhost:{}/", port),
+                    &[],
+                    short_lived_token.to_string().into_bytes(),
+                )
+                .await
+                .unwrap();
+            resp_builder
+                .status(StatusCode::OK)
+                .body(Body::from(HTTP_GET_RESPONSE_BODY))
+                .unwrap()
         }
         Err(error) => {
-            let message = format!("Error while retrieving the dropbox short lived token: {}", error);
+            let message = format!(
+                "Error while retrieving the dropbox short lived token: {}",
+                error
+            );
             error!("{}", message);
-            resp_builder.status(StatusCode::BAD_REQUEST).body(Body::from(message)).unwrap()
+            resp_builder
+                .status(StatusCode::BAD_REQUEST)
+                .body(Body::from(message))
+                .unwrap()
         }
     }
 }
 
-async fn req_to_body(req: Request<Body>) -> errors::Result<Vec<u8>> {
-    Ok(hyper::body::to_bytes(req.into_body()).await?.to_vec())
+async fn req_to_body(req: Request<hyper::body::Incoming>) -> errors::Result<Vec<u8>> {
+    Ok(req.into_body().collect().await?.to_bytes().into())
 }
 
 fn parse_url(url_string: String) -> errors::Result<(u16, String)> {
@@ -520,12 +621,21 @@ fn parse_get_uri(uri: &Uri) -> errors::Result<Zeroizing<String>> {
                 .collect()
         })
         .unwrap_or_else(HashMap::new);
-    let code = Zeroizing::new(params.get("code").map(|s| s.to_owned()).unwrap_or_else(String::new));
+    let code = Zeroizing::new(
+        params
+            .get("code")
+            .map(|s| s.to_owned())
+            .unwrap_or_else(String::new),
+    );
 
     Ok(code)
 }
 
-async fn get_refresh_token(code: &str, code_challenge: &str, client: &mut BoxedRklHttpAsyncClient) -> errors::Result<Zeroizing<String>> {
+async fn get_refresh_token(
+    code: &str,
+    code_challenge: &str,
+    client: &mut BoxedRklHttpAsyncClient,
+) -> errors::Result<Zeroizing<String>> {
     debug!("DBX: Retrieving a refresh token");
 
     let post_body: Vec<u8> = format!("code={}&grant_type=authorization_code&redirect_uri=http://localhost:8899&code_verifier={}&client_id={}",
@@ -533,12 +643,13 @@ async fn get_refresh_token(code: &str, code_challenge: &str, client: &mut BoxedR
                                      utf8_percent_encode(&code_challenge, FRAGMENT),
                                      APP_KEY).into_bytes();
 
-    let response_bytes = client.post(
-        "https://api.dropbox.com/oauth2/token",
-        &[
-            ("Content-Type", "application/x-www-form-urlencoded"),
-        ],
-        post_body).await?;
+    let response_bytes = client
+        .post(
+            "https://api.dropbox.com/oauth2/token",
+            &[("Content-Type", "application/x-www-form-urlencoded")],
+            post_body,
+        )
+        .await?;
     let response_string = String::from_utf8(response_bytes)?;
     let dbx_auth_response: DbxAuthResponse = serde_json::from_str(&response_string)?;
 
@@ -564,13 +675,12 @@ struct DbxAuthResponse {
 #[cfg(test)]
 mod dropbox_tests {
     use std::collections::HashMap;
+    use std::str::FromStr;
     use std::sync::mpsc;
     use std::thread;
     use std::time;
-    use std::str::FromStr;
 
     use async_trait::async_trait;
-    use hyper::{Client, Method, Request};
 
     use crate::asynch::RklHttpAsyncClient;
 
@@ -602,14 +712,13 @@ mod dropbox_tests {
         thread::sleep(time::Duration::from_millis(1000));
 
         // Send the HTTP POST request
-        let client = Client::new();
-        let refresh_token = "a-refresh-token-generated-by-drobpox-servers";
-        let uri: hyper::Uri = format!("http://localhost:8899/").parse().unwrap();
-        let mut req = Request::new(Body::from(refresh_token));
-        *req.method_mut() = Method::POST;
-        *req.uri_mut() = uri.clone();
+        let uri = "http://localhost:8899/";
+        let refresh_token = "a-refresh-token-generated-by-drobpox-servers".to_owned();
+        let reqwest_client_factory = ReqwestClientFactory::new();
+        let mut client = reqwest_client_factory.create();
+        let f = client.post(uri, &[], refresh_token.clone().into_bytes());
 
-        let response = rt.block_on(client.request(req));
+        let response = rt.block_on(f);
 
         if response.is_ok() {
             println!("POST Response OK: {:?}", response.unwrap());
@@ -644,7 +753,9 @@ mod dropbox_tests {
                                     "scope": "scope1 scope2",
                                     "refresh_token": "a-refresh-token",
                                     "account_id": "dbid:MYACCOUNTID"
-                                    }"#.to_owned().into_bytes();
+                                    }"#
+        .to_owned()
+        .into_bytes();
         client.add_response(json_response);
         let mut dyn_client = client as BoxedRklHttpAsyncClient;
         let response = rt.block_on(handle_get(code, code_challenge, &mut dyn_client, port));
@@ -665,7 +776,9 @@ mod dropbox_tests {
         let json_response: Vec<u8> = r#"{
                                     "uid": "123",
                                     "account_id": "dbid:MYACCOUNTID"
-                                    }"#.to_owned().into_bytes();
+                                    }"#
+        .to_owned()
+        .into_bytes();
         client.add_response(json_response);
         let mut dyn_client = client as BoxedRklHttpAsyncClient;
         let response = rt.block_on(handle_get(code, code_challenge, &mut dyn_client, port));
@@ -746,8 +859,14 @@ mod dropbox_tests {
         client.header("Authorization", "Bearer thisisatoken");
 
         let mut validation_headers = HashMap::new();
-        validation_headers.insert("Dropbox-API-Arg".to_string(), format!(r#"{{"path": "/afile_dld"}}"#));
-        validation_headers.insert("Authorization".to_string(), "Bearer thisisatoken".to_string());
+        validation_headers.insert(
+            "Dropbox-API-Arg".to_string(),
+            format!(r#"{{"path": "/afile_dld"}}"#),
+        );
+        validation_headers.insert(
+            "Authorization".to_string(),
+            "Bearer thisisatoken".to_string(),
+        );
 
         client.add_validation_step(TestHttpClientValidationStep {
             uri: Some("https://content.dropboxapi.com/2/files/download".to_string()),
@@ -767,9 +886,18 @@ mod dropbox_tests {
         client.header("Authorization", "Bearer thisisatoken");
 
         let mut validation_headers = HashMap::new();
-        validation_headers.insert("Authorization".to_string(), "Bearer thisisatoken".to_string());
-        validation_headers.insert("Dropbox-API-Arg".to_string(), format!(r#"{{"path":"/afile_upld","mode":"overwrite"}}"#));
-        validation_headers.insert("Content-Type".to_string(), "application/octet-stream".to_string());
+        validation_headers.insert(
+            "Authorization".to_string(),
+            "Bearer thisisatoken".to_string(),
+        );
+        validation_headers.insert(
+            "Dropbox-API-Arg".to_string(),
+            format!(r#"{{"path":"/afile_upld","mode":"overwrite"}}"#),
+        );
+        validation_headers.insert(
+            "Content-Type".to_string(),
+            "application/octet-stream".to_string(),
+        );
 
         client.add_validation_step(TestHttpClientValidationStep {
             uri: Some("https://content.dropboxapi.com/2/files/upload".to_string()),
@@ -791,15 +919,20 @@ mod dropbox_tests {
         client.header("Authorization", "Bearer thisisatoken");
 
         let mut validation_headers = HashMap::new();
-        validation_headers.insert("Authorization".to_string(), "Bearer thisisatoken".to_string());
-        validation_headers.insert("Dropbox-API-Arg".to_string(), r#"{"path": "/.version"}"#.to_string());
+        validation_headers.insert(
+            "Authorization".to_string(),
+            "Bearer thisisatoken".to_string(),
+        );
+        validation_headers.insert(
+            "Dropbox-API-Arg".to_string(),
+            r#"{"path": "/.version"}"#.to_string(),
+        );
 
         client.add_validation_step(TestHttpClientValidationStep {
             uri: Some("https://content.dropboxapi.com/2/files/download".to_string()),
             response: Vec::from("1,2"),
             headers: validation_headers,
         });
-
 
         let mut dyn_client = client as BoxedRklHttpAsyncClient;
         let res = rt.block_on(Synchronizer::get_version(&mut dyn_client));
@@ -817,7 +950,13 @@ mod dropbox_tests {
         client.add_response(Vec::from("irrelevant"));
 
         let mut dyn_client = client as BoxedRklHttpAsyncClient;
-        let res = rt.block_on(Synchronizer::parse_synchronizer_action(SynchronizerAction::Download, "afile_sa_dld", &mut dyn_client, Some(1), Some(2)));
+        let res = rt.block_on(Synchronizer::parse_synchronizer_action(
+            SynchronizerAction::Download,
+            "afile_sa_dld",
+            &mut dyn_client,
+            Some(1),
+            Some(2),
+        ));
         assert!(res.is_ok());
 
         match res.unwrap() {
@@ -838,7 +977,13 @@ mod dropbox_tests {
         client.add_response(Vec::from("irrelevant"));
 
         let mut dyn_client = client as BoxedRklHttpAsyncClient;
-        let res = rt.block_on(Synchronizer::parse_synchronizer_action(SynchronizerAction::Ignore, "afile_sa_ign", &mut dyn_client, Some(1), Some(2)));
+        let res = rt.block_on(Synchronizer::parse_synchronizer_action(
+            SynchronizerAction::Ignore,
+            "afile_sa_ign",
+            &mut dyn_client,
+            Some(1),
+            Some(2),
+        ));
         assert!(res.is_ok());
 
         match res.unwrap() {
@@ -861,7 +1006,13 @@ mod dropbox_tests {
         client.add_response(Vec::from("irrelevant"));
 
         let mut dyn_client = client as BoxedRklHttpAsyncClient;
-        let res = rt.block_on(Synchronizer::parse_synchronizer_action(SynchronizerAction::Upload, "afile_upload", &mut dyn_client, Some(1), Some(2)));
+        let res = rt.block_on(Synchronizer::parse_synchronizer_action(
+            SynchronizerAction::Upload,
+            "afile_upload",
+            &mut dyn_client,
+            Some(1),
+            Some(2),
+        ));
         assert!(res.is_ok());
 
         match res.unwrap() {
@@ -879,7 +1030,13 @@ mod dropbox_tests {
         client.add_response(Vec::from("irrelevant"));
 
         let mut dyn_client = client as BoxedRklHttpAsyncClient;
-        let res = rt.block_on(Synchronizer::parse_synchronizer_action(SynchronizerAction::DownloadMergeAndUpload, "afile_dmu", &mut dyn_client, Some(1), Some(2)));
+        let res = rt.block_on(Synchronizer::parse_synchronizer_action(
+            SynchronizerAction::DownloadMergeAndUpload,
+            "afile_dmu",
+            &mut dyn_client,
+            Some(1),
+            Some(2),
+        ));
         assert!(res.is_ok());
 
         match res.unwrap() {
@@ -908,7 +1065,9 @@ mod dropbox_tests {
         }
 
         async fn handle_request(&mut self) -> errors::Result<Vec<u8>> {
-            self.responses.pop().ok_or(RustKeylockError::GeneralError("There are no available responses".to_string()))
+            self.responses.pop().ok_or(RustKeylockError::GeneralError(
+                "There are no available responses".to_string(),
+            ))
         }
     }
 
@@ -922,7 +1081,12 @@ mod dropbox_tests {
             self.handle_request().await
         }
 
-        async fn post(&mut self, _: &str, _: &[(&str, &str)], _: Vec<u8>) -> errors::Result<Vec<u8>> {
+        async fn post(
+            &mut self,
+            _: &str,
+            _: &[(&str, &str)],
+            _: Vec<u8>,
+        ) -> errors::Result<Vec<u8>> {
             self.handle_request().await
         }
     }
@@ -952,11 +1116,17 @@ mod dropbox_tests {
             self.validation_steps.push(validation_step);
         }
 
-        fn validate_headers(current: &HashMap<String, String>, correct: &HashMap<String, String>) -> errors::Result<()> {
+        fn validate_headers(
+            current: &HashMap<String, String>,
+            correct: &HashMap<String, String>,
+        ) -> errors::Result<()> {
             if current == correct {
                 Ok(())
             } else {
-                Err(RustKeylockError::GeneralError(format!("Headers validation failed. Should be {:?} but was {:?}", correct, current)))
+                Err(RustKeylockError::GeneralError(format!(
+                    "Headers validation failed. Should be {:?} but was {:?}",
+                    correct, current
+                )))
             }
         }
 
@@ -965,20 +1135,32 @@ mod dropbox_tests {
                 if current == correct.as_ref().unwrap() {
                     Ok(())
                 } else {
-                    Err(RustKeylockError::GeneralError(format!("URIs validation failed. Should be {:?} but was {:?}", correct, current)))
+                    Err(RustKeylockError::GeneralError(format!(
+                        "URIs validation failed. Should be {:?} but was {:?}",
+                        correct, current
+                    )))
                 }
             } else {
                 Ok(())
             }
         }
 
-        fn handle_request(&mut self, uri: &str, additional_headers: &[(&str, &str)]) -> errors::Result<Vec<u8>> {
+        fn handle_request(
+            &mut self,
+            uri: &str,
+            additional_headers: &[(&str, &str)],
+        ) -> errors::Result<Vec<u8>> {
             let mut current_headers = self.headers.clone();
             let current_uri = uri.to_owned();
             for (additional_k, additional_v) in additional_headers {
                 current_headers.insert(additional_k.to_string(), additional_v.to_string());
             }
-            let validation_step = self.validation_steps.pop().ok_or(RustKeylockError::GeneralError("There are no available responses".to_string()))?;
+            let validation_step =
+                self.validation_steps
+                    .pop()
+                    .ok_or(RustKeylockError::GeneralError(
+                        "There are no available responses".to_string(),
+                    ))?;
             let response_to_send: Vec<u8> = validation_step.response.iter().cloned().collect();
             Self::validate_headers(&current_headers, &validation_step.headers)
                 .and_then(|_| Self::validate_uris(&current_uri, &validation_step.uri))
@@ -994,11 +1176,20 @@ mod dropbox_tests {
             self.headers.insert(k.to_string(), v.to_string());
         }
 
-        async fn get(&mut self, uri: &str, additional_headers: &[(&str, &str)]) -> errors::Result<Vec<u8>> {
+        async fn get(
+            &mut self,
+            uri: &str,
+            additional_headers: &[(&str, &str)],
+        ) -> errors::Result<Vec<u8>> {
             self.handle_request(uri, additional_headers)
         }
 
-        async fn post(&mut self, uri: &str, additional_headers: &[(&str, &str)], _body: Vec<u8>) -> errors::Result<Vec<u8>> {
+        async fn post(
+            &mut self,
+            uri: &str,
+            additional_headers: &[(&str, &str)],
+            _body: Vec<u8>,
+        ) -> errors::Result<Vec<u8>> {
             self.handle_request(uri, additional_headers)
         }
     }
