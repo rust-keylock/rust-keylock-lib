@@ -49,6 +49,7 @@ use std::time;
 use log::*;
 
 pub use file_handler::default_rustkeylock_location;
+use rest_server::RestService;
 
 use crate::api::{EditorShowMessageWrapper, PasswordChecker, RklPasswordChecker};
 use crate::asynch::dropbox::DropboxConfiguration;
@@ -82,19 +83,24 @@ const PROPS_FILENAME: &str = ".props";
 /// Takes a reference of `Editor` implementation as argument and executes the _rust-keylock_ logic.
 /// The `Editor` is responsible for the interaction with the user. Currently there are `Editor` implementations for __shell__ and for __Android__.
 pub async fn execute_async(editor: Box<dyn AsyncEditor>) {
-    // Channel to send commands to the UI. The user responses (what the user selects in the current UI presentation)
     let (command_tx, command_rx) = mpsc::channel();
-    // tx used to send force exit to the UI (the UI should close)
     let (ui_tx, ui_rx) = mpsc::channel();
     let mut ui_rx_vec = Vec::new();
 
-    tokio::task::spawn(async {
-        rest_server::init()
-            .await
-            .expect("Could not start the HTTP server")
+    let mut rest_server = RestService::new()
+        .await
+        .expect("Could not start the rest server");
+    let rest_server_clone = rest_server.clone();
+
+    tokio::task::spawn(async move {
+        loop {
+            if let Err(e) = rest_server.serve().await {
+                error!("Could not serve HTTP Rest servers: {e}");
+            }
+        }
     });
 
-    tokio::task::spawn(async {
+    tokio::task::spawn(async move {
         unsafe {
             openssl_probe::init_openssl_env_vars();
         }
@@ -112,7 +118,11 @@ pub async fn execute_async(editor: Box<dyn AsyncEditor>) {
 
         let editor_facade = asynch::AsyncEditorFacade::new(ui_rx, command_tx, props.clone());
         let mut executor = CoreLogicHandler::new(editor_facade, props);
+
         loop {
+            if let Err(e) = rest_server_clone.update_safe(executor.get_safe()) {
+                error!("Could not update the safe for the HTTP server: {e}");
+            }
             let (new_executor, stop) = executor.handle().await.unwrap();
             executor = new_executor;
             if stop {
@@ -374,6 +384,10 @@ impl CoreLogicHandler {
             async_task_handles,
             cryptor,
         }
+    }
+
+    pub(crate) fn get_safe(&self) -> Safe {
+        self.safe.clone()
     }
 
     // This is the main function that handles all the user selections. Its complexity is expected to be big.

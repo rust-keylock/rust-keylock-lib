@@ -23,6 +23,7 @@ use hyper_util::rt::TokioIo;
 use log::{debug, info};
 use spake2::{Ed25519Group, Identity, Password, Spake2};
 use tokio::net::TcpListener;
+use tokio::task::JoinHandle;
 
 use std::future::Future;
 use std::net::SocketAddr;
@@ -31,36 +32,46 @@ use std::sync::{Arc, Mutex};
 
 type Counter = i32;
 
-use crate::errors;
+use crate::{errors, Safe};
 
-pub(crate) async fn init() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let addr: SocketAddr = ([127, 0, 0, 1], 9876).into();
+#[derive(Clone)]
+pub(crate) struct RestService {
+    listener: Arc<TcpListener>,
+    counter: Arc<Mutex<Counter>>,
+    safe: Arc<Mutex<Option<Safe>>>,
+}
 
-    let listener = TcpListener::bind(addr).await?;
-    info!("Listening on http://{}", addr);
+impl RestService {
+    pub(crate) async fn new() -> errors::Result<Self> {
+        let addr: SocketAddr = ([127, 0, 0, 1], 9876).into();
+        let listener = TcpListener::bind(addr).await?;
+        info!("Listening on http://{}", addr);
 
-    let svc = Svc {
-        counter: Arc::new(Mutex::new(0)),
-    };
+        Ok(RestService {
+            listener: Arc::new(listener),
+            counter: Arc::new(Mutex::new(0)),
+            safe: Arc::new(Mutex::new(None)),
+        })
+    }
 
-    loop {
-        let (stream, _) = listener.accept().await?;
+    pub(crate) async fn serve(&mut self) -> errors::Result<JoinHandle<()>> {
+        let (stream, _) = self.listener.accept().await?;
         let io = TokioIo::new(stream);
-        let svc_clone = svc.clone();
-        tokio::task::spawn(async move {
+        let svc_clone = self.clone();
+        Ok(tokio::task::spawn(async move {
             if let Err(err) = http1::Builder::new().serve_connection(io, svc_clone).await {
                 println!("Failed to serve connection: {:?}", err);
             }
-        });
+        }))
+    }
+
+    pub(crate) fn update_safe(&self, safe: Safe) -> errors::Result<()> {
+        *self.safe.lock()? = Some(safe);
+        Ok(())
     }
 }
 
-#[derive(Debug, Clone)]
-struct Svc {
-    counter: Arc<Mutex<Counter>>,
-}
-
-impl Service<Request<IncomingBody>> for Svc {
+impl Service<Request<IncomingBody>> for RestService {
     type Response = Response<Full<Bytes>>;
     type Error = hyper::Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
@@ -78,14 +89,28 @@ impl Service<Request<IncomingBody>> for Svc {
             *self.counter.lock().expect("lock poisoned") += 1;
         }
 
-        let res = async {match (req.method(), req.uri().path()) {
-            // (&Method::GET, "/") => async {mk_response(format!("home! counter = {:?}", self.counter))},
-            (&Method::POST, "/pake") => {
+        let safe_opt = self.safe.lock().expect("Safe poisoned").clone();
+        let res = async move {
+            match (req.method(), req.uri().path()) {
+                // (&Method::GET, "/") => async {mk_response(format!("home! counter = {:?}", self.counter))},
+                (&Method::POST, "/pake") => {
                     let key = do_pake(req).await.unwrap();
                     mk_response_bytes(key)
-            },
-            _ => mk_response("not found".to_string()),
-        }};
+                }
+                (&Method::GET, "/entries") => {
+                    let resp_string = match safe_opt {
+                        Some(safe) => {
+                            serde_json::to_string(&safe.entries).unwrap()
+                        }
+                        None => {
+                            "Not loaded yet".to_string()
+                        }
+                    };
+                    mk_response_bytes(resp_string.into_bytes())
+                }
+                _ => mk_response("not found".to_string()),
+            }
+        };
 
         Box::pin(res)
     }
@@ -95,7 +120,7 @@ async fn do_pake(req: Request<IncomingBody>) -> errors::Result<Vec<u8>> {
     debug!("Executing PAKE");
     let inbound_msg = req.collect().await?.to_bytes();
     let (s1, outbound_msg) = Spake2::<Ed25519Group>::start_b(
-        &Password::new(b"patates"),
+        &Password::new(b"password"),
         &Identity::new(b"rust-keylock-browser-extension"),
         &Identity::new(b"rust-keylock-lib"),
     );

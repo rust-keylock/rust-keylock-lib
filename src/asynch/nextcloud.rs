@@ -80,7 +80,7 @@ impl Synchronizer {
 
     async fn do_request(
         req: Request,
-        is_not_https: bool,
+        _is_not_https: bool,
         use_self_signed: bool,
     ) -> errors::Result<Response> {
         let response = reqwest::Client::builder()

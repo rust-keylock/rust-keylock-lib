@@ -488,6 +488,7 @@ pub(crate) enum SyncStatus {
 pub(crate) trait RklHttpAsyncClient: Send {
     type ResType;
     fn header(&mut self, k: &str, v: &str);
+    #[allow(dead_code)]
     async fn get(&mut self, uri: &str, additional_headers: &[(&str, &str)]) -> errors::Result<Self::ResType>;
     async fn post(&mut self, uri: &str, additional_headers: &[(&str, &str)], body: Vec<u8>) -> errors::Result<Self::ResType>;
 }
@@ -584,6 +585,7 @@ impl RklHttpAsyncClient for ReqwestClient {
 /// The trait to be implemented by HTTP client factories. Provides the needed abstraction that makes the RklHttpAsyncClients testable.
 pub(crate) trait RklHttpAsyncFactory: Send + Sync {
     type ClientResType;
+    #[allow(dead_code)]
     fn init_factory(&mut self);
     fn create(&self) -> Box<dyn RklHttpAsyncClient<ResType=Self::ClientResType>>;
 }

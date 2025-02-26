@@ -20,6 +20,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use async_trait::async_trait;
 use log::*;
 use rs_password_utils;
+use serde::{Deserialize, Serialize};
 use toml;
 use toml::value::Table;
 use zeroize::{Zeroize, Zeroizing};
@@ -157,7 +158,7 @@ impl Default for SystemConfiguration {
 }
 
 /// Struct that defines meta-data for an entry.
-#[derive(Debug, PartialEq, Eq, Clone, Zeroize)]
+#[derive(Debug, PartialEq, Eq, Clone, Zeroize, Serialize, Deserialize)]
 #[zeroize(drop)]
 pub struct EntryMeta {
     /// True if the password is leaked.
@@ -194,7 +195,7 @@ impl Default for EntryMeta {
 }
 
 /// Struct that defines a password entry.
-#[derive(Debug, PartialEq, Eq, Clone, Zeroize)]
+#[derive(Debug, PartialEq, Eq, Clone, Zeroize, Serialize, Deserialize)]
 #[zeroize(drop)]
 pub struct Entry {
     /// The name of the Entry
