@@ -24,7 +24,9 @@ use log::{debug, info};
 use spake2::{Ed25519Group, Identity, Password, Spake2};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
+use url::form_urlencoded;
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -32,7 +34,7 @@ use std::sync::{Arc, Mutex};
 
 type Counter = i32;
 
-use crate::{errors, Safe};
+use crate::{errors, Entry, Safe};
 
 #[derive(Clone)]
 pub(crate) struct RestService {
@@ -91,20 +93,49 @@ impl Service<Request<IncomingBody>> for RestService {
 
         let safe_opt = self.safe.lock().expect("Safe poisoned").clone();
         let res = async move {
-            match (req.method(), req.uri().path()) {
+            match (req.method(), req.uri().path(), req.uri().query()) {
                 // (&Method::GET, "/") => async {mk_response(format!("home! counter = {:?}", self.counter))},
-                (&Method::POST, "/pake") => {
+                (&Method::POST, "/pake", _) => {
                     let key = do_pake(req).await.unwrap();
                     mk_response_bytes(key)
                 }
-                (&Method::GET, "/entries") => {
+                (&Method::GET, "/entries", query_opt) => {
+                    debug!("Getting entries...");
                     let resp_string = match safe_opt {
-                        Some(safe) => {
-                            serde_json::to_string(&safe.entries).unwrap()
+                        Some(mut safe) => {
+                            safe.set_filter("".to_string());
+                            if let Some(query) = query_opt {
+                                let params = form_urlencoded::parse(query.as_bytes())
+                                    .into_owned()
+                                    .collect::<HashMap<String, String>>();
+                                if let Some(f) = params.get("filter") {
+                                    debug!("Using filter {f}");
+                                    safe.set_filter(f.to_string());
+                                }
+                            }
+                            serde_json::to_string(&safe.get_entries()).unwrap()
                         }
-                        None => {
-                            "Not loaded yet".to_string()
+                        None => "Not loaded yet".to_string(),
+                    };
+                    mk_response_bytes(resp_string.into_bytes())
+                }
+                (&Method::GET, path, _) if path.starts_with("/decrypted") => {
+                    debug!("Getting decrypted: {path}");
+                    let resp_string = match safe_opt {
+                        Some(mut safe) => {
+                            safe.set_filter("".to_string());
+                            let name_to_find = path.replace("/decrypted/", "");
+                            debug!("Searching for name: {name_to_find}");
+                            let found_entries: Vec<Entry> = safe
+                                .get_entries()
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, entry)| entry.name == name_to_find)
+                                .map(|(pos, _)| safe.get_entry_decrypted(pos))
+                                .collect();
+                            serde_json::to_string(&found_entries).unwrap()
                         }
+                        None => "Not loaded yet".to_string(),
                     };
                     mk_response_bytes(resp_string.into_bytes())
                 }
