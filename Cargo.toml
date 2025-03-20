@@ -32,6 +32,7 @@ spake2 = "0.4"
 rand = "0.8"
 log = "0.4"
 secstr = "0.5"
+aes-gcm = "0.10"
 hyper = {version = "1", features = ["full"]}
 hyper-util = { version = "0.1", features = ["full"] }
 http-body-util = "0.1"
@@ -53,6 +54,7 @@ async-trait = "0.1"
 zeroize = {version = "1.8", features = ["zeroize_derive"] }
 serde = { version = "1.0", features = ["derive"] }
 bytes = "1.10"
+lazy_static = "1.5"
 
 [dependencies.toml]
 version = "0.8"

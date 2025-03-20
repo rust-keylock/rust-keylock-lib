@@ -16,6 +16,7 @@
 
 use base64::DecodeError;
 use http;
+use http::header::ToStrError;
 use http::method::InvalidMethod;
 use hyper;
 use native_tls;
@@ -210,3 +211,20 @@ impl From<InvalidMethod> for RustKeylockError {
     }
 }
 
+impl From<ToStrError> for RustKeylockError {
+    fn from(err: ToStrError) -> RustKeylockError {
+        RustKeylockError::ParseError(format!("{:?}", err))
+    }
+}
+
+impl From<aes_gcm::Error> for RustKeylockError {
+    fn from(err: aes_gcm::Error) -> RustKeylockError {
+        RustKeylockError::EncryptionError(format!("{:?}", err))
+    }
+}
+
+impl From<spake2::Error> for RustKeylockError {
+    fn from(err: spake2::Error) -> RustKeylockError {
+        RustKeylockError::EncryptionError(format!("{:?}", err))
+    }
+}
