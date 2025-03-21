@@ -53,9 +53,12 @@ lazy_static! {
     static ref LOST_COUNTS: Mutex<Vec<Counter>> = Mutex::new(Vec::new());
 }
 
+fn get_session_key_opt() -> Option<Vec<u8>> {
+    SESSION_KEY.lock().expect("Session Key is poisoned").clone()
+}
+
 fn get_session_key() -> Vec<u8> {
-    let session_key_opt = SESSION_KEY.lock().expect("Session Key is poisoned").clone();
-    session_key_opt.expect("Session key is not established yet")
+    get_session_key_opt().expect("Session key is not established yet")
 }
 
 fn set_session_key(key: Vec<u8>) {
@@ -150,6 +153,11 @@ impl Service<Request<IncomingBody>> for RestService {
         }
 
         if req.uri().path() != "/pake" {
+            if get_session_key_opt().is_none() {
+                return Box::pin(std::future::ready(
+                    mk_403_response().or_else(|_| Ok(mk_400_response())),
+                ));
+            }
             let mut counter = get_counter();
             let mut lost_counters = get_lost_counts();
             if let Err(_) = handle_headers(req.headers(), &mut counter, &mut lost_counters) {
