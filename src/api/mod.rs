@@ -40,32 +40,54 @@ pub(crate) struct RklContent {
     pub nextcloud_conf: nextcloud::NextcloudConfiguration,
     pub dropbox_conf: dropbox::DropboxConfiguration,
     pub system_conf: SystemConfiguration,
+    pub general_conf: GeneralConfiguration,
 }
 
 impl RklContent {
-    pub fn new(entries: Vec<Entry>,
-               nextcloud_conf: nextcloud::NextcloudConfiguration,
-               dropbox_conf: dropbox::DropboxConfiguration,
-               system_conf: SystemConfiguration)
-               -> RklContent {
+    pub fn new(
+        entries: Vec<Entry>,
+        nextcloud_conf: nextcloud::NextcloudConfiguration,
+        dropbox_conf: dropbox::DropboxConfiguration,
+        system_conf: SystemConfiguration,
+        general_conf: GeneralConfiguration,
+    ) -> RklContent {
         RklContent {
             entries,
             nextcloud_conf,
             dropbox_conf,
             system_conf,
+            general_conf,
         }
     }
 
-    pub fn from(tup: (&Safe, &nextcloud::NextcloudConfiguration, &dropbox::DropboxConfiguration, &SystemConfiguration)) -> errors::Result<RklContent> {
+    pub fn from(
+        tup: (
+            &Safe,
+            &nextcloud::NextcloudConfiguration,
+            &dropbox::DropboxConfiguration,
+            &SystemConfiguration,
+            &GeneralConfiguration,
+        ),
+    ) -> errors::Result<RklContent> {
         let entries = tup.0.get_entries_decrypted();
-        let nextcloud_conf = nextcloud::NextcloudConfiguration::new(tup.1.server_url.clone(),
-                                                                    tup.1.username.clone(),
-                                                                    tup.1.decrypted_password()?.to_string(),
-                                                                    tup.1.use_self_signed_certificate);
+        let nextcloud_conf = nextcloud::NextcloudConfiguration::new(
+            tup.1.server_url.clone(),
+            tup.1.username.clone(),
+            tup.1.decrypted_password()?.to_string(),
+            tup.1.use_self_signed_certificate,
+        );
         let dropbox_conf = dropbox::DropboxConfiguration::new(tup.2.decrypted_token()?);
-        let system_conf = SystemConfiguration::new(tup.3.saved_at, tup.3.version, tup.3.last_sync_version);
+        let system_conf =
+            SystemConfiguration::new(tup.3.saved_at, tup.3.version, tup.3.last_sync_version);
+        let general_configuration = GeneralConfiguration::new(tup.4.browser_extension_token.clone());
 
-        Ok(RklContent::new(entries, nextcloud_conf?, dropbox_conf?, system_conf))
+        Ok(RklContent::new(
+            entries,
+            nextcloud_conf?,
+            dropbox_conf?,
+            system_conf,
+            general_configuration,
+        ))
     }
 }
 
@@ -75,6 +97,7 @@ pub(crate) struct RklConfiguration {
     pub system: SystemConfiguration,
     pub nextcloud: nextcloud::NextcloudConfiguration,
     pub dropbox: dropbox::DropboxConfiguration,
+    pub general: GeneralConfiguration,
 }
 
 impl RklConfiguration {
@@ -94,12 +117,27 @@ impl RklConfiguration {
     }
 }
 
-impl From<(nextcloud::NextcloudConfiguration, dropbox::DropboxConfiguration, SystemConfiguration)> for RklConfiguration {
-    fn from(confs: (nextcloud::NextcloudConfiguration, dropbox::DropboxConfiguration, SystemConfiguration)) -> Self {
+impl
+    From<(
+        nextcloud::NextcloudConfiguration,
+        dropbox::DropboxConfiguration,
+        SystemConfiguration,
+        GeneralConfiguration,
+    )> for RklConfiguration
+{
+    fn from(
+        confs: (
+            nextcloud::NextcloudConfiguration,
+            dropbox::DropboxConfiguration,
+            SystemConfiguration,
+            GeneralConfiguration,
+        ),
+    ) -> Self {
         RklConfiguration {
             system: confs.2,
             nextcloud: confs.0,
             dropbox: confs.1,
+            general: confs.3,
         }
     }
 }
@@ -116,7 +154,11 @@ pub struct SystemConfiguration {
 }
 
 impl SystemConfiguration {
-    pub fn new(saved_at: Option<i64>, version: Option<i64>, last_sync_version: Option<i64>) -> SystemConfiguration {
+    pub fn new(
+        saved_at: Option<i64>,
+        version: Option<i64>,
+        last_sync_version: Option<i64>,
+    ) -> SystemConfiguration {
         SystemConfiguration {
             saved_at,
             version,
@@ -125,22 +167,41 @@ impl SystemConfiguration {
     }
 
     pub fn from_table(table: &Table) -> Result<SystemConfiguration, errors::RustKeylockError> {
-        let saved_at = table.get("saved_at").and_then(|value| value.as_integer().and_then(Some));
-        let version = table.get("version").and_then(|value| value.as_integer().and_then(Some));
-        let last_sync_version = table.get("last_sync_version").and_then(|value| value.as_integer().and_then(Some));
-        Ok(SystemConfiguration::new(saved_at, version, last_sync_version))
+        let saved_at = table
+            .get("saved_at")
+            .and_then(|value| value.as_integer().and_then(Some));
+        let version = table
+            .get("version")
+            .and_then(|value| value.as_integer().and_then(Some));
+        let last_sync_version = table
+            .get("last_sync_version")
+            .and_then(|value| value.as_integer().and_then(Some));
+        Ok(SystemConfiguration::new(
+            saved_at,
+            version,
+            last_sync_version,
+        ))
     }
 
     pub fn to_table(&self) -> errors::Result<Table> {
         let mut table = Table::new();
         if self.saved_at.is_some() {
-            table.insert("saved_at".to_string(), toml::Value::Integer(self.saved_at.unwrap()));
+            table.insert(
+                "saved_at".to_string(),
+                toml::Value::Integer(self.saved_at.unwrap()),
+            );
         }
         if self.version.is_some() {
-            table.insert("version".to_string(), toml::Value::Integer(self.version.unwrap()));
+            table.insert(
+                "version".to_string(),
+                toml::Value::Integer(self.version.unwrap()),
+            );
         }
         if self.last_sync_version.is_some() {
-            table.insert("last_sync_version".to_string(), toml::Value::Integer(self.last_sync_version.unwrap()));
+            table.insert(
+                "last_sync_version".to_string(),
+                toml::Value::Integer(self.last_sync_version.unwrap()),
+            );
         }
 
         Ok(table)
@@ -157,12 +218,53 @@ impl Default for SystemConfiguration {
     }
 }
 
+/// General configuration
+#[derive(Debug, PartialEq, Clone)]
+pub struct GeneralConfiguration {
+    /// Token to be used for securing the communication with browser extensions
+    pub browser_extension_token: Option<String>,
+}
+
+impl GeneralConfiguration {
+    pub fn new(browser_extension_token: Option<String>) -> GeneralConfiguration {
+        GeneralConfiguration {
+            browser_extension_token,
+        }
+    }
+
+    pub fn from_table(table: &Table) -> Result<GeneralConfiguration, errors::RustKeylockError> {
+        let browser_extension_token = table
+            .get("browser_extension_token")
+            .and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
+        Ok(GeneralConfiguration::new(browser_extension_token))
+    }
+
+    pub fn to_table(&self) -> errors::Result<Table> {
+        let mut table = Table::new();
+        if self.browser_extension_token.is_some() {
+            table.insert(
+                "browser_extension_token".to_string(),
+                toml::Value::String(self.browser_extension_token.clone().unwrap()),
+            );
+        }
+        Ok(table)
+    }
+}
+
+impl Default for GeneralConfiguration {
+    fn default() -> GeneralConfiguration {
+        GeneralConfiguration {
+            browser_extension_token: None,
+        }
+    }
+}
+
 /// Struct that defines meta-data for an entry.
 #[derive(Debug, PartialEq, Eq, Clone, Zeroize, Serialize, Deserialize)]
 #[zeroize(drop)]
 pub struct EntryMeta {
     /// True if the password is leaked.
-    pub leaked_password: bool
+    pub leaked_password: bool,
 }
 
 impl EntryMeta {
@@ -171,16 +273,24 @@ impl EntryMeta {
     }
 
     pub fn from_table(table: &Table) -> Result<EntryMeta, errors::RustKeylockError> {
-        let leaked_password = table.get("leaked_password").and_then(|value| value.as_bool());
+        let leaked_password = table
+            .get("leaked_password")
+            .and_then(|value| value.as_bool());
         match leaked_password {
             Some(lp) => Ok(Self::new(lp)),
-            _ => Err(errors::RustKeylockError::ParseError(toml::ser::to_string(&table).unwrap_or_else(|_| "Cannot dserialize toml for EntryMeta".to_string()))),
+            _ => Err(errors::RustKeylockError::ParseError(
+                toml::ser::to_string(&table)
+                    .unwrap_or_else(|_| "Cannot dserialize toml for EntryMeta".to_string()),
+            )),
         }
     }
 
     pub fn to_table(&self) -> Table {
         let mut table = Table::new();
-        table.insert("leaked_password".to_string(), toml::Value::Boolean(self.leaked_password));
+        table.insert(
+            "leaked_password".to_string(),
+            toml::Value::Boolean(self.leaked_password),
+        );
 
         table
     }
@@ -218,7 +328,14 @@ pub struct Entry {
 
 impl Entry {
     /// Creates a new `Entry` using the provided name, url, username, password and description
-    pub fn new(name: String, url: String, user: String, pass: String, desc: String, meta: EntryMeta) -> Entry {
+    pub fn new(
+        name: String,
+        url: String,
+        user: String,
+        pass: String,
+        desc: String,
+        meta: EntryMeta,
+    ) -> Entry {
         Entry {
             name,
             url,
@@ -244,18 +361,36 @@ impl Entry {
     }
 
     pub fn from_table(table: &Table) -> Result<Entry, errors::RustKeylockError> {
-        let name = table.get("name").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
-        let url = table.get("url").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
-        let user = table.get("user").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
-        let pass = table.get("pass").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
-        let desc = table.get("desc").and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
-        let meta = table.get("meta").and_then(|value| {
-            value.as_table().map(|table| EntryMeta::from_table(table).unwrap_or_default())
-        }).unwrap_or_default();
+        let name = table
+            .get("name")
+            .and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
+        let url = table
+            .get("url")
+            .and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
+        let user = table
+            .get("user")
+            .and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
+        let pass = table
+            .get("pass")
+            .and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
+        let desc = table
+            .get("desc")
+            .and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
+        let meta = table
+            .get("meta")
+            .and_then(|value| {
+                value
+                    .as_table()
+                    .map(|table| EntryMeta::from_table(table).unwrap_or_default())
+            })
+            .unwrap_or_default();
 
         match (name, url, user, pass, desc) {
             (Some(n), Some(ul), Some(u), Some(p), Some(d)) => Ok(Self::new(n, ul, u, p, d, meta)),
-            _ => Err(errors::RustKeylockError::ParseError(toml::ser::to_string(&table).unwrap_or_else(|_| "Cannot serialize toml".to_string()))),
+            _ => Err(errors::RustKeylockError::ParseError(
+                toml::ser::to_string(&table)
+                    .unwrap_or_else(|_| "Cannot serialize toml".to_string()),
+            )),
         }
     }
 
@@ -275,7 +410,10 @@ impl Entry {
         let (encrypted_password, encryption_succeeded) = match cryptor.encrypt_str(&self.pass) {
             Ok(encrypted) => (encrypted, true),
             Err(_) => {
-                error!("Could not encrypt password for {}. Defaulting in keeping it in plain...", &self.name);
+                error!(
+                    "Could not encrypt password for {}. Defaulting in keeping it in plain...",
+                    &self.name
+                );
                 (self.pass.clone(), false)
             }
         };
@@ -299,7 +437,14 @@ impl Entry {
         } else {
             self.pass.clone()
         };
-        Entry::new(self.name.clone(), self.url.clone(), self.user.clone(), decrypted_password, self.desc.clone(), self.meta.clone())
+        Entry::new(
+            self.name.clone(),
+            self.url.clone(),
+            self.user.clone(),
+            decrypted_password,
+            self.desc.clone(),
+            self.meta.clone(),
+        )
     }
 }
 
@@ -334,7 +479,10 @@ impl Default for Props {
 }
 
 impl Props {
-    pub(crate) fn new(idle_timeout_seconds: isize, generated_passphrases_words_count: isize) -> Props {
+    pub(crate) fn new(
+        idle_timeout_seconds: isize,
+        generated_passphrases_words_count: isize,
+    ) -> Props {
         Props {
             idle_timeout_seconds,
             generated_passphrases_words_count,
@@ -342,21 +490,32 @@ impl Props {
     }
 
     pub fn from_table(table: &Table) -> Result<Props, errors::RustKeylockError> {
-        let idle_timeout_seconds = table.get("idle_timeout_seconds")
+        let idle_timeout_seconds = table
+            .get("idle_timeout_seconds")
             .and_then(|value| value.as_integer().and_then(|v| Some(v as isize)))
             .unwrap_or_else(|| Props::default().idle_timeout_seconds());
-        let generated_passphrases_words_count = table.get("generated_passphrases_words_count")
+        let generated_passphrases_words_count = table
+            .get("generated_passphrases_words_count")
             .and_then(|value| value.as_integer().and_then(|v| Some(v as isize)))
             .unwrap_or_else(|| Props::default().generated_passphrases_words_count());
 
-        Ok(Self::new(idle_timeout_seconds, generated_passphrases_words_count))
+        Ok(Self::new(
+            idle_timeout_seconds,
+            generated_passphrases_words_count,
+        ))
     }
 
     #[allow(dead_code)]
     pub fn to_table(&self) -> Table {
         let mut table = Table::new();
-        table.insert("idle_timeout_seconds".to_string(), toml::Value::Integer(self.idle_timeout_seconds as i64));
-        table.insert("generated_passphrases_words_count".to_string(), toml::Value::Integer(self.generated_passphrases_words_count as i64));
+        table.insert(
+            "idle_timeout_seconds".to_string(),
+            toml::Value::Integer(self.idle_timeout_seconds as i64),
+        );
+        table.insert(
+            "generated_passphrases_words_count".to_string(),
+            toml::Value::Integer(self.generated_passphrases_words_count as i64),
+        );
 
         table
     }
@@ -454,6 +613,8 @@ pub enum UserSelection {
     GeneratePassphrase(Option<usize>, Entry),
     /// The user wants to check the passwords status quality.
     CheckPasswords,
+    /// The user wants to generate a new Browser Extension token
+    GenerateBrowserExtensionToken,
 }
 
 impl UserSelection {
@@ -461,15 +622,29 @@ impl UserSelection {
         self.ordinal() == other.ordinal()
     }
 
-    pub fn new_provided_password<T: Into<Zeroizing<String>>, U: Into<Zeroizing<usize>>>(password: T, number: U) -> UserSelection {
+    pub fn new_provided_password<T: Into<Zeroizing<String>>, U: Into<Zeroizing<usize>>>(
+        password: T,
+        number: U,
+    ) -> UserSelection {
         UserSelection::ProvidedPassword(password.into(), number.into())
     }
 
-    pub fn new_import_from<T: Into<Zeroizing<String>>, U: Into<Zeroizing<usize>>>(location: String, password: T, number: U) -> UserSelection {
+    pub fn new_import_from<T: Into<Zeroizing<String>>, U: Into<Zeroizing<usize>>>(
+        location: String,
+        password: T,
+        number: U,
+    ) -> UserSelection {
         UserSelection::ImportFrom(location, password.into(), number.into())
     }
 
-    pub fn new_import_from_default_location<T: Into<Zeroizing<String>>, U: Into<Zeroizing<usize>>>(location: String, password: T, number: U) -> UserSelection {
+    pub fn new_import_from_default_location<
+        T: Into<Zeroizing<String>>,
+        U: Into<Zeroizing<usize>>,
+    >(
+        location: String,
+        password: T,
+        number: U,
+    ) -> UserSelection {
         UserSelection::ImportFromDefaultLocation(location, password.into(), number.into())
     }
 
@@ -489,6 +664,7 @@ impl UserSelection {
             UserSelection::AddToClipboard(_) => 12,
             UserSelection::GeneratePassphrase(_, _) => 13,
             UserSelection::CheckPasswords => 14,
+            UserSelection::GenerateBrowserExtensionToken => 15,
         }
     }
 }
@@ -497,20 +673,30 @@ impl UserSelection {
 pub struct AllConfigurations {
     pub nextcloud: nextcloud::NextcloudConfiguration,
     pub dropbox: dropbox::DropboxConfiguration,
+    pub general: GeneralConfiguration,
 }
 
 impl AllConfigurations {
-    pub fn new(nextcloud: nextcloud::NextcloudConfiguration, dropbox: dropbox::DropboxConfiguration) -> AllConfigurations {
+    pub fn new(
+        nextcloud: nextcloud::NextcloudConfiguration,
+        dropbox: dropbox::DropboxConfiguration,
+        general: GeneralConfiguration,
+    ) -> AllConfigurations {
         AllConfigurations {
             nextcloud,
             dropbox,
+            general,
         }
     }
 }
 
 impl Default for AllConfigurations {
     fn default() -> Self {
-        AllConfigurations::new(NextcloudConfiguration::default(), DropboxConfiguration::default())
+        AllConfigurations::new(
+            NextcloudConfiguration::default(),
+            DropboxConfiguration::default(),
+            GeneralConfiguration::default(),
+        )
     }
 }
 
@@ -635,18 +821,21 @@ impl ToString for UserOptionType {
 impl<'a> From<&'a str> for UserOptionType {
     fn from(string: &str) -> Self {
         match string {
-            ref s if s.starts_with("String") => {
-                match Self::extract_value_from_string(s) {
-                    Ok(value) => UserOptionType::String(value),
-                    Err(error) => {
-                        error!("Could not create UserOptionType from {}: {:?}. Please consider opening a bug to the developers.", s, error);
-                        UserOptionType::None
-                    }
+            ref s if s.starts_with("String") => match Self::extract_value_from_string(s) {
+                Ok(value) => UserOptionType::String(value),
+                Err(error) => {
+                    error!("Could not create UserOptionType from {}: {:?}. Please consider opening a bug to the developers.", s, error);
+                    UserOptionType::None
                 }
-            }
+            },
             ref s if s.starts_with("Number") => {
                 let m = Self::extract_value_from_string(s).and_then(|value| {
-                    value.parse::<i64>().map_err(|_| errors::RustKeylockError::ParseError(format!("Could not parse {} to i64", value)))
+                    value.parse::<i64>().map_err(|_| {
+                        errors::RustKeylockError::ParseError(format!(
+                            "Could not parse {} to i64",
+                            value
+                        ))
+                    })
                 });
                 match m {
                     Ok(num) => UserOptionType::Number(num as isize),
@@ -672,7 +861,11 @@ pub(crate) struct EditorShowMessageWrapper {
 }
 
 impl EditorShowMessageWrapper {
-    pub(crate) fn new(message: &str, user_options: Vec<UserOption>, severity: MessageSeverity) -> EditorShowMessageWrapper {
+    pub(crate) fn new(
+        message: &str,
+        user_options: Vec<UserOption>,
+        severity: MessageSeverity,
+    ) -> EditorShowMessageWrapper {
         EditorShowMessageWrapper {
             message: message.to_string(),
             user_options,
@@ -710,7 +903,11 @@ pub(crate) enum UiCommand {
     ShowMenu(Menu),
     ShowEntries(Vec<Entry>, String),
     ShowEntry(Entry, usize, EntryPresentationType),
-    ShowConfiguration(NextcloudConfiguration, DropboxConfiguration),
+    ShowConfiguration(
+        NextcloudConfiguration,
+        DropboxConfiguration,
+        GeneralConfiguration,
+    ),
     Exit(bool),
     ShowMessage(String, Vec<UserOption>, MessageSeverity),
 }
@@ -847,7 +1044,14 @@ mod api_unit_tests {
     #[test]
     fn entry_to_encrypted() {
         let cryptor = EntryPasswordCryptor::new();
-        let entry = super::Entry::new("name".to_string(), "url".to_string(), "user".to_string(), "pass".to_string(), "desc".to_string(), EntryMeta::default());
+        let entry = super::Entry::new(
+            "name".to_string(),
+            "url".to_string(),
+            "user".to_string(),
+            "pass".to_string(),
+            "desc".to_string(),
+            EntryMeta::default(),
+        );
         let enc_entry = entry.encrypted(&cryptor);
         assert!(enc_entry.name == entry.name);
         assert!(enc_entry.url == entry.url);
@@ -861,7 +1065,14 @@ mod api_unit_tests {
     #[test]
     fn entry_to_encrypted_encryption_may_fail() {
         let cryptor = EntryPasswordCryptor::new();
-        let entry = super::Entry::new("name".to_string(), "url".to_string(), "user".to_string(), "pass".to_string(), "desc".to_string(), EntryMeta::default());
+        let entry = super::Entry::new(
+            "name".to_string(),
+            "url".to_string(),
+            "user".to_string(),
+            "pass".to_string(),
+            "desc".to_string(),
+            EntryMeta::default(),
+        );
         let dec_entry = entry.decrypted(&cryptor);
         assert!(dec_entry.pass == entry.pass);
     }
@@ -980,7 +1191,10 @@ mod api_unit_tests {
 
     #[test]
     fn user_option_type_from_string() {
-        assert!(super::UserOptionType::from("String(my string)") == super::UserOptionType::String("my string".to_string()));
+        assert!(
+            super::UserOptionType::from("String(my string)")
+                == super::UserOptionType::String("my string".to_string())
+        );
         assert!(super::UserOptionType::from("Number(33)") == super::UserOptionType::Number(33));
         assert!(super::UserOptionType::from("Other(33)") == super::UserOptionType::None);
     }
@@ -991,7 +1205,10 @@ mod api_unit_tests {
         let string = user_option_type.to_string();
         assert!(string == "String(my string)");
         let s: &str = &string;
-        assert!(super::UserOptionType::from(s) == super::UserOptionType::String("my string".to_string()));
+        assert!(
+            super::UserOptionType::from(s)
+                == super::UserOptionType::String("my string".to_string())
+        );
     }
 
     #[test]
@@ -1036,7 +1253,11 @@ mod api_unit_tests {
         assert!(UserSelection::Ack.ordinal() == 6);
         assert!(UserSelection::ExportTo("".to_owned()).ordinal() == 7);
         assert!(UserSelection::new_import_from("".to_owned(), "".to_owned(), 1).ordinal() == 8);
-        assert!(UserSelection::new_import_from_default_location("".to_owned(), "".to_owned(), 1).ordinal() == 9);
+        assert!(
+            UserSelection::new_import_from_default_location("".to_owned(), "".to_owned(), 1)
+                .ordinal()
+                == 9
+        );
         assert!(UserSelection::UserOption(UserOption::empty()).ordinal() == 10);
         assert!(UserSelection::UpdateConfiguration(AllConfigurations::default()).ordinal() == 11);
         assert!(UserSelection::AddToClipboard("".to_owned()).ordinal() == 12);
@@ -1044,6 +1265,10 @@ mod api_unit_tests {
 
     #[test]
     fn is_same_variant_with() {
-        assert!(UserSelection::new_provided_password("".to_owned(), 33).is_same_variant_with(&UserSelection::new_provided_password("other".to_owned(), 11)));
+        assert!(
+            UserSelection::new_provided_password("".to_owned(), 33).is_same_variant_with(
+                &UserSelection::new_provided_password("other".to_owned(), 11)
+            )
+        );
     }
 }

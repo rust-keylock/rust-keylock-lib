@@ -26,7 +26,7 @@ use log::*;
 use reqwest;
 use reqwest::{Client as OfficialReqwestClient, Response};
 
-use crate::api::EntryPresentationType;
+use crate::api::{EntryPresentationType, GeneralConfiguration};
 use crate::asynch::dropbox::DropboxConfiguration;
 use crate::asynch::nextcloud::NextcloudConfiguration;
 use crate::Entry;
@@ -426,8 +426,8 @@ impl Editor for AsyncEditorFacade {
         self.receive()
     }
 
-    fn show_configuration(&self, nextcloud: NextcloudConfiguration, dropbox: DropboxConfiguration) -> UserSelection {
-        self.send(UiCommand::ShowConfiguration(nextcloud, dropbox));
+    fn show_configuration(&self, nextcloud: NextcloudConfiguration, dropbox: DropboxConfiguration, general: GeneralConfiguration) -> UserSelection {
+        self.send(UiCommand::ShowConfiguration(nextcloud, dropbox, general));
         self.receive()
     }
 

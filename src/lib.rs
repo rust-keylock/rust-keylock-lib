@@ -46,6 +46,7 @@ use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread;
 use std::time;
 
+pub use api::GeneralConfiguration as GeneralConfiguration;
 use log::*;
 
 pub use file_handler::default_rustkeylock_location;
@@ -123,6 +124,10 @@ pub async fn execute_async(editor: Box<dyn AsyncEditor>) {
             if let Err(e) = rest_server_clone.update_safe(executor.get_safe()) {
                 error!("Could not update the safe for the HTTP server: {e}");
             }
+            let token = executor.get_configuration().general.browser_extension_token.unwrap_or_default();
+            if let Err(e) = rest_server_clone.update_token(token.to_string()) {
+                error!("Could not update the safe for the HTTP server: {e}");
+            }
             let (new_executor, stop) = executor.handle().await.unwrap();
             executor = new_executor;
             if stop {
@@ -152,8 +157,8 @@ pub async fn execute_async(editor: Box<dyn AsyncEditor>) {
                 UiCommand::ShowEntry(entry, index, presentation_type) => {
                     ui_rx_vec.push(editor.show_entry(entry, index, presentation_type));
                 }
-                UiCommand::ShowConfiguration(nextcloud, dropbox) => {
-                    ui_rx_vec.push(editor.show_configuration(nextcloud, dropbox));
+                UiCommand::ShowConfiguration(nextcloud, dropbox, general) => {
+                    ui_rx_vec.push(editor.show_configuration(nextcloud, dropbox, general));
                 }
                 UiCommand::ShowMessage(message, options, severity) => {
                     ui_rx_vec.push(editor.show_message(&message, options, severity));
@@ -270,9 +275,9 @@ pub fn execute(editor: Box<dyn Editor>) {
                     debug!("Showing entry");
                     send(&ui_tx, editor.show_entry(entry, index, presentation_type))
                 }
-                UiCommand::ShowConfiguration(nextcloud, dropbox) => {
+                UiCommand::ShowConfiguration(nextcloud, dropbox, general) => {
                     debug!("Showing configuration");
-                    send(&ui_tx, editor.show_configuration(nextcloud, dropbox))
+                    send(&ui_tx, editor.show_configuration(nextcloud, dropbox, general))
                 }
                 UiCommand::ShowMessage(message, options, severity) => {
                     debug!("Showing message");
@@ -335,6 +340,7 @@ impl CoreLogicHandler {
             nextcloud::NextcloudConfiguration::default(),
             dropbox::DropboxConfiguration::default(),
             SystemConfiguration::default(),
+            GeneralConfiguration::default(),
         ));
         // Signals changes that are not saved
         let contents_changed = false;
@@ -390,6 +396,10 @@ impl CoreLogicHandler {
         self.safe.clone()
     }
 
+    pub(crate) fn get_configuration(&self) -> RklConfiguration {
+        self.configuration.clone()
+    }
+
     // This is the main function that handles all the user selections. Its complexity is expected to be big.
     // This may change in the future during a refactoring but is accepted for now.
     #[allow(clippy::cyclomatic_complexity)]
@@ -419,6 +429,7 @@ impl CoreLogicHandler {
                         &s.configuration.nextcloud,
                         &s.configuration.dropbox,
                         &s.configuration.system,
+                        &s.configuration.general,
                     ));
                     let _ =
                         rkl_content.and_then(|c| file_handler::save(c, FILENAME, &s.cryptor, true));
@@ -522,6 +533,7 @@ impl CoreLogicHandler {
                         &s.configuration.nextcloud,
                         &s.configuration.dropbox,
                         &s.configuration.system,
+                        &s.configuration.general,
                     ));
                     let res =
                         rkl_content.and_then(|c| file_handler::save(c, FILENAME, &s.cryptor, true));
@@ -768,6 +780,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                         &s.configuration.nextcloud,
                         &s.configuration.dropbox,
                         &s.configuration.system,
+                        &s.configuration.general,
                     )) {
                         Ok(c) => match file_handler::save(c, &path, &s.cryptor, false) {
                             Ok(_) => {
@@ -864,6 +877,21 @@ Warning: Saving will discard all the entries that could not be recovered.
                 s.editor.show_configuration(
                     s.configuration.nextcloud.clone(),
                     s.configuration.dropbox.clone(),
+                    s.configuration.general.clone(),
+                )
+            }
+            UserSelection::GenerateBrowserExtensionToken => {
+                debug!("UserSelection::GenerateBrowserExtensionToken");
+                let new_token = rs_password_utils::dice::generate_with_separator(
+                    s.props.generated_passphrases_words_count() as usize,
+                    "_"
+                );
+                let mut updated_gen_conf = s.configuration.general.clone();
+                updated_gen_conf.browser_extension_token = Some(new_token);
+                s.editor.show_configuration(
+                    s.configuration.nextcloud.clone(),
+                    s.configuration.dropbox.clone(),
+                    updated_gen_conf,
                 )
             }
             UserSelection::UpdateConfiguration(new_conf) => {
@@ -876,6 +904,11 @@ Warning: Saving will discard all the entries that could not be recovered.
                 } else {
                     s.configuration.nextcloud = new_conf.nextcloud;
                     s.configuration.dropbox = new_conf.dropbox;
+                    if s.configuration.general != new_conf.general {
+                        debug!("General configuration changed");
+                        s.contents_changed = true;
+                        s.configuration.general = new_conf.general;
+                    }
                     if s.configuration.nextcloud.is_filled() {
                         debug!("A valid configuration for Nextcloud synchronization was found after being updated by the User. Spawning \
                             nextcloud sync task");
@@ -1097,6 +1130,7 @@ fn handle_provided_password_for_init(
                         rkl_content.nextcloud_conf,
                         rkl_content.dropbox_conf,
                         rkl_content.system_conf,
+                        rkl_content.general_conf
                     ));
                     *configuration = new_rkl_conf;
                     rkl_content.entries
@@ -1233,6 +1267,7 @@ pub trait Editor {
         &self,
         nextcloud: NextcloudConfiguration,
         dropbox: DropboxConfiguration,
+        general: GeneralConfiguration,
     ) -> UserSelection;
     /// Shows a message to the User.
     /// Along with the message, the user should select one of the offered `UserOption`s.
@@ -1275,6 +1310,7 @@ pub trait AsyncEditor {
         &self,
         nextcloud: NextcloudConfiguration,
         dropbox: DropboxConfiguration,
+        general: GeneralConfiguration,
     ) -> Receiver<UserSelection>;
     /// Shows a message to the User.
     /// Along with the message, the user should select one of the offered `UserOption`s.

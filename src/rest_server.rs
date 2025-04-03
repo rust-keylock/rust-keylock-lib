@@ -80,6 +80,7 @@ fn get_lost_counts() -> MutexGuard<'static, Vec<Counter>> {
 pub(crate) struct RestService {
     listener: Arc<TcpListener>,
     safe: Arc<Mutex<Option<Safe>>>,
+    token: Arc<Mutex<String>>,
 }
 
 impl RestService {
@@ -91,6 +92,7 @@ impl RestService {
         Ok(RestService {
             listener: Arc::new(listener),
             safe: Arc::new(Mutex::new(None)),
+            token: Arc::new(Mutex::new("".to_string())),
         })
     }
 
@@ -107,6 +109,11 @@ impl RestService {
 
     pub(crate) fn update_safe(&self, safe: Safe) -> errors::Result<()> {
         *self.safe.lock()? = Some(safe);
+        Ok(())
+    }
+
+    pub(crate) fn update_token(&self, token: String) -> errors::Result<()> {
+        *self.token.lock()? = token;
         Ok(())
     }
 }
@@ -168,11 +175,12 @@ impl Service<Request<IncomingBody>> for RestService {
         }
 
         let safe_opt = self.safe.lock().expect("Safe poisoned").clone();
+        let token_clone = self.token.lock().expect("Token poisoned").clone();
         let res = async move {
             match (req.method(), req.uri().path(), req.uri().query()) {
                 (&Method::POST, "/pake", _) => {
                     debug!("Initializing pake...");
-                    let outbound_key = do_pake(req).await?;
+                    let outbound_key = do_pake(req, &token_clone).await?;
 
                     let mut counter = get_counter();
                     let random_initial_counter = thread_rng().gen_range(0..100000);
@@ -285,11 +293,11 @@ fn handle_headers(
     Ok(())
 }
 
-async fn do_pake(req: Request<IncomingBody>) -> errors::Result<Vec<u8>> {
+async fn do_pake(req: Request<IncomingBody>, token: &str) -> errors::Result<Vec<u8>> {
     debug!("Executing PAKE");
     let inbound_msg = req.collect().await?.to_bytes();
     let (s1, outbound_msg) = Spake2::<Ed25519Group>::start_b(
-        &Password::new(b"password"),
+        &Password::new(token),
         &Identity::new(b"rust-keylock-browser-extension"),
         &Identity::new(b"rust-keylock-lib"),
     );
