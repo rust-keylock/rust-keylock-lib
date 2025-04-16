@@ -329,9 +329,15 @@ fn decrypt_base_64(key: &[u8], product: &str) -> errors::Result<Vec<u8>> {
     let encrypted_bytes = general_purpose::STANDARD.decode(&product)?;
     let key: &Key<Aes256Gcm> = key.into();
     let cipher = Aes256Gcm::new(&key);
-    let (nonce, data) = encrypted_bytes.split_at(12);
-    let plain = cipher.decrypt(Nonce::from_slice(nonce), data)?;
-    Ok(plain)
+    if product.len() > 12 {
+        let (nonce, data) = encrypted_bytes.split_at(12);
+        let plain = cipher.decrypt(Nonce::from_slice(nonce), data)?;
+        Ok(plain)
+    } else {
+        Err(errors::RustKeylockError::DecryptionError(
+            "Error during decryption. Unexpected bytes to decrypt".to_string(),
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -344,9 +350,7 @@ mod rest_server_tests {
 
     fn init_tests() {
         let _guard = SYNC_GUARD.lock().unwrap();
-        let b = {
-            SESSION_KEY.lock().expect("Session Key is poisoned").clone()
-        };
+        let b = { SESSION_KEY.lock().expect("Session Key is poisoned").clone() };
         if let None = b {
             let r = crate::datacrypt::create_random(32);
             println!("Creating new session key...{:x?}", r);
@@ -367,7 +371,8 @@ mod rest_server_tests {
         let plain = "plaintext";
         let encrypted_res = encrypt_to_base_64(&get_session_key(), plain.as_bytes());
         assert!(encrypted_res.is_ok());
-        let retrieved_plain_res = decrypt_base_64(&get_session_key(), encrypted_res.unwrap().as_str());
+        let retrieved_plain_res =
+            decrypt_base_64(&get_session_key(), encrypted_res.unwrap().as_str());
         assert!(retrieved_plain_res.is_ok());
         let retrieved_plain_str = String::from_utf8(retrieved_plain_res.unwrap()).unwrap();
         assert_eq!(retrieved_plain_str, plain);
@@ -406,7 +411,10 @@ mod rest_server_tests {
         let mut counter: usize = 1000;
         let mut lost_counters: Vec<usize> = Vec::new();
         let mut headers = HeaderMap::new();
-        headers.insert(TICKET_HEADER, get_encrypted_base_64_header_value("A string"));
+        headers.insert(
+            TICKET_HEADER,
+            get_encrypted_base_64_header_value("A string"),
+        );
 
         let res = handle_headers(&headers, &mut counter, &mut lost_counters);
         assert!(res.is_err(), "{:?} was not en error", res);
