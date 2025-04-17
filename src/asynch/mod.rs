@@ -255,7 +255,7 @@ impl AsyncEditorFacade {
         }
     }
 
-    fn receive(&self) -> UserSelection {
+    fn receive(&self, only_user_response: bool) -> UserSelection {
         let user_selection;
         // Holds the time of the latest user action
         let last_action_time = SystemTime::now();
@@ -263,12 +263,12 @@ impl AsyncEditorFacade {
             thread::park_timeout(ASYNC_EDITOR_PARK_TIMEOUT);
 
             // Check if idle timeout
-            if timeout_check(&last_action_time, self.props.idle_timeout_seconds()).is_some() {
+            if !only_user_response && timeout_check(&last_action_time, self.props.idle_timeout_seconds()).is_some() {
                 let message = format!("Idle time of {} seconds elapsed! Locking...", self.props.idle_timeout_seconds());
                 self.send(UiCommand::ShowMessage(message, vec![UserOption::ok()], MessageSeverity::default()));
-                let _ = self.receive();
+                let _ = self.receive(true);
                 self.send(UiCommand::ShowPasswordEnter);
-                user_selection = self.receive();
+                user_selection = self.receive(true);
                 break;
             };
 
@@ -286,14 +286,16 @@ impl AsyncEditorFacade {
                 Err(TryRecvError::Empty) => { /* ignore */ }
             }
 
-            if let Some(sel) = self.check_nextcloud_message() {
-                user_selection = sel;
-                break;
-            }
+            if !only_user_response {
+                if let Some(sel) = self.check_nextcloud_message() {
+                    user_selection = sel;
+                    break;
+                }
 
-            if let Some(sel) = self.check_dropbox_message() {
-                user_selection = sel;
-                break;
+                if let Some(sel) = self.check_dropbox_message() {
+                    user_selection = sel;
+                    break;
+                }
             }
         }
 
@@ -398,44 +400,44 @@ impl AsyncEditorFacade {
 impl Editor for AsyncEditorFacade {
     fn show_password_enter(&self) -> UserSelection {
         self.send(UiCommand::ShowPasswordEnter);
-        self.receive()
+        self.receive(true)
     }
 
     fn show_change_password(&self) -> UserSelection {
         self.send(UiCommand::ShowChangePassword);
-        self.receive()
+        self.receive(false)
     }
 
     fn show_menu(&self, menu: &Menu) -> UserSelection {
         self.send(UiCommand::ShowMenu(menu.clone()));
-        self.receive()
+        self.receive(false)
     }
 
     fn show_entries(&self, entries: Vec<Entry>, filter: String) -> UserSelection {
         self.send(UiCommand::ShowEntries(entries, filter));
-        self.receive()
+        self.receive(false)
     }
 
     fn show_entry(&self, entry: Entry, index: usize, presentation_type: EntryPresentationType) -> UserSelection {
         self.send(UiCommand::ShowEntry(entry, index, presentation_type));
-        self.receive()
+        self.receive(false)
     }
 
     fn exit(&self, contents_changed: bool) -> UserSelection {
         self.send(UiCommand::Exit(contents_changed));
-        self.receive()
+        self.receive(false)
     }
 
     fn show_configuration(&self, nextcloud: NextcloudConfiguration, dropbox: DropboxConfiguration, general: GeneralConfiguration) -> UserSelection {
         self.send(UiCommand::ShowConfiguration(nextcloud, dropbox, general));
-        self.receive()
+        self.receive(false)
     }
 
     fn show_message(&self, message: &str, options: Vec<UserOption>, severity: MessageSeverity) -> UserSelection {
         self.send(UiCommand::ShowMessage(message.to_string(), options, severity));
         let mut opt = None;
         while opt.is_none() {
-            opt = match self.receive() {
+            opt = match self.receive(false) {
                 uo @ UserSelection::UserOption(_) => {
                     Some(uo)
                 }
