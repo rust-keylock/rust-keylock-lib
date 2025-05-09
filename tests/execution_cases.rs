@@ -2,9 +2,10 @@ use std::sync::mpsc::{self, Sender};
 use std::sync::Mutex;
 use std::time::SystemTime;
 
+use async_trait::async_trait;
 use terminal_clipboard;
 
-use rust_keylock::{AllConfigurations, Entry, EntryMeta, EntryPresentationType, Menu, UserOption, UserSelection, execute, Editor, MessageSeverity};
+use rust_keylock::{execute, AllConfigurations, AsyncEditor, Editor, Entry, EntryMeta, EntryPresentationType, GeneralConfiguration, Menu, MessageSeverity, UserOption, UserSelection};
 use rust_keylock::dropbox::DropboxConfiguration;
 use rust_keylock::nextcloud::NextcloudConfiguration;
 use std::path::PathBuf;
@@ -404,7 +405,9 @@ fn execute_update_configuration() {
 
     let dbx_conf = DropboxConfiguration::default();
 
-    let new_conf = AllConfigurations::new(nc_conf, dbx_conf);
+    let gen_conf = GeneralConfiguration::default();
+
+    let new_conf = AllConfigurations::new(nc_conf, dbx_conf, gen_conf);
 
     let editor = Box::new(TestEditor::new(vec![
         // Login
@@ -512,57 +515,58 @@ impl TestEditor {
     }
 }
 
-impl Editor for TestEditor {
-    fn show_password_enter(&self) -> UserSelection {
+#[async_trait]
+impl AsyncEditor for TestEditor {
+    async fn show_password_enter(&self) -> UserSelection {
         println!("TestEditor::show_password_enter");
         let to_ret = self.return_first_selection();
         println!("Returning {:?}", to_ret);
         to_ret
     }
 
-    fn show_change_password(&self) -> UserSelection {
+    async fn show_change_password(&self) -> UserSelection {
         println!("TestEditor::show_change_password");
         let to_ret = self.return_first_selection();
         println!("Returning {:?}", to_ret);
         to_ret
     }
 
-    fn show_menu(&self, m: &Menu) -> UserSelection {
+    async fn show_menu(&self, m: Menu) -> UserSelection {
         println!("TestEditor::show_menu {:?}", m);
         let to_ret = self.return_first_selection();
         println!("Returning {:?}", to_ret);
         to_ret
     }
 
-    fn show_entries(&self, entries: Vec<Entry>, filter: String) -> UserSelection {
+    async fn show_entries(&self, entries: Vec<Entry>, filter: String) -> UserSelection {
         println!("TestEditor::show_entries {:?} with filter {}", entries, filter);
         let to_ret = self.return_first_selection();
         println!("Returning {:?}", to_ret);
         to_ret
     }
 
-    fn show_entry(&self, entry: Entry, index: usize, presentation_type: EntryPresentationType) -> UserSelection {
+    async fn show_entry(&self, entry: Entry, index: usize, presentation_type: EntryPresentationType) -> UserSelection {
         println!("TestEditor::show_entry {:?} with index {} and presentation_type {:?}", entry, index, presentation_type);
         let to_ret = self.return_first_selection();
         println!("Returning {:?}", to_ret);
         to_ret
     }
 
-    fn exit(&self, force: bool) -> UserSelection {
+    async fn exit(&self, force: bool) -> UserSelection {
         println!("TestEditor::exit {}", force);
         let to_ret = self.return_first_selection();
         println!("Returning {:?}", to_ret);
         to_ret
     }
 
-    fn show_configuration(&self, nextcloud: NextcloudConfiguration, dropbox: DropboxConfiguration) -> UserSelection {
-        println!("TestEditor::show_configuration with {:?} and {:?}", nextcloud, dropbox);
+    async fn show_configuration(&self, nextcloud: NextcloudConfiguration, dropbox: DropboxConfiguration, gen: GeneralConfiguration) -> UserSelection {
+        println!("TestEditor::show_configuration with {:?}, {:?} and {:?}", nextcloud, dropbox, gen);
         let to_ret = self.return_first_selection();
         println!("Returning {:?}", to_ret);
         to_ret
     }
 
-    fn show_message(&self, m: &str, _: Vec<UserOption>, _: MessageSeverity) -> UserSelection {
+    async fn show_message(&self, m: &str, _: Vec<UserOption>, _: MessageSeverity) -> UserSelection {
         println!("TestEditor::show_message {}", m);
         let to_ret = self.return_first_selection();
         println!("Returning {:?}", to_ret);

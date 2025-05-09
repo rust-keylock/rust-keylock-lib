@@ -15,9 +15,6 @@
 // along with rust-keylock.  If not, see <http://www.gnu.org/licenses/>.
 
 use std::str::{self, FromStr};
-use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
-use std::thread;
-use std::time::{self, Duration, SystemTime};
 
 use async_trait::async_trait;
 use http::{HeaderMap, HeaderValue};
@@ -26,55 +23,12 @@ use log::*;
 use reqwest;
 use reqwest::{Client as OfficialReqwestClient, Response};
 
-use crate::api::{EntryPresentationType, GeneralConfiguration};
-use crate::asynch::dropbox::DropboxConfiguration;
-use crate::asynch::nextcloud::NextcloudConfiguration;
-use crate::Entry;
-
-use super::{Editor, Menu, MessageSeverity, Props, UserOption, UserSelection};
-use super::api::UiCommand;
 use super::errors::{self, RustKeylockError};
-
-use tokio::time::sleep;
 
 pub mod nextcloud;
 pub mod dropbox;
 
-pub const ASYNC_EDITOR_PARK_TIMEOUT: Duration = time::Duration::from_millis(10);
-
 pub(crate) type BoxedRklHttpAsyncClient = Box<dyn RklHttpAsyncClient<ResType=Vec<u8>>>;
-
-/// Executes a task in a new thread
-pub fn execute_task(task: Box<dyn AsyncTask>, every: time::Duration) -> AsyncTaskHandle {
-    let (tx_loop_control, rx_loop_control): (Sender<bool>, Receiver<bool>) = mpsc::channel();
-
-    let mut task = task;
-
-    tokio::spawn(async move {
-        task.init().await;
-
-        loop {
-            let f = task.execute();
-            let cont = f.await;
-            let force_stop = match rx_loop_control.try_recv() {
-                Ok(stop_received) => {
-                    stop_received
-                }
-                Err(TryRecvError::Disconnected) => {
-                    warn!("The rx_loop_control has been disconnected. Stopping async task.");
-                    true
-                }
-                Err(TryRecvError::Empty) => { false }
-            };
-            if !cont || force_stop {
-                break;
-            }
-            sleep(every).await;
-        }
-    });
-
-    AsyncTaskHandle::new(tx_loop_control)
-}
 
 /// Defines a task that runs asynchronously in the background.
 #[async_trait]
@@ -82,33 +36,7 @@ pub trait AsyncTask: Send {
     /// Initializes a task
     async fn init(&mut self);
     /// Executes the task
-    /// When the returned boolean is true, the task will run again. When false, the task will be stopped.
-    async fn execute(&self) -> bool;
-}
-
-/// A handle to a created AsyncTask
-pub struct AsyncTaskHandle {
-    stop_tx: Sender<bool>,
-}
-
-impl AsyncTaskHandle {
-    fn new(stop_tx: Sender<bool>) -> AsyncTaskHandle {
-        AsyncTaskHandle {
-            stop_tx,
-        }
-    }
-
-    pub fn stop(&self) -> errors::Result<()> {
-        debug!("Stopping async task...");
-
-        match self.stop_tx.send(true) {
-            Ok(_) => Ok(()),
-            Err(error) => {
-                warn!("Could not stop async task... {:?}", error);
-                Err(RustKeylockError::from(error))
-            }
-        }
-    }
+    async fn execute(&self) -> errors::Result<SyncStatus>;
 }
 
 #[derive(PartialEq, Debug)]
@@ -222,249 +150,6 @@ pub(crate) fn synchronizer_action(svd: &ServerVersionData,
         (_, _, _) => {
             error!("The local version, server version and last sync version seem corrupted.");
             Ok(SynchronizerAction::Ignore)
-        }
-    }
-}
-
-// Used in the execute function
-pub(crate) struct AsyncEditorFacade {
-    user_selection_rx: Receiver<UserSelection>,
-    nextcloud_rx: Option<Receiver<errors::Result<SyncStatus>>>,
-    dropbox_rx: Option<Receiver<errors::Result<SyncStatus>>>,
-    command_tx: Sender<UiCommand>,
-    props: Props,
-}
-
-impl AsyncEditorFacade {
-    pub fn new(user_selection_rx: Receiver<UserSelection>, command_tx: Sender<UiCommand>, props: Props) -> AsyncEditorFacade {
-        AsyncEditorFacade { user_selection_rx, nextcloud_rx: None, dropbox_rx: None, command_tx, props }
-    }
-
-    pub fn update_nextcloud_rx(&mut self, new_nextcloud_rx: Option<Receiver<errors::Result<SyncStatus>>>) {
-        self.nextcloud_rx = new_nextcloud_rx;
-    }
-
-    pub fn update_dropbox_rx(&mut self, new_dropbox_rx: Option<Receiver<errors::Result<SyncStatus>>>) {
-        self.dropbox_rx = new_dropbox_rx;
-    }
-
-    pub fn send(&self, command: UiCommand) {
-        match self.command_tx.send(command) {
-            Ok(_) => { /* ignore */ }
-            Err(error) => error!("Could not send UiCommand to the Editor: {:?}", error),
-        }
-    }
-
-    fn receive(&self, only_user_response: bool) -> UserSelection {
-        let user_selection;
-        // Holds the time of the latest user action
-        let last_action_time = SystemTime::now();
-        loop {
-            thread::park_timeout(ASYNC_EDITOR_PARK_TIMEOUT);
-
-            // Check if idle timeout
-            if !only_user_response && timeout_check(&last_action_time, self.props.idle_timeout_seconds()).is_some() {
-                let message = format!("Idle time of {} seconds elapsed! Locking...", self.props.idle_timeout_seconds());
-                self.send(UiCommand::ShowMessage(message, vec![UserOption::ok()], MessageSeverity::default()));
-                let _ = self.receive(true);
-                self.send(UiCommand::ShowPasswordEnter);
-                user_selection = self.receive(true);
-                break;
-            };
-
-            // Get a possible user input
-            match self.user_selection_rx.try_recv() {
-                Ok(sel) => {
-                    user_selection = sel;
-                    break;
-                }
-                Err(TryRecvError::Disconnected) => {
-                    warn!("The Editor got disconnected");
-                    user_selection = UserSelection::GoTo(Menu::Current);
-                    break;
-                }
-                Err(TryRecvError::Empty) => { /* ignore */ }
-            }
-
-            if !only_user_response {
-                if let Some(sel) = self.check_nextcloud_message() {
-                    user_selection = sel;
-                    break;
-                }
-
-                if let Some(sel) = self.check_dropbox_message() {
-                    user_selection = sel;
-                    break;
-                }
-            }
-        }
-
-        user_selection
-    }
-
-    // Get a possible nextcloud async task message
-    fn check_nextcloud_message(&self) -> Option<UserSelection> {
-        self.nextcloud_rx.as_ref().and_then(|rx| {
-            match rx.try_recv() {
-                Ok(sync_status_res) => {
-                    match sync_status_res {
-                        Ok(sync_status) => self.handle_sync_status_success(sync_status, super::FILENAME),
-                        Err(_) => None,
-                    }
-                }
-                _ => {
-                    None
-                }
-            }
-        })
-    }
-
-    // Get a possible dropbox async task message
-    fn check_dropbox_message(&self) -> Option<UserSelection> {
-        self.dropbox_rx.as_ref().and_then(|rx| {
-            match rx.try_recv() {
-                Ok(sync_status_res) => {
-                    match sync_status_res {
-                        Ok(sync_status) => self.handle_sync_status_success(sync_status, super::FILENAME),
-                        Err(_) => None,
-                    }
-                }
-                _ => None,
-            }
-        })
-    }
-
-    fn handle_sync_status_success(&self, sync_status: SyncStatus, filename: &str) -> Option<UserSelection> {
-        match sync_status {
-            SyncStatus::UploadSuccess(who) => {
-                debug!("The {} server was updated with the local data", who);
-                let _ = self.show_message(&format!("The {} server was updated with the local data", who), vec![UserOption::ok()], MessageSeverity::Info);
-                Some(UserSelection::GoTo(Menu::Save(true)))
-            }
-            SyncStatus::NewAvailable(who, downloaded_filename) => {
-                debug!("Downloaded new data from the {} server.", who);
-                let selection = self.show_message(&format!("Downloaded new data from the {} server. Do you want to apply them locally now?", who),
-                                                  vec![UserOption::yes(), UserOption::no()],
-                                                  MessageSeverity::Info);
-
-                debug!("The user selected {:?} as an answer for applying the downloaded data locally", &selection);
-                if selection == UserSelection::UserOption(UserOption::yes()) {
-                    debug!("Replacing the local file with the one downloaded from the server");
-                    let _ = super::file_handler::replace(&downloaded_filename, filename);
-                    Some(UserSelection::GoTo(Menu::TryPass(true)))
-                } else {
-                    Some(UserSelection::GoTo(Menu::Current))
-                }
-            }
-            SyncStatus::NewToMerge(who, downloaded_filename) => {
-                debug!("Downloaded data from the {} server, but conflicts were identified. The contents will be merged.", who);
-                let selection =
-                    self.show_message(&format!("Downloaded data from the {} server, but conflicts were identified. The contents will be merged \
-                                   but nothing will be saved. You will need to explicitly save after reviewing the merged data. Do you \
-                                   want to do the merge now?", who),
-                                      vec![UserOption::yes(), UserOption::no()],
-                                      MessageSeverity::Info);
-
-                if selection == UserSelection::UserOption(UserOption::yes()) {
-                    debug!("The user selected {:?} as an answer for applying the downloaded data locally", &selection);
-                    debug!("Merging the local data with the downloaded from the server");
-
-                    match self.show_password_enter() {
-                        UserSelection::ProvidedPassword(pwd, salt_pos) => {
-                            Some(UserSelection::ImportFromDefaultLocation(downloaded_filename, pwd, salt_pos))
-                        }
-                        other => {
-                            let message = format!("Expected a ProvidedPassword but received '{:?}'. Please, consider opening a bug to the \
-                                               developers.",
-                                                  &other);
-                            error!("{}", message);
-                            let _ =
-                                self.show_message("Unexpected result when waiting for password. See the logs for more details. Please \
-                                                 consider opening a bug to the developers.",
-                                                  vec![UserOption::ok()],
-                                                  MessageSeverity::Error);
-                            Some(UserSelection::GoTo(Menu::TryPass(false)))
-                        }
-                    }
-                } else {
-                    Some(UserSelection::GoTo(Menu::Current))
-                }
-            }
-            SyncStatus::None => {
-                None
-            }
-        }
-    }
-}
-
-impl Editor for AsyncEditorFacade {
-    fn show_password_enter(&self) -> UserSelection {
-        self.send(UiCommand::ShowPasswordEnter);
-        self.receive(true)
-    }
-
-    fn show_change_password(&self) -> UserSelection {
-        self.send(UiCommand::ShowChangePassword);
-        self.receive(false)
-    }
-
-    fn show_menu(&self, menu: &Menu) -> UserSelection {
-        self.send(UiCommand::ShowMenu(menu.clone()));
-        self.receive(false)
-    }
-
-    fn show_entries(&self, entries: Vec<Entry>, filter: String) -> UserSelection {
-        self.send(UiCommand::ShowEntries(entries, filter));
-        self.receive(false)
-    }
-
-    fn show_entry(&self, entry: Entry, index: usize, presentation_type: EntryPresentationType) -> UserSelection {
-        self.send(UiCommand::ShowEntry(entry, index, presentation_type));
-        self.receive(false)
-    }
-
-    fn exit(&self, contents_changed: bool) -> UserSelection {
-        self.send(UiCommand::Exit(contents_changed));
-        self.receive(false)
-    }
-
-    fn show_configuration(&self, nextcloud: NextcloudConfiguration, dropbox: DropboxConfiguration, general: GeneralConfiguration) -> UserSelection {
-        self.send(UiCommand::ShowConfiguration(nextcloud, dropbox, general));
-        self.receive(false)
-    }
-
-    fn show_message(&self, message: &str, options: Vec<UserOption>, severity: MessageSeverity) -> UserSelection {
-        self.send(UiCommand::ShowMessage(message.to_string(), options, severity));
-        let mut opt = None;
-        while opt.is_none() {
-            opt = match self.receive(false) {
-                uo @ UserSelection::UserOption(_) => {
-                    Some(uo)
-                }
-                other => {
-                    debug!("Ignoring {:?} while waiting for UserOption.", other);
-                    None
-                }
-            };
-        }
-        opt.unwrap()
-    }
-}
-
-fn timeout_check(last_action_time: &SystemTime, timeout_seconds: isize) -> Option<()> {
-    match last_action_time.elapsed() {
-        Ok(elapsed) => {
-            let elapsed_seconds = elapsed.as_secs();
-            if elapsed_seconds as isize > timeout_seconds {
-                warn!("Idle time of {} seconds elapsed! Locking...", timeout_seconds);
-                Some(())
-            } else {
-                None
-            }
-        }
-        Err(error) => {
-            error!("Cannot get the elapsed time since the last action of the user: {:?}", &error);
-            Some(())
         }
     }
 }
@@ -616,117 +301,79 @@ impl RklHttpAsyncFactory for ReqwestClientFactory {
 mod async_tests {
     use std::fs::{self, File};
     use std::io::prelude::*;
-    use std::sync::mpsc;
     use std::sync::mpsc::SyncSender;
     use std::time::SystemTime;
 
     use crate::file_handler;
 
     use super::*;
-    use super::super::{Editor, MessageSeverity, UiCommand, UserOption, UserSelection};
 
-    #[test]
-    fn facade_show_change_password() {
-        let (user_selection_tx, user_selection_rx) = mpsc::channel();
-        let (command_tx, command_rx) = mpsc::channel();
+    // #[test]
+    // fn facade_show_change_password() {
+    //     let (user_selection_tx, user_selection_rx) = mpsc::channel();
+    //     let (command_tx, command_rx) = mpsc::channel();
 
-        let facade = super::AsyncEditorFacade::new(user_selection_rx, command_tx, super::Props::default());
-        assert!(user_selection_tx.send(UserSelection::Ack).is_ok());
-        let user_selection = facade.show_change_password();
-        assert!(user_selection == UserSelection::Ack);
-        let command_res = command_rx.recv();
-        assert!(command_res.is_ok());
-        match command_res.unwrap() {
-            UiCommand::ShowChangePassword => assert!(true),
-            _ => assert!(false),
-        };
-    }
+    //     let facade = super::AsyncEditorFacade::new(user_selection_rx, command_tx, super::Props::default());
+    //     assert!(user_selection_tx.send(UserSelection::Ack).is_ok());
+    //     let user_selection = facade.show_change_password();
+    //     assert!(user_selection == UserSelection::Ack);
+    //     let command_res = command_rx.recv();
+    //     assert!(command_res.is_ok());
+    //     match command_res.unwrap() {
+    //         UiCommand::ShowChangePassword => assert!(true),
+    //         _ => assert!(false),
+    //     };
+    // }
 
-    #[test]
-    fn facade_show_password_enter() {
-        let (user_selection_tx, user_selection_rx) = mpsc::channel();
-        let (command_tx, command_rx) = mpsc::channel();
+    // #[test]
+    // fn facade_show_password_enter() {
+    //     let (user_selection_tx, user_selection_rx) = mpsc::channel();
+    //     let (command_tx, command_rx) = mpsc::channel();
 
-        let facade = super::AsyncEditorFacade::new(user_selection_rx, command_tx, super::Props::default());
-        assert!(user_selection_tx.send(UserSelection::Ack).is_ok());
-        let user_selection = facade.show_password_enter();
-        assert!(user_selection == UserSelection::Ack);
-        let command_res = command_rx.recv();
-        assert!(command_res.is_ok());
-        match command_res.unwrap() {
-            UiCommand::ShowPasswordEnter => assert!(true),
-            _ => assert!(false),
-        };
-    }
+    //     let facade = super::AsyncEditorFacade::new(user_selection_rx, command_tx, super::Props::default());
+    //     assert!(user_selection_tx.send(UserSelection::Ack).is_ok());
+    //     let user_selection = facade.show_password_enter();
+    //     assert!(user_selection == UserSelection::Ack);
+    //     let command_res = command_rx.recv();
+    //     assert!(command_res.is_ok());
+    //     match command_res.unwrap() {
+    //         UiCommand::ShowPasswordEnter => assert!(true),
+    //         _ => assert!(false),
+    //     };
+    // }
 
-    #[test]
-    fn facade_show_message() {
-        let (user_selection_tx, user_selection_rx) = mpsc::channel();
-        let (command_tx, command_rx) = mpsc::channel();
+    // #[test]
+    // fn facade_show_message() {
+    //     let (user_selection_tx, user_selection_rx) = mpsc::channel();
+    //     let (command_tx, command_rx) = mpsc::channel();
 
-        let facade = super::AsyncEditorFacade::new(user_selection_rx, command_tx, super::Props::default());
-        assert!(user_selection_tx.send(UserSelection::UserOption(UserOption::ok())).is_ok());
-        let user_selection = facade.show_message("message", vec![UserOption::ok()], MessageSeverity::Info);
-        assert!(user_selection == UserSelection::UserOption(UserOption::ok()));
-        let command_res = command_rx.recv();
-        assert!(command_res.is_ok());
-        match command_res.unwrap() {
-            UiCommand::ShowMessage(_, _, _) => assert!(true),
-            _ => assert!(false),
-        };
-    }
+    //     let facade = super::AsyncEditorFacade::new(user_selection_rx, command_tx, super::Props::default());
+    //     assert!(user_selection_tx.send(UserSelection::UserOption(UserOption::ok())).is_ok());
+    //     let user_selection = facade.show_message("message", vec![UserOption::ok()], MessageSeverity::Info);
+    //     assert!(user_selection == UserSelection::UserOption(UserOption::ok()));
+    //     let command_res = command_rx.recv();
+    //     assert!(command_res.is_ok());
+    //     match command_res.unwrap() {
+    //         UiCommand::ShowMessage(_, _, _) => assert!(true),
+    //         _ => assert!(false),
+    //     };
+    // }
 
-    #[test]
-    fn facade_show_message_waits_only_for_user_options() {
-        let (user_selection_tx, user_selection_rx) = mpsc::channel();
-        let (command_tx, _) = mpsc::channel();
+    // #[test]
+    // fn facade_show_message_waits_only_for_user_options() {
+    //     let (user_selection_tx, user_selection_rx) = mpsc::channel();
+    //     let (command_tx, _) = mpsc::channel();
 
-        let facade = super::AsyncEditorFacade::new(user_selection_rx, command_tx, super::Props::default());
-        // Send a non-UserOption first. This should be ignored.
-        assert!(user_selection_tx.send(UserSelection::Ack).is_ok());
-        // Send a UserOption.
-        assert!(user_selection_tx.send(UserSelection::UserOption(UserOption::ok())).is_ok());
-        let user_selection = facade.show_message("message", vec![UserOption::ok()], MessageSeverity::Info);
-        assert!(user_selection == UserSelection::UserOption(UserOption::ok()));
-    }
+    //     let facade = super::AsyncEditorFacade::new(user_selection_rx, command_tx, super::Props::default());
+    //     // Send a non-UserOption first. This should be ignored.
+    //     assert!(user_selection_tx.send(UserSelection::Ack).is_ok());
+    //     // Send a UserOption.
+    //     assert!(user_selection_tx.send(UserSelection::UserOption(UserOption::ok())).is_ok());
+    //     let user_selection = facade.show_message("message", vec![UserOption::ok()], MessageSeverity::Info);
+    //     assert!(user_selection == UserSelection::UserOption(UserOption::ok()));
+    // }
 
-    #[test]
-    fn user_selection_after_idle_check_timed_out() {
-        let time = SystemTime::now();
-        std::thread::sleep(std::time::Duration::new(2, 0));
-        let opt = super::timeout_check(&time, 1);
-        assert!(opt.is_some());
-    }
-
-    #[test]
-    fn user_selection_after_idle_check_not_timed_out() {
-        let time = SystemTime::now();
-        let opt = super::timeout_check(&time, 10);
-        assert!(opt.is_none());
-    }
-
-    #[test]
-    fn async_execution() {
-        let (tx, rx) = mpsc::sync_channel(10);
-        let task = DummyTask { tx };
-
-        thread::spawn(|| {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            let f = async {
-                let ten_millis = time::Duration::from_millis(10);
-                super::execute_task(Box::new(task), ten_millis)
-            };
-            // Keep AsyncTaskHandle and sleep in order for the channel that it contains not to be disconnected.
-            // If the channel gets disconnected, the AsyncTask will be stopped.
-            let _ath = rt.block_on(f);
-            thread::sleep(time::Duration::from_millis(60000));
-        });
-        std::thread::sleep(std::time::Duration::new(2, 0));
-
-        assert!(rx.recv_timeout(time::Duration::from_millis(10000)).is_ok());
-        assert!(rx.recv_timeout(time::Duration::from_millis(10000)).is_ok());
-        assert!(rx.recv_timeout(time::Duration::from_millis(10000)).is_ok());
-    }
+    // TODO: Test timeout mechanism
 
     #[test]
     fn parse_web_dav_response() {
@@ -818,20 +465,6 @@ mod async_tests {
         assert!(res6.as_ref().unwrap() == &SynchronizerAction::DownloadMergeAndUpload);
 
         let _ = file_handler::delete_file(filename);
-    }
-
-    pub struct DummyTask {
-        tx: SyncSender<errors::Result<&'static str>>,
-    }
-
-    #[async_trait]
-    impl super::AsyncTask for DummyTask {
-        async fn init(&mut self) {}
-
-        async fn execute(&self) -> bool {
-            let _ = self.tx.clone().send(Ok("dummy"));
-            true
-        }
     }
 
     fn create_file_with_contents(filename: &str, contents: &str) {

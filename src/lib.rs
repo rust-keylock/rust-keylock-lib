@@ -40,13 +40,12 @@ extern crate terminal_clipboard;
 extern crate toml;
 extern crate xml;
 
-use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
-use std::thread;
-use std::time;
 
-pub use api::GeneralConfiguration as GeneralConfiguration;
+pub use api::GeneralConfiguration;
+use async_trait::async_trait;
+use asynch::{AsyncTask, ReqwestClientFactory, SyncStatus};
+use futures::{future, select, FutureExt};
 use log::*;
 
 pub use file_handler::default_rustkeylock_location;
@@ -55,10 +54,8 @@ use rest_server::RestService;
 use crate::api::{EditorShowMessageWrapper, PasswordChecker, RklPasswordChecker};
 use crate::asynch::dropbox::DropboxConfiguration;
 use crate::asynch::nextcloud::NextcloudConfiguration;
-use crate::asynch::ReqwestClientFactory;
 
 use self::api::safe::Safe;
-use self::api::UiCommand;
 pub use self::api::{
     AllConfigurations, Entry, EntryMeta, EntryPresentationType, Menu, MessageSeverity, UserOption,
     UserSelection,
@@ -66,7 +63,6 @@ pub use self::api::{
 use self::api::{Props, RklConfiguration, RklContent, SystemConfiguration};
 pub use self::asynch::dropbox;
 pub use self::asynch::nextcloud;
-use self::asynch::AsyncEditorFacade;
 
 mod api;
 mod asynch;
@@ -75,7 +71,6 @@ mod errors;
 mod file_handler;
 mod protected;
 mod rest_server;
-mod selection_handling;
 mod utils;
 
 const FILENAME: &str = ".sec";
@@ -84,9 +79,6 @@ const PROPS_FILENAME: &str = ".props";
 /// Takes a reference of `Editor` implementation as argument and executes the _rust-keylock_ logic.
 /// The `Editor` is responsible for the interaction with the user. Currently there are `Editor` implementations for __shell__ and for __Android__.
 pub async fn execute_async(editor: Box<dyn AsyncEditor>) {
-    let (command_tx, command_rx) = mpsc::channel();
-    let (ui_tx, ui_rx) = mpsc::channel();
-    let mut ui_rx_vec = Vec::new();
 
     let mut rest_server = RestService::new()
         .await
@@ -101,11 +93,52 @@ pub async fn execute_async(editor: Box<dyn AsyncEditor>) {
         }
     });
 
-    tokio::task::spawn(async move {
-        unsafe {
-            openssl_probe::init_openssl_env_vars();
+    unsafe {
+        openssl_probe::init_openssl_env_vars();
+    }
+    info!("Starting rust-keylock...");
+    let props = match file_handler::load_properties(PROPS_FILENAME) {
+        Ok(m) => m,
+        Err(error) => {
+            error!(
+                "Could not load properties. Using defaults. The error was: {}",
+                error
+            );
+            Props::default()
         }
-        info!("Starting rust-keylock...");
+    };
+
+    let mut executor = CoreLogicHandler::new(editor, props).await;
+
+    loop {
+        if let Err(e) = rest_server_clone.update_safe(executor.get_safe()) {
+            error!("Could not update the safe for the HTTP server: {e}");
+        }
+        let token = executor
+            .get_configuration()
+            .general
+            .browser_extension_token
+            .unwrap_or_default();
+        if let Err(e) = rest_server_clone.update_token(token.to_string()) {
+            error!("Could not update the safe for the HTTP server: {e}");
+        }
+        let (new_executor, stop) = executor.handle().await.unwrap();
+        executor = new_executor;
+        if stop {
+            break;
+        }
+    }
+
+    info!("Exiting rust-keylock...");
+}
+
+pub fn execute(editor: Box<dyn AsyncEditor>) {
+    unsafe {
+        openssl_probe::init_openssl_env_vars();
+    }
+    info!("Starting rust-keylock...");
+
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
         let props = match file_handler::load_properties(PROPS_FILENAME) {
             Ok(m) => m,
             Err(error) => {
@@ -117,17 +150,9 @@ pub async fn execute_async(editor: Box<dyn AsyncEditor>) {
             }
         };
 
-        let editor_facade = asynch::AsyncEditorFacade::new(ui_rx, command_tx, props.clone());
-        let mut executor = CoreLogicHandler::new(editor_facade, props);
+        let mut executor = CoreLogicHandler::new(editor, props).await;
 
         loop {
-            if let Err(e) = rest_server_clone.update_safe(executor.get_safe()) {
-                error!("Could not update the safe for the HTTP server: {e}");
-            }
-            let token = executor.get_configuration().general.browser_extension_token.unwrap_or_default();
-            if let Err(e) = rest_server_clone.update_token(token.to_string()) {
-                error!("Could not update the safe for the HTTP server: {e}");
-            }
             let (new_executor, stop) = executor.handle().await.unwrap();
             executor = new_executor;
             if stop {
@@ -136,185 +161,10 @@ pub async fn execute_async(editor: Box<dyn AsyncEditor>) {
         }
     });
 
-    // The select macro is a nightly feature and is going to be deprecated. Use polling until a better solution is found.
-    // https://github.com/rust-lang/rust/issues/27800
-    loop {
-        thread::park_timeout(asynch::ASYNC_EDITOR_PARK_TIMEOUT);
-        match command_rx.try_recv() {
-            Ok(command) => match command {
-                UiCommand::ShowPasswordEnter => {
-                    ui_rx_vec.push(editor.show_password_enter());
-                }
-                UiCommand::ShowChangePassword => {
-                    ui_rx_vec.push(editor.show_change_password());
-                }
-                UiCommand::ShowMenu(menu) => {
-                    ui_rx_vec.push(editor.show_menu(&menu));
-                }
-                UiCommand::ShowEntries(entries, filter) => {
-                    ui_rx_vec.push(editor.show_entries(entries, filter));
-                }
-                UiCommand::ShowEntry(entry, index, presentation_type) => {
-                    ui_rx_vec.push(editor.show_entry(entry, index, presentation_type));
-                }
-                UiCommand::ShowConfiguration(nextcloud, dropbox, general) => {
-                    ui_rx_vec.push(editor.show_configuration(nextcloud, dropbox, general));
-                }
-                UiCommand::ShowMessage(message, options, severity) => {
-                    ui_rx_vec.push(editor.show_message(&message, options, severity));
-                }
-                UiCommand::Exit(contents_changed) => {
-                    ui_rx_vec.push(editor.exit(contents_changed));
-                }
-            },
-            Err(TryRecvError::Disconnected) => {
-                break;
-            }
-            Err(TryRecvError::Empty) => { /* ignore */ }
-        }
-
-        if let Some(sel) = try_recv_from_vec(&mut ui_rx_vec) {
-            let should_break = sel == UserSelection::GoTo(Menu::ForceExit);
-            send(&ui_tx, sel);
-            if should_break {
-                break;
-            }
-        }
-    }
-
     info!("Exiting rust-keylock...");
-}
-
-fn try_recv_from_vec(rxs: &mut Vec<Receiver<UserSelection>>) -> Option<UserSelection> {
-    let mut res_opt: Option<UserSelection> = None;
-    let mut i = 0;
-    let mut remove_element = false;
-
-    for rx in rxs.iter() {
-        match rx.try_recv() {
-            Ok(res) => {
-                res_opt = Some(res);
-                remove_element = true;
-                break;
-            }
-            Err(TryRecvError::Disconnected) => {
-                remove_element = true;
-                break;
-            }
-            Err(TryRecvError::Empty) => { /* ignore */ }
-        }
-
-        i += 1;
-    }
-
-    if remove_element {
-        rxs.remove(i);
-    }
-    res_opt
-}
-
-pub fn execute(editor: Box<dyn Editor>) {
-    unsafe {
-        openssl_probe::init_openssl_env_vars();
-    }
-    info!("Starting rust-keylock...");
-    let (command_tx, command_rx) = mpsc::channel();
-    let (ui_tx, ui_rx) = mpsc::channel();
-
-    thread::spawn(move || {
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let props = match file_handler::load_properties(PROPS_FILENAME) {
-                Ok(m) => m,
-                Err(error) => {
-                    error!(
-                        "Could not load properties. Using defaults. The error was: {}",
-                        error
-                    );
-                    Props::default()
-                }
-            };
-
-            let editor_facade = asynch::AsyncEditorFacade::new(ui_rx, command_tx, props.clone());
-            let mut executor = CoreLogicHandler::new(editor_facade, props);
-
-            loop {
-                let (new_executor, stop) = executor.handle().await.unwrap();
-                executor = new_executor;
-                if stop {
-                    break;
-                }
-            }
-        });
-    });
-
-    loop {
-        match command_rx.recv() {
-            Ok(command) => match command {
-                UiCommand::ShowPasswordEnter => {
-                    debug!("Showing password");
-                    send(&ui_tx, editor.show_password_enter())
-                }
-                UiCommand::ShowChangePassword => {
-                    debug!("Showing change password");
-                    send(&ui_tx, editor.show_change_password())
-                }
-                UiCommand::ShowMenu(menu) => {
-                    debug!("Showing menu {:?}", menu);
-                    let sel = editor.show_menu(&menu);
-                    let should_break = sel == UserSelection::GoTo(Menu::ForceExit);
-                    send(&ui_tx, sel);
-                    if should_break {
-                        break;
-                    }
-                }
-                UiCommand::ShowEntries(entries, filter) => {
-                    debug!("Showing entries");
-                    send(&ui_tx, editor.show_entries(entries, filter))
-                }
-                UiCommand::ShowEntry(entry, index, presentation_type) => {
-                    debug!("Showing entry");
-                    send(&ui_tx, editor.show_entry(entry, index, presentation_type))
-                }
-                UiCommand::ShowConfiguration(nextcloud, dropbox, general) => {
-                    debug!("Showing configuration");
-                    send(&ui_tx, editor.show_configuration(nextcloud, dropbox, general))
-                }
-                UiCommand::ShowMessage(message, options, severity) => {
-                    debug!("Showing message");
-                    send(&ui_tx, editor.show_message(&message, options, severity))
-                }
-                UiCommand::Exit(contents_changed) => {
-                    debug!("Exiting");
-                    let sel = editor.exit(contents_changed);
-                    let should_break = sel == UserSelection::GoTo(Menu::ForceExit);
-                    send(&ui_tx, sel);
-                    if should_break {
-                        break;
-                    }
-                }
-            },
-            Err(error) => {
-                error!(
-                    "Error while receiving command from spawned execution: {:?}",
-                    error
-                );
-                break;
-            }
-        }
-    }
-
-    info!("Exiting rust-keylock...");
-}
-
-fn send(tx: &Sender<UserSelection>, user_selection: UserSelection) {
-    match tx.send(user_selection) {
-        Ok(_) => { /* ignore*/ }
-        Err(error) => error!("Could not send User Selection to the core lib: {:?}", error),
-    }
 }
 
 struct CoreLogicHandler {
-    editor: AsyncEditorFacade,
     props: Props,
     // Holds the UserSelections
     user_selection: UserSelection,
@@ -323,13 +173,13 @@ struct CoreLogicHandler {
     configuration: RklConfiguration,
     // Signals changes that are not saved
     contents_changed: bool,
-    async_task_handles: HashMap<&'static str, asynch::AsyncTaskHandle>,
     cryptor: datacrypt::BcryptAes,
+    editor: Box<dyn AsyncEditor>
 }
 
 impl CoreLogicHandler {
-    fn new(editor: AsyncEditorFacade, props: Props) -> CoreLogicHandler {
-        let mut editor = editor;
+    async fn new(editor: Box<dyn AsyncEditor>, props: Props) -> CoreLogicHandler {
+        let editor = editor;
         // Holds the UserSelections
         let user_selection;
 
@@ -344,14 +194,13 @@ impl CoreLogicHandler {
         ));
         // Signals changes that are not saved
         let contents_changed = false;
-        let mut async_task_handles = HashMap::new();
         // Create a Cryptor
         let cryptor = {
             // First time run?
             let provided_password = if file_handler::is_first_run(FILENAME) {
-                editor.show_change_password()
+                editor.show_change_password().await
             } else {
-                editor.show_password_enter()
+                editor.show_password_enter().await
             };
 
             // Take the provided password and do the initialization
@@ -361,21 +210,7 @@ impl CoreLogicHandler {
                 &mut safe,
                 &mut configuration,
                 &editor,
-            );
-            // If a valid nextcloud configuration is in place, spawn the background async execution
-            if configuration.nextcloud.is_filled() {
-                let (handle, nextcloud_sync_status_rx) =
-                    spawn_nextcloud_async_task(FILENAME, &configuration, &async_task_handles);
-                async_task_handles.insert("nextcloud", handle);
-                editor.update_nextcloud_rx(Some(nextcloud_sync_status_rx));
-            }
-            // If a valid dropbox configuration is in place, spawn the background async execution
-            if configuration.dropbox.is_filled() {
-                let (handle, dropbox_sync_status_rx) =
-                    spawn_dropbox_async_task(FILENAME, &configuration, &async_task_handles);
-                async_task_handles.insert("dropbox", handle);
-                editor.update_dropbox_rx(Some(dropbox_sync_status_rx));
-            }
+            ).await;
             // Set the UserSelection
             user_selection = us;
             cr
@@ -387,7 +222,6 @@ impl CoreLogicHandler {
             safe,
             configuration,
             contents_changed,
-            async_task_handles,
             cryptor,
         }
     }
@@ -409,19 +243,16 @@ impl CoreLogicHandler {
 
         s.editor.sort_entries(&mut s.safe.entries);
         // Handle
-        s.user_selection = match s.user_selection {
+        let user_selection_future = match s.user_selection {
             UserSelection::GoTo(Menu::TryPass(update_last_sync_version)) => {
-                // Cancel any pending background tasks
-                for handle in s.async_task_handles.values() {
-                    let _ = handle.stop();
-                }
+                // TODO: Cancel any pending background tasks
                 let (user_selection, cr) = handle_provided_password_for_init(
-                    s.editor.show_password_enter(),
+                    s.editor.show_password_enter().await,
                     FILENAME,
                     &mut s.safe,
                     &mut s.configuration,
                     &s.editor,
-                );
+                ).await;
                 if update_last_sync_version {
                     s.configuration.update_system_last_sync();
                     let rkl_content = RklContent::from((
@@ -434,33 +265,14 @@ impl CoreLogicHandler {
                     let _ =
                         rkl_content.and_then(|c| file_handler::save(c, FILENAME, &s.cryptor, true));
                 }
-                // If a valid nextcloud configuration is in place, spawn the background async execution
-                if s.configuration.nextcloud.is_filled() {
-                    debug!("A valid configuration for Nextcloud synchronization was found. Spawning async tasks");
-                    let (handle, nextcloud_sync_status_rx) = spawn_nextcloud_async_task(
-                        FILENAME,
-                        &s.configuration,
-                        &s.async_task_handles,
-                    );
-                    s.async_task_handles.insert("nextcloud", handle);
-                    s.editor.update_nextcloud_rx(Some(nextcloud_sync_status_rx));
-                }
-                // If a valid dropbox configuration is in place, spawn the background async execution
-                if s.configuration.dropbox.is_filled() {
-                    debug!("A valid configuration for dropbox synchronization was found. Spawning async tasks");
-                    let (handle, dropbox_sync_status_rx) =
-                        spawn_dropbox_async_task(FILENAME, &s.configuration, &s.async_task_handles);
-                    s.async_task_handles.insert("dropbox", handle);
-                    s.editor.update_nextcloud_rx(Some(dropbox_sync_status_rx));
-                }
+                // TODO: If a valid nextcloud configuration is in place, spawn the background async execution
+                // TODO: If a valid dropbox configuration is in place, spawn the background async execution
                 s.cryptor = cr;
-                user_selection
+                Box::pin(future::ready(user_selection))
             }
             UserSelection::GoTo(Menu::Main) => {
                 debug!("UserSelection::GoTo(Menu::Main)");
-                let m = s.editor.show_menu(&Menu::Main);
-                debug!("UserSelection::GoTo(Menu::Main) returns {:?}", &m);
-                m
+                s.editor.show_menu(Menu::Main)
             }
             UserSelection::GoTo(Menu::ChangePass) => {
                 debug!("UserSelection::GoTo(Menu::ChangePass)");
@@ -472,7 +284,7 @@ impl CoreLogicHandler {
                 s.cryptor =
                     file_handler::create_bcryptor(FILENAME, pwd.to_string(), *salt_pos, true, true)
                         .unwrap();
-                UserSelection::GoTo(Menu::Main)
+                    Box::pin(future::ready(UserSelection::GoTo(Menu::Main)))
             }
             UserSelection::GoTo(Menu::EntriesList(filter)) => {
                 debug!(
@@ -480,12 +292,11 @@ impl CoreLogicHandler {
                     &filter
                 );
                 s.safe.set_filter(filter.clone());
-                s.editor
-                    .show_entries(s.safe.get_entries().to_vec(), s.safe.get_filter())
+                s.editor.show_entries(s.safe.get_entries().to_vec(), s.safe.get_filter())
             }
             UserSelection::GoTo(Menu::NewEntry(opt)) => {
                 debug!("UserSelection::GoTo(Menu::NewEntry)");
-                s.editor.show_menu(&Menu::NewEntry(opt))
+                s.editor.show_menu(Menu::NewEntry(opt))
             }
             UserSelection::GoTo(Menu::ShowEntry(index)) => {
                 debug!("UserSelection::GoTo(Menu::ShowEntry(index))");
@@ -512,15 +323,12 @@ impl CoreLogicHandler {
                 )
             }
             UserSelection::GoTo(Menu::Save(update_last_sync_version)) => {
-                debug!(
-                    "UserSelection::GoTo(Menu::Save({}))",
-                    update_last_sync_version
-                );
+                debug!("UserSelection::GoTo(Menu::Save({}))",update_last_sync_version);
                 if s.configuration.nextcloud.is_filled() && s.configuration.dropbox.is_filled() {
                     error!("Cannot save because both Nextcloud and Dropbox are configured");
                     s.editor.show_message("Having both Nextcloud and Dropbox configured may lead to unexpected state and currently is not allowed.\
-                    Please configure only one of them.", vec![UserOption::ok()], MessageSeverity::Error);
-                    UserSelection::GoTo(Menu::Current)
+                    Please configure only one of them.", vec![UserOption::ok()], MessageSeverity::Error).await;
+                    Box::pin(future::ready(UserSelection::GoTo(Menu::Current)))
                 } else {
                     let _ = s
                         .configuration
@@ -539,38 +347,21 @@ impl CoreLogicHandler {
                         rkl_content.and_then(|c| file_handler::save(c, FILENAME, &s.cryptor, true));
                     match res {
                         Ok(_) => {
-                            // Cancel any pending background tasks
-                            for handle in s.async_task_handles.values() {
-                                let _ = handle.stop();
-                            }
+                            // TODO: Cancel any pending background tasks
                             // Clean the flag for unsaved data
                             s.contents_changed = false;
                             if s.configuration.nextcloud.is_filled() {
-                                // Start a new background async task
-                                let (handle, nextcloud_sync_status_rx) = spawn_nextcloud_async_task(
-                                    FILENAME,
-                                    &s.configuration,
-                                    &s.async_task_handles,
-                                );
-                                s.async_task_handles.insert("nextcloud", handle);
-                                s.editor.update_nextcloud_rx(Some(nextcloud_sync_status_rx));
+                                // TODO: Start a new background async task for nextcloud
                             }
                             if s.configuration.dropbox.is_filled() {
-                                // Start a new background async task
-                                let (handle, dropbox_sync_status_rx) = spawn_dropbox_async_task(
-                                    FILENAME,
-                                    &s.configuration,
-                                    &s.async_task_handles,
-                                );
-                                s.async_task_handles.insert("dropbox", handle);
-                                s.editor.update_dropbox_rx(Some(dropbox_sync_status_rx));
+                                // TODO: Start a new background async task for dropbox
                             }
                             if !update_last_sync_version {
                                 let _ = s.editor.show_message(
                                     "Encrypted and saved successfully!",
                                     vec![UserOption::ok()],
                                     MessageSeverity::default(),
-                                );
+                                ).await;
                             }
                         }
                         Err(error) => {
@@ -578,14 +369,14 @@ impl CoreLogicHandler {
                                 "Could not save...",
                                 vec![UserOption::ok()],
                                 MessageSeverity::Error,
-                            );
+                            ).await;
                             error!("Could not save... {:?}", error);
                         }
                     };
                     if update_last_sync_version {
-                        UserSelection::GoTo(Menu::Current)
+                        Box::pin(future::ready(UserSelection::GoTo(Menu::Current)))
                     } else {
-                        UserSelection::GoTo(Menu::Main)
+                        Box::pin(future::ready(UserSelection::GoTo(Menu::Main)))
                     }
                 }
             }
@@ -596,7 +387,7 @@ impl CoreLogicHandler {
             UserSelection::GoTo(Menu::ForceExit) => {
                 debug!("UserSelection::GoTo(Menu::ForceExit)");
                 stop = true;
-                UserSelection::GoTo(Menu::Current)
+                Box::pin(future::ready(UserSelection::GoTo(Menu::Current)))
             }
             UserSelection::NewEntry(mut entry) => {
                 debug!("UserSelection::NewEntry(entry)");
@@ -610,7 +401,7 @@ impl CoreLogicHandler {
                         let sel = s.editor.show_message(
                             "The password you provided has been leaked and is not safe. Are you sure you want to use it?",
                             vec![UserOption::yes(), UserOption::no()],
-                            MessageSeverity::Warn);
+                            MessageSeverity::Warn).await;
 
                         if sel == UserSelection::UserOption(UserOption::yes()) {
                             warn!(
@@ -640,9 +431,9 @@ impl CoreLogicHandler {
                 if let Some(entry) = entry_to_replace_opt {
                     s.safe.add_entry(entry);
                     s.contents_changed = true;
-                    UserSelection::GoTo(Menu::EntriesList("".to_string()))
+                    Box::pin(future::ready(UserSelection::GoTo(Menu::EntriesList("".to_string()))))
                 } else {
-                    UserSelection::GoTo(Menu::Current)
+                    Box::pin(future::ready(UserSelection::GoTo(Menu::Current)))
                 }
             }
             UserSelection::ReplaceEntry(index, mut entry) => {
@@ -657,7 +448,7 @@ impl CoreLogicHandler {
                         let sel = s.editor.show_message(
                             "The password you provided has been leaked and is not safe. Are you sure you want to use it?",
                             vec![UserOption::yes(), UserOption::no()],
-                            MessageSeverity::Warn);
+                            MessageSeverity::Warn).await;
 
                         if sel == UserSelection::UserOption(UserOption::yes()) {
                             warn!(
@@ -690,12 +481,12 @@ impl CoreLogicHandler {
                         Ok(_) => { /**/ }
                         Err(error) => {
                             error!("Could not replace entry: {:?}", error);
-                            let _ = s.editor.show_message("Could not replace the password entry. Please see the logs for more details.", vec![UserOption::ok()], MessageSeverity::Error);
+                            let _ = s.editor.show_message("Could not replace the password entry. Please see the logs for more details.", vec![UserOption::ok()], MessageSeverity::Error).await;
                         }
                     }
-                    UserSelection::GoTo(Menu::EntriesList(s.safe.get_filter()))
+                    Box::pin(future::ready(UserSelection::GoTo(Menu::EntriesList(s.safe.get_filter()))))
                 } else {
-                    UserSelection::GoTo(Menu::Current)
+                    Box::pin(future::ready(UserSelection::GoTo(Menu::Current)))
                 }
             }
             UserSelection::DeleteEntry(index) => {
@@ -709,7 +500,7 @@ impl CoreLogicHandler {
                     );
                 });
                 s.contents_changed = true;
-                UserSelection::GoTo(Menu::EntriesList("".to_string()))
+                Box::pin(future::ready(UserSelection::GoTo(Menu::EntriesList("".to_string()))))
             }
             UserSelection::GoTo(Menu::TryFileRecovery) => {
                 debug!("UserSelection::GoTo(Menu::TryFileRecovery)");
@@ -750,11 +541,11 @@ Warning: Saving will discard all the entries that could not be recovered.
                 };
                 s.safe.entries.append(&mut rec_entries);
 
-                UserSelection::GoTo(Menu::EntriesList("".to_string()))
+                Box::pin(future::ready(UserSelection::GoTo(Menu::EntriesList("".to_string()))))
             }
             UserSelection::GoTo(Menu::ExportEntries) => {
                 debug!("UserSelection::GoTo(Menu::ExportEntries)");
-                s.editor.show_menu(&Menu::ExportEntries)
+                s.editor.show_menu(Menu::ExportEntries)
             }
             UserSelection::ExportTo(path) => {
                 debug!("UserSelection::ExportTo(path)");
@@ -763,7 +554,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                         "This will overwrite an existing file. Do you want to proceed?",
                         vec![UserOption::yes(), UserOption::no()],
                         MessageSeverity::Warn,
-                    );
+                    ).await;
 
                     debug!(
                         "The user selected {:?} as an answer for overwriting the file {}",
@@ -808,14 +599,14 @@ Warning: Saving will discard all the entries that could not be recovered.
                             );
                         }
                     };
-                    UserSelection::GoTo(Menu::Main)
+                    Box::pin(future::ready(UserSelection::GoTo(Menu::Main)))
                 } else {
-                    UserSelection::GoTo(Menu::ExportEntries)
+                    Box::pin(future::ready(UserSelection::GoTo(Menu::ExportEntries)))
                 }
             }
             UserSelection::GoTo(Menu::ImportEntries) => {
                 debug!("UserSelection::GoTo(Menu::ImportEntries)");
-                s.editor.show_menu(&Menu::ImportEntries)
+                s.editor.show_menu(Menu::ImportEntries)
             }
             us @ UserSelection::ImportFrom(_, _, _)
             | us @ UserSelection::ImportFromDefaultLocation(_, _, _) => {
@@ -844,7 +635,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                                     "Could not import...",
                                     vec![UserOption::ok()],
                                     MessageSeverity::Error,
-                                );
+                                ).await;
                             }
                             Ok(rkl_content) => {
                                 let message =
@@ -863,14 +654,14 @@ Warning: Saving will discard all the entries that could not be recovered.
                                     &message,
                                     vec![UserOption::ok()],
                                     MessageSeverity::default(),
-                                );
+                                ).await;
                             }
                         };
                     }
                     _ => {}
                 };
 
-                UserSelection::GoTo(Menu::Main)
+                Box::pin(future::ready(UserSelection::GoTo(Menu::Main)))
             }
             UserSelection::GoTo(Menu::ShowConfiguration) => {
                 debug!("UserSelection::GoTo(Menu::ShowConfiguration)");
@@ -884,7 +675,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                 debug!("UserSelection::GenerateBrowserExtensionToken");
                 let new_token = rs_password_utils::dice::generate_with_separator(
                     s.props.generated_passphrases_words_count() as usize,
-                    "_"
+                    "_",
                 );
                 let mut updated_gen_conf = s.configuration.general.clone();
                 updated_gen_conf.browser_extension_token = Some(new_token);
@@ -899,8 +690,8 @@ Warning: Saving will discard all the entries that could not be recovered.
                 if new_conf.nextcloud.is_filled() && new_conf.dropbox.is_filled() {
                     error!("Cannot update the configuration because both Nextcloud and Dropbox are configured");
                     s.editor.show_message("Having both Nextcloud and Dropbox configured may lead to unexpected state and currently is not allowed.\
-                    Please configure only one of them.", vec![UserOption::ok()], MessageSeverity::Error);
-                    UserSelection::GoTo(Menu::Current)
+                    Please configure only one of them.", vec![UserOption::ok()], MessageSeverity::Error).await;
+                    Box::pin(future::ready(UserSelection::GoTo(Menu::Current)))
                 } else {
                     s.configuration.nextcloud = new_conf.nextcloud;
                     s.configuration.dropbox = new_conf.dropbox;
@@ -912,33 +703,36 @@ Warning: Saving will discard all the entries that could not be recovered.
                     if s.configuration.nextcloud.is_filled() {
                         debug!("A valid configuration for Nextcloud synchronization was found after being updated by the User. Spawning \
                             nextcloud sync task");
-                        let (handle, nextcloud_sync_status_rx) = spawn_nextcloud_async_task(
-                            FILENAME,
-                            &s.configuration,
-                            &s.async_task_handles,
-                        );
-                        s.async_task_handles.insert("nextcloud", handle);
-                        s.editor.update_nextcloud_rx(Some(nextcloud_sync_status_rx));
+                        // TODO: Spawn task
                         s.contents_changed = true;
                     }
                     if s.configuration.dropbox.is_filled() {
                         debug!("A valid configuration for dropbox synchronization was found after being updated by the User. Spawning \
                             dropbox sync task");
-                        let (handle, dropbox_sync_status_rx) = spawn_dropbox_async_task(
-                            FILENAME,
-                            &s.configuration,
-                            &s.async_task_handles,
-                        );
-                        s.async_task_handles.insert("dropbox", handle);
-                        s.editor.update_dropbox_rx(Some(dropbox_sync_status_rx));
+                        // TODO: Spawn task
                         s.contents_changed = true;
                     }
-                    UserSelection::GoTo(Menu::Main)
+                    Box::pin(future::ready(UserSelection::GoTo(Menu::Main)))
                 }
             }
             UserSelection::AddToClipboard(content) => {
                 debug!("UserSelection::AddToClipboard");
-                selection_handling::add_to_clipboard(content, &s.editor)
+                let res = terminal_clipboard::set_string(content).map_err(|error| {
+                    errors::RustKeylockError::GeneralError(error.to_string())
+                });
+                match res {
+                    Ok(_) => {
+                        let _ = s.editor.show_message("Copied! ", vec![UserOption::ok()], MessageSeverity::default()).await;
+                    }
+                    Err(error) => {
+                        error!("Could not copy: {:?}", error);
+                        let error_message = format!("Could not copy... Reason: {}", error);
+                        let _ = s.editor.show_message(&error_message, vec![UserOption::ok()], MessageSeverity::Error).await;
+                    }
+                };
+            
+                // Do not change Menu
+                Box::pin(future::ready(UserSelection::GoTo(Menu::Current)))
             }
             UserSelection::GoTo(Menu::WaitForDbxTokenCallback(url)) => {
                 debug!("UserSelection::GoTo(Menu::WaitForDbxTokenCallback)");
@@ -950,9 +744,9 @@ Warning: Saving will discard all the entries that could not be recovered.
                                 vec![UserOption::ok()],
                                 MessageSeverity::Error,
                             );
-                            UserSelection::GoTo(Menu::ShowConfiguration)
+                            Box::pin(future::ready(UserSelection::GoTo(Menu::ShowConfiguration)))
                         } else {
-                            UserSelection::GoTo(Menu::SetDbxToken(token))
+                            Box::pin(future::ready(UserSelection::GoTo(Menu::SetDbxToken(token))))
                         }
                     }
                     Err(error) => {
@@ -967,8 +761,8 @@ Warning: Saving will discard all the entries that could not be recovered.
                             ),
                             vec![UserOption::ok()],
                             MessageSeverity::Error,
-                        );
-                        UserSelection::GoTo(Menu::ShowConfiguration)
+                        ).await;
+                        Box::pin(future::ready(UserSelection::GoTo(Menu::ShowConfiguration)))
                     }
                 }
             }
@@ -979,12 +773,12 @@ Warning: Saving will discard all the entries that could not be recovered.
                     Ok(dbx_conf) => {
                         s.contents_changed = true;
                         s.configuration.dropbox = dbx_conf;
-                        UserSelection::GoTo(Menu::ShowConfiguration)
+                        Box::pin(future::ready(UserSelection::GoTo(Menu::ShowConfiguration)))
                     }
                     Err(error) => {
                         error!("Could not set the Dropbox token: {:?}", error);
                         let _ = s.editor.show_message("Could not obtain the Dropbox token. Please see the logs for more details.", vec![UserOption::ok()], MessageSeverity::Error);
-                        UserSelection::GoTo(Menu::ShowConfiguration)
+                        Box::pin(future::ready(UserSelection::GoTo(Menu::ShowConfiguration)))
                     }
                 }
             }
@@ -997,7 +791,9 @@ Warning: Saving will discard all the entries that could not be recovered.
                     Some(index) => s
                         .editor
                         .show_entry(entry, index, EntryPresentationType::Edit),
-                    None => s.editor.show_menu(&Menu::NewEntry(Some(entry))),
+                    None => {
+                        s.editor.show_menu(Menu::NewEntry(Some(entry)))
+                    },
                 }
             }
             UserSelection::CheckPasswords => {
@@ -1007,7 +803,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                         let _ = s
                             .editor
                             .show_message(&mr.message, mr.user_options, mr.severity);
-                        UserSelection::GoTo(Menu::EntriesList("".to_string()))
+                        Box::pin(future::ready(UserSelection::GoTo(Menu::EntriesList("".to_string()))))
                     }
                     Err(error) => {
                         let _ = s.editor.show_message(
@@ -1015,13 +811,13 @@ Warning: Saving will discard all the entries that could not be recovered.
                             vec![UserOption::ok()],
                             MessageSeverity::Error,
                         );
-                        UserSelection::GoTo(Menu::EntriesList("".to_string()))
+                        Box::pin(future::ready(UserSelection::GoTo(Menu::EntriesList("".to_string()))))
                     }
                 }
             }
             UserSelection::GoTo(Menu::Current) => {
                 debug!("UserSelection::GoTo(Menu::Current)");
-                s.editor.show_menu(&Menu::Current)
+                s.editor.show_menu(Menu::Current)
             }
             other => {
                 let message = format!("Bug: User Selection '{:?}' should not be handled in the main loop. Please, consider opening a bug \
@@ -1031,10 +827,215 @@ Warning: Saving will discard all the entries that could not be recovered.
                 panic!("{}", message)
             }
         };
+        
+        // Initialize the synchronizers
+        let mut nc_synchronizer = nextcloud::Synchronizer::new(
+            &s.configuration.nextcloud, 
+            &s.configuration.system,
+                FILENAME
+            ).unwrap();
+            nc_synchronizer.init().await;
+
+        let mut dbx_synchronizer = dropbox::Synchronizer::new(
+            &s.configuration.dropbox, 
+            &s.configuration.system,
+                FILENAME,
+                Box::new(ReqwestClientFactory::new())
+            ).unwrap();
+            dbx_synchronizer.init().await;
+
+        // Prepare all the possible futures from which we expect possible user_selection
+        let mut nc_future = nc_synchronizer.execute().fuse();
+        let mut dbx_future = dbx_synchronizer.execute().fuse();
+        let mut fused_user_selection_future = user_selection_future.fuse();
+
+        debug!("==============Entering loop");
+        let mut loop_result;
+        loop {
+            // Get the first future that completes
+            loop_result = select! {
+                selection_from_future = fused_user_selection_future => {
+                    LoopResult::LoopUserSelection(selection_from_future)
+                },
+                sync_status_res = nc_future => {
+                    if sync_status_res == Ok(SyncStatus::None) {
+                        LoopResult::Ignore("nextcloud")
+                    } else {
+                        LoopResult::LoopSyncStatus(sync_status_res, "nextcloud")
+                    }
+                },
+                sync_status_res = dbx_future => {
+                    if sync_status_res == Ok(SyncStatus::None) {
+                        LoopResult::Ignore("dropbox")
+                    } else {
+                        LoopResult::LoopSyncStatus(sync_status_res, "dropbox")
+                    }
+                },
+            };
+            match loop_result {
+                LoopResult::Ignore(_) => {/* Ignore this. Continue the loop */},
+                _ => break,
+            }
+        }
+        debug!("==============Exiting loop with {:?}", loop_result);
+
+        std::mem::drop(fused_user_selection_future);
+
+        match loop_result {
+            LoopResult::LoopUserSelection(selection) => {
+                s.user_selection = selection;
+            },
+            LoopResult::LoopSyncStatus(sync_status_res, synchronizer_name) => {
+                let selection = handle_sync_status(&s.editor, sync_status_res, FILENAME, synchronizer_name).await;
+                s.user_selection = selection;
+            },
+            LoopResult::Ignore(synchronizer_name) => {
+                let selection = handle_sync_status(&s.editor, Ok(SyncStatus::None), FILENAME, synchronizer_name).await;
+                s.user_selection = selection;
+            },
+        }
 
         Ok((s, stop))
     }
 }
+
+#[derive(Debug, PartialEq)]
+enum LoopResult {
+    LoopUserSelection(UserSelection),
+    LoopSyncStatus(errors::Result<SyncStatus>, &'static str),
+    Ignore(&'static str),
+}
+
+async fn handle_sync_status(editor: &Box<dyn AsyncEditor>, sync_status_res: errors::Result<SyncStatus>, filename: &str, synchronizer_name: &str) -> UserSelection {
+    if sync_status_res.is_err() {
+        error!("Error during {synchronizer_name} sync: {:?}", sync_status_res);
+        let _ = editor.show_message(&format!("Synchronization error occured. Please see the logs for more dsetails."), vec![UserOption::ok()], MessageSeverity::Error).await;
+        UserSelection::GoTo(Menu::Current)
+    } else {
+        match sync_status_res.unwrap() {
+            SyncStatus::UploadSuccess(who) => {
+                debug!("The {} server was updated with the local data", who);
+                let _ = editor.show_message(&format!("The {} server was updated with the local data", who), vec![UserOption::ok()], MessageSeverity::Info).await;
+                UserSelection::GoTo(Menu::Save(true))
+            }
+            SyncStatus::NewAvailable(who, downloaded_filename) => {
+                debug!("Downloaded new data from the {} server.", who);
+                let selection = editor.show_message(&format!("Downloaded new data from the {} server. Do you want to apply them locally now?", who),
+                                                vec![UserOption::yes(), UserOption::no()],
+                                                MessageSeverity::Info).await;
+
+                debug!("The user selected {:?} as an answer for applying the downloaded data locally", &selection);
+                if selection == UserSelection::UserOption(UserOption::yes()) {
+                    debug!("Replacing the local file with the one downloaded from the server");
+                    let _ = file_handler::replace(&downloaded_filename, filename);
+                    UserSelection::GoTo(Menu::TryPass(true))
+                } else {
+                    UserSelection::GoTo(Menu::Current)
+                }
+            }
+            SyncStatus::NewToMerge(who, downloaded_filename) => {
+                debug!("Downloaded data from the {} server, but conflicts were identified. The contents will be merged.", who);
+                let selection =
+                    editor.show_message(&format!("Downloaded data from the {} server, but conflicts were identified. The contents will be merged \
+                                but nothing will be saved. You will need to explicitly save after reviewing the merged data. Do you \
+                                want to do the merge now?", who),
+                                    vec![UserOption::yes(), UserOption::no()],
+                                    MessageSeverity::Info).await;
+
+                if selection == UserSelection::UserOption(UserOption::yes()) {
+                    debug!("The user selected {:?} as an answer for applying the downloaded data locally", &selection);
+                    debug!("Merging the local data with the downloaded from the server");
+
+                    match editor.show_password_enter().await {
+                        UserSelection::ProvidedPassword(pwd, salt_pos) => {
+                            UserSelection::ImportFromDefaultLocation(downloaded_filename, pwd, salt_pos)
+                        }
+                        other => {
+                            let message = format!("Expected a ProvidedPassword but received '{:?}'. Please, consider opening a bug to the \
+                                            developers.",
+                                                &other);
+                            error!("{}", message);
+                            let _ =
+                                editor.show_message("Unexpected result when waiting for password. See the logs for more details. Please \
+                                                consider opening a bug to the developers.",
+                                                vec![UserOption::ok()],
+                                                MessageSeverity::Error).await;
+                            UserSelection::GoTo(Menu::TryPass(false))
+                        }
+                    }
+                } else {
+                    UserSelection::GoTo(Menu::Current)
+                }
+            }
+            SyncStatus::None => {
+                let _ = editor.show_message(&format!("{synchronizer_name} synchronization got into unexpected Status. This should never happen theoretically. Please consider opening a bug to the developers."), vec![UserOption::ok()], MessageSeverity::Error).await;
+                UserSelection::GoTo(Menu::Current)
+            }
+        }
+    }
+}
+
+// fn handle_sync_status_success(&self, sync_status: SyncStatus, filename: &str) -> Option<UserSelection> {
+//     match sync_status {
+//         SyncStatus::UploadSuccess(who) => {
+//             debug!("The {} server was updated with the local data", who);
+//             let _ = self.show_message(&format!("The {} server was updated with the local data", who), vec![UserOption::ok()], MessageSeverity::Info);
+//             Some(UserSelection::GoTo(Menu::Save(true)))
+//         }
+//         SyncStatus::NewAvailable(who, downloaded_filename) => {
+//             debug!("Downloaded new data from the {} server.", who);
+//             let selection = self.show_message(&format!("Downloaded new data from the {} server. Do you want to apply them locally now?", who),
+//                                               vec![UserOption::yes(), UserOption::no()],
+//                                               MessageSeverity::Info);
+
+//             debug!("The user selected {:?} as an answer for applying the downloaded data locally", &selection);
+//             if selection == UserSelection::UserOption(UserOption::yes()) {
+//                 debug!("Replacing the local file with the one downloaded from the server");
+//                 let _ = super::file_handler::replace(&downloaded_filename, filename);
+//                 Some(UserSelection::GoTo(Menu::TryPass(true)))
+//             } else {
+//                 Some(UserSelection::GoTo(Menu::Current))
+//             }
+//         }
+//         SyncStatus::NewToMerge(who, downloaded_filename) => {
+//             debug!("Downloaded data from the {} server, but conflicts were identified. The contents will be merged.", who);
+//             let selection =
+//                 self.show_message(&format!("Downloaded data from the {} server, but conflicts were identified. The contents will be merged \
+//                                but nothing will be saved. You will need to explicitly save after reviewing the merged data. Do you \
+//                                want to do the merge now?", who),
+//                                   vec![UserOption::yes(), UserOption::no()],
+//                                   MessageSeverity::Info);
+
+//             if selection == UserSelection::UserOption(UserOption::yes()) {
+//                 debug!("The user selected {:?} as an answer for applying the downloaded data locally", &selection);
+//                 debug!("Merging the local data with the downloaded from the server");
+
+//                 match self.show_password_enter() {
+//                     UserSelection::ProvidedPassword(pwd, salt_pos) => {
+//                         Some(UserSelection::ImportFromDefaultLocation(downloaded_filename, pwd, salt_pos))
+//                     }
+//                     other => {
+//                         let message = format!("Expected a ProvidedPassword but received '{:?}'. Please, consider opening a bug to the \
+//                                            developers.",
+//                                               &other);
+//                         error!("{}", message);
+//                         let _ =
+//                             self.show_message("Unexpected result when waiting for password. See the logs for more details. Please \
+//                                              consider opening a bug to the developers.",
+//                                               vec![UserOption::ok()],
+//                                               MessageSeverity::Error);
+//                         Some(UserSelection::GoTo(Menu::TryPass(false)))
+//                     }
+//                 }
+//             } else {
+//                 Some(UserSelection::GoTo(Menu::Current))
+//             }
+//         }
+//         SyncStatus::None => {
+//             None
+//         }
+//     }
+// }
 
 async fn handle_check_passwords<T>(
     safe: &mut Safe,
@@ -1106,12 +1107,12 @@ where
     }
 }
 
-fn handle_provided_password_for_init(
+async fn handle_provided_password_for_init(
     provided_password: UserSelection,
     filename: &str,
     safe: &mut Safe,
     configuration: &mut RklConfiguration,
-    editor: &dyn Editor,
+    editor: &Box<dyn AsyncEditor>,
 ) -> (UserSelection, datacrypt::BcryptAes) {
     let user_selection: UserSelection;
     match provided_password {
@@ -1130,7 +1131,7 @@ fn handle_provided_password_for_init(
                         rkl_content.nextcloud_conf,
                         rkl_content.dropbox_conf,
                         rkl_content.system_conf,
-                        rkl_content.general_conf
+                        rkl_content.general_conf,
                     ));
                     *configuration = new_rkl_conf;
                     rkl_content.entries
@@ -1151,7 +1152,8 @@ fn handle_provided_password_for_init(
                                 editor.show_message("Wrong password or number! Please make sure that both the password and number that you \
                                                    provide are correct.",
                                                     vec![UserOption::ok()],
-                                                    MessageSeverity::Error);
+                                                    MessageSeverity::Error)
+                                                    .await;
                             match s {
                                 _ => {
                                     user_selection = UserSelection::GoTo(Menu::TryPass(false));
@@ -1184,61 +1186,6 @@ fn handle_provided_password_for_init(
                     Please, consider opening a bug to the developers.: {:?}", other)
         }
     }
-}
-
-fn spawn_nextcloud_async_task(
-    filename: &str,
-    configuration: &RklConfiguration,
-    async_task_handles: &HashMap<&'static str, asynch::AsyncTaskHandle>,
-) -> (
-    asynch::AsyncTaskHandle,
-    Receiver<errors::Result<asynch::SyncStatus>>,
-) {
-    if let Some(async_task) = async_task_handles.get("nextcloud") {
-        debug!("Stopping a previously spawned nextcloud async task");
-        let _ = async_task.stop();
-    }
-
-    debug!("Spawning nextcloud async task");
-    // Create a new channel
-    let (tx, rx) = mpsc::sync_channel(10);
-    let every = time::Duration::from_millis(10000);
-    let nc = nextcloud::Synchronizer::new(
-        &configuration.nextcloud,
-        &configuration.system,
-        tx,
-        filename,
-    )
-    .unwrap();
-    (asynch::execute_task(Box::new(nc), every), rx)
-}
-
-fn spawn_dropbox_async_task(
-    filename: &str,
-    configuration: &RklConfiguration,
-    async_task_handles: &HashMap<&'static str, asynch::AsyncTaskHandle>,
-) -> (
-    asynch::AsyncTaskHandle,
-    Receiver<errors::Result<asynch::SyncStatus>>,
-) {
-    if let Some(async_task) = async_task_handles.get("dropbox") {
-        debug!("Stopping a previously spawned dropbox async task");
-        let _ = async_task.stop();
-    }
-
-    debug!("Spawning dropbox async task");
-    // Create a new channel
-    let (tx, rx) = mpsc::sync_channel(10);
-    let every = time::Duration::from_millis(10000);
-    let dbx = dropbox::Synchronizer::new(
-        &configuration.dropbox,
-        &configuration.system,
-        tx,
-        filename,
-        Box::new(ReqwestClientFactory::new()),
-    )
-    .unwrap();
-    (asynch::execute_task(Box::new(dbx), every), rx)
 }
 
 /// Trait to be implemented by various different `Editor`s (Shell, Web, Android, other...).
@@ -1287,39 +1234,40 @@ pub trait Editor {
 /// Trait to be implemented by various different `Editor`s (Shell, Web, Android, other...).
 ///
 /// It drives the interaction with the Users
+#[async_trait]
 pub trait AsyncEditor {
     /// Shows the interface for entering a Password and a Number.
-    fn show_password_enter(&self) -> Receiver<UserSelection>;
+    async fn show_password_enter(&self) -> UserSelection;
     /// Shows the interface for changing a Password and/or a Number.
-    fn show_change_password(&self) -> Receiver<UserSelection>;
+    async fn show_change_password(&self) -> UserSelection;
     /// Shows the specified `Menu` to the User.
-    fn show_menu(&self, menu: &Menu) -> Receiver<UserSelection>;
+    async fn show_menu(&self, menu: Menu) -> UserSelection;
     /// Shows the provided entries to the User. The provided entries are already filtered with the filter argument.
-    fn show_entries(&self, entries: Vec<Entry>, filter: String) -> Receiver<UserSelection>;
+    async fn show_entries(&self, entries: Vec<Entry>, filter: String) -> UserSelection;
     /// Shows the provided entry details to the User following a presentation type.
-    fn show_entry(
+    async fn show_entry(
         &self,
         entry: Entry,
         index: usize,
         presentation_type: EntryPresentationType,
-    ) -> Receiver<UserSelection>;
+    ) -> UserSelection;
     /// Shows the Exit `Menu` to the User.
-    fn exit(&self, contents_changed: bool) -> Receiver<UserSelection>;
+    async fn exit(&self, contents_changed: bool) -> UserSelection;
     /// Shows the configuration screen.
-    fn show_configuration(
+    async fn show_configuration(
         &self,
         nextcloud: NextcloudConfiguration,
         dropbox: DropboxConfiguration,
         general: GeneralConfiguration,
-    ) -> Receiver<UserSelection>;
+    ) -> UserSelection;
     /// Shows a message to the User.
     /// Along with the message, the user should select one of the offered `UserOption`s.
-    fn show_message(
+    async fn show_message(
         &self,
         message: &str,
         options: Vec<UserOption>,
         severity: MessageSeverity,
-    ) -> Receiver<UserSelection>;
+    ) -> UserSelection;
 
     /// Sorts the supplied entries.
     fn sort_entries(&self, entries: &mut [Entry]) {
@@ -1329,70 +1277,13 @@ pub trait AsyncEditor {
 
 #[cfg(test)]
 mod unit_tests {
-    use std::mem;
-
     use async_trait::async_trait;
 
     use crate::api::safe::Safe;
     use crate::api::EntryMeta;
 
-    use super::api::{Entry, Menu, UserSelection};
+    use super::api::Entry;
     use super::*;
-
-    #[test]
-    fn try_recv_from_vec() {
-        let (tx1, rx1) = mpsc::channel();
-        let (tx2, rx2) = mpsc::channel();
-        let (tx3, rx3) = mpsc::channel();
-        let (tx4, rx4) = mpsc::channel();
-        let mut v = Vec::new();
-        v.push(rx1);
-        v.push(rx2);
-        v.push(rx3);
-        v.push(rx4);
-
-        // No messages arrive yet
-        assert!(super::try_recv_from_vec(&mut v).is_none());
-        assert!(v.len() == 4);
-
-        // Send a message
-        assert!(tx1.send(UserSelection::Ack).is_ok());
-        let m1 = super::try_recv_from_vec(&mut v);
-        // A result is picked
-        assert!(m1.is_some());
-        assert!(m1.unwrap() == UserSelection::Ack);
-        // rx1 is removed from the vec
-        assert!(v.len() == 3);
-        assert!(tx1.send(UserSelection::Ack).is_err());
-        // No more messages exist
-        assert!(super::try_recv_from_vec(&mut v).is_none());
-
-        // Send two messages
-        assert!(tx2.send(UserSelection::GoTo(Menu::Current)).is_ok());
-        assert!(tx3.send(UserSelection::GoTo(Menu::Exit)).is_ok());
-        // Pick the two results
-        let m2_opt = super::try_recv_from_vec(&mut v);
-        let m3_opt = super::try_recv_from_vec(&mut v);
-        assert!(m2_opt.is_some() && m3_opt.is_some());
-        let m2 = m2_opt.unwrap();
-        let m3 = m3_opt.unwrap();
-        assert!(m2 == UserSelection::GoTo(Menu::Current) || m2 == UserSelection::GoTo(Menu::Exit));
-        assert!(m3 == UserSelection::GoTo(Menu::Current) || m3 == UserSelection::GoTo(Menu::Exit));
-        // rx2 and rx3 are removed from the vec
-        assert!(v.len() == 1);
-        assert!(tx2.send(UserSelection::Ack).is_err());
-        assert!(tx3.send(UserSelection::Ack).is_err());
-        // No more messages exist
-        assert!(super::try_recv_from_vec(&mut v).is_none());
-
-        // Drop tx4 to close the channel
-        mem::drop(tx4);
-        assert!(super::try_recv_from_vec(&mut v).is_none());
-        // rx4 is removed from the vec
-        assert!(v.is_empty());
-        // No more messages exist
-        assert!(super::try_recv_from_vec(&mut v).is_none());
-    }
 
     struct AlwaysOkTruePasswordChecker {}
 

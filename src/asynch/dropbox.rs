@@ -77,8 +77,6 @@ const HTTP_GET_RESPONSE_BODY: &str = r#"
 pub(crate) struct Synchronizer {
     /// The configuration needed for this synchronizer
     conf: DropboxConfiguration,
-    /// The TX to notify about sync status
-    tx: SyncSender<errors::Result<SyncStatus>>,
     /// The rust-keylock file name to synchronize
     file_name: String,
     /// The saved_at value read locally from the file
@@ -95,13 +93,11 @@ impl Synchronizer {
     pub(crate) fn new(
         dbc: &DropboxConfiguration,
         sys_conf: &SystemConfiguration,
-        tx: SyncSender<errors::Result<SyncStatus>>,
         f: &str,
         client_factory: Box<dyn RklHttpAsyncFactory<ClientResType = Vec<u8>>>,
     ) -> errors::Result<Synchronizer> {
         let s = Synchronizer {
             conf: dbc.clone(),
-            tx,
             file_name: f.to_string(),
             saved_at_local: sys_conf.saved_at,
             version_local: sys_conf.version,
@@ -312,34 +308,37 @@ impl Synchronizer {
 #[async_trait]
 impl super::AsyncTask for Synchronizer {
     async fn init(&mut self) {
-        match self.get_short_lived_token().await {
-            Ok(short_lived_token) => {
-                if let Err(error) = self.conf.set_short_lived_token(short_lived_token) {
-                    error!("Could not initialize the Dropbox synchronizer: {}", error);
+        if self.conf.is_filled() {
+            match self.get_short_lived_token().await {
+                Ok(short_lived_token) => {
+                    if let Err(error) = self.conf.set_short_lived_token(short_lived_token) {
+                        error!("Could not initialize the Dropbox synchronizer: {}", error);
+                    }
                 }
-            }
-            Err(error) => {
-                error!("Could not initialize the Dropbox synchronizer - error while retrieving short-lived token: {}", error);
+                Err(error) => {
+                    error!("Could not initialize the Dropbox synchronizer - error while retrieving short-lived token: {}", error);
+                }
             }
         }
     }
 
-    async fn execute(&self) -> bool {
-        let cloned_tx_ok = self.tx.clone();
-        let cloned_tx_err = self.tx.clone();
+    async fn execute(&self) -> errors::Result<SyncStatus> {
+        if self.conf.is_filled() {
+            loop {
+                match self.do_execute().await {
+                    Ok(SyncStatus::None) => {
 
-        match self.do_execute().await {
-            Ok(sync_status) => {
-                // Return true to continue the task only if the SyncStatus was None.
-                // In all the other cases we need to stop the task in order to allow the user to take an action.
-                let to_ret = sync_status == SyncStatus::None;
-                Self::send_to_channel(Ok(sync_status), cloned_tx_ok);
-                to_ret
+                    },
+                    Ok(sync_status) => {
+                        return Ok(sync_status)
+                    }
+                    Err(error) => {
+                        return Err(error);
+                    }
+                }
             }
-            Err(error) => {
-                Self::send_to_channel(Err(error), cloned_tx_err);
-                false
-            }
+        } else {
+            return Ok(SyncStatus::None);
         }
     }
 }

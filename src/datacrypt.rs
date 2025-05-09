@@ -361,7 +361,7 @@ pub trait Hasher: Debug + PartialEq {
 }
 
 /// SHA3 hashing with 512 bits output
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Sha3Keccak512;
 
 impl Sha3Keccak512 {

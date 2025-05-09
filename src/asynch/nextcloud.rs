@@ -16,8 +16,9 @@
 
 use async_trait::async_trait;
 use reqwest::{Body, Client, Request, Response};
+use tokio::time::sleep;
 use std::io::prelude::*;
-use std::sync::mpsc::SyncSender;
+use std::time::Duration;
 use url::Url;
 
 use http::{Method, StatusCode};
@@ -37,8 +38,6 @@ use crate::{errors, file_handler};
 pub(crate) struct Synchronizer {
     /// The configuration needed for this synchronizer
     conf: NextcloudConfiguration,
-    /// The TX to notify about sync status
-    tx: SyncSender<errors::Result<SyncStatus>>,
     /// The rust-keylock file name to synchronize
     file_name: String,
     /// The saved_at value read locally from the file
@@ -53,7 +52,6 @@ impl Synchronizer {
     pub(crate) fn new(
         ncc: &NextcloudConfiguration,
         sys_conf: &SystemConfiguration,
-        tx: SyncSender<errors::Result<SyncStatus>>,
         f: &str,
     ) -> errors::Result<Synchronizer> {
         let ncc = NextcloudConfiguration::new(
@@ -64,7 +62,6 @@ impl Synchronizer {
         )?;
         let s = Synchronizer {
             conf: ncc,
-            tx,
             file_name: f.to_string(),
             saved_at_local: sys_conf.saved_at,
             version_local: sys_conf.version,
@@ -506,62 +503,40 @@ impl Synchronizer {
 
         res
     }
-
-    fn send_to_channel(
-        res: errors::Result<SyncStatus>,
-        tx: SyncSender<errors::Result<SyncStatus>>,
-    ) {
-        match res {
-            Ok(ref r) => debug!("Nextcloud Async Task sends to the channel {:?}", r),
-            Err(ref error) => error!("Nextcloud Async Tasks reported error: {:?}", error),
-        };
-
-        match tx.send(res) {
-            Ok(_) => {
-                // ignore
-            }
-            Err(error) => {
-                error!("Error while the Nextcloud synchronizer attempted to send the status to the channel: {:?}.", error);
-            }
-        }
-    }
 }
 
 #[async_trait]
 impl super::AsyncTask for Synchronizer {
     async fn init(&mut self) {}
 
-    async fn execute(&self) -> bool {
-        let capsule = ArgsCapsule::new(
-            self.conf.server_url.clone(),
-            self.conf.username.clone(),
-            self.file_name.clone(),
-            self.use_password()
-                .expect("Could not retrieve the password for the nextcloud server")
-                .to_string(),
-            self.conf.server_url.starts_with("http://"),
-            self.conf.use_self_signed_certificate,
-            self.saved_at_local,
-            self.version_local,
-            self.last_sync_version,
-        );
+    async fn execute(&self) -> errors::Result<SyncStatus> {
+        if self.conf.is_filled() {
+            loop {
+                sleep(Duration::from_millis(10000)).await;
+                let capsule = ArgsCapsule::new(
+                    self.conf.server_url.clone(),
+                    self.conf.username.clone(),
+                    self.file_name.clone(),
+                    self.use_password()
+                        .expect("Could not retrieve the password for the nextcloud server")
+                        .to_string(),
+                    self.conf.server_url.starts_with("http://"),
+                    self.conf.use_self_signed_certificate,
+                    self.saved_at_local,
+                    self.version_local,
+                    self.last_sync_version,
+                );
 
-        let cloned_tx_ok = self.tx.clone();
-        let cloned_tx_err = self.tx.clone();
-
-        match Self::do_execute(capsule).await {
-            Ok(sync_status) => {
-                // Return true to continue the task only if the SyncStatus was None.
-                // In all the other cases we need to stop the task in order to allow the user to take an action.
-                let to_ret = sync_status == SyncStatus::None;
-                Self::send_to_channel(Ok(sync_status), cloned_tx_ok);
-
-                to_ret
+                match Self::do_execute(capsule).await {
+                    Ok(SyncStatus::None) => {}
+                    Ok(sync_status) => return Ok(sync_status),
+                    Err(error) => {
+                        return Err(error);
+                    }
+                }
             }
-            Err(error) => {
-                Self::send_to_channel(Err(error), cloned_tx_err);
-                false
-            }
+        } else {
+            return Ok(SyncStatus::None);
         }
     }
 }
@@ -807,10 +782,6 @@ mod nextcloud_tests {
     #[test]
     fn synchronizer_stores_encrypted_password() {
         let password = "password".to_string();
-        let (tx, _rx): (
-            SyncSender<errors::Result<super::SyncStatus>>,
-            Receiver<errors::Result<super::SyncStatus>>,
-        ) = mpsc::sync_channel(1);
         let ncc = super::NextcloudConfiguration::new(
             "https://localhost/nextcloud".to_string(),
             "username".to_string(),
@@ -818,8 +789,8 @@ mod nextcloud_tests {
             false,
         )
         .unwrap();
-        let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, "filename")
-            .unwrap();
+        let nc =
+            super::Synchronizer::new(&ncc, &SystemConfiguration::default(), "filename").unwrap();
 
         assert!(nc.conf.decrypted_password().unwrap().as_str() == password)
     }
@@ -923,9 +894,10 @@ mod nextcloud_tests {
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let sys_config = SystemConfiguration::new(Some(123), Some(1), None);
-            let nc = super::Synchronizer::new(&ncc, &sys_config, tx.clone(), filename).unwrap();
+            let nc = super::Synchronizer::new(&ncc, &sys_config, filename).unwrap();
             let f = nc.execute();
-            let _ = rt.block_on(f);
+            let res = rt.block_on(f);
+            tx.send(res);
         });
 
         let timeout = time::Duration::from_millis(10000000);
@@ -979,9 +951,10 @@ mod nextcloud_tests {
 
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename)
-                .unwrap();
-            rt.block_on(nc.execute());
+            let nc =
+                super::Synchronizer::new(&ncc, &SystemConfiguration::default(), filename).unwrap();
+            let res = rt.block_on(nc.execute());
+            tx.send(res);
         });
 
         let timeout = time::Duration::from_millis(10000);
@@ -1034,9 +1007,10 @@ mod nextcloud_tests {
         .unwrap();
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename)
-                .unwrap();
-            rt.block_on(nc.execute());
+            let nc =
+                super::Synchronizer::new(&ncc, &SystemConfiguration::default(), filename).unwrap();
+            let res = rt.block_on(nc.execute());
+            tx.send(res);
         });
 
         let timeout = time::Duration::from_millis(10000);
@@ -1082,8 +1056,9 @@ mod nextcloud_tests {
 
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            let nc = super::Synchronizer::new(&ncc, &sys_config, tx, filename).unwrap();
-            rt.block_on(nc.execute());
+            let nc = super::Synchronizer::new(&ncc, &sys_config, filename).unwrap();
+            let res = rt.block_on(nc.execute());
+            tx.send(res);
         });
 
         let timeout = time::Duration::from_millis(10000);
@@ -1131,8 +1106,9 @@ mod nextcloud_tests {
 
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            let nc = super::Synchronizer::new(&ncc, &sys_config, tx, filename).unwrap();
-            rt.block_on(nc.execute());
+            let nc = super::Synchronizer::new(&ncc, &sys_config, filename).unwrap();
+            let res = rt.block_on(nc.execute());
+            tx.send(res);
         });
 
         let timeout = time::Duration::from_millis(10000);
@@ -1180,9 +1156,10 @@ mod nextcloud_tests {
         .unwrap();
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename)
-                .unwrap();
-            rt.block_on(nc.execute());
+            let nc =
+                super::Synchronizer::new(&ncc, &SystemConfiguration::default(), filename).unwrap();
+            let res = rt.block_on(nc.execute());
+            tx.send(res);
         });
 
         let timeout = time::Duration::from_millis(10000);
@@ -1220,9 +1197,10 @@ mod nextcloud_tests {
         .unwrap();
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            let nc = super::Synchronizer::new(&ncc, &SystemConfiguration::default(), tx, filename)
-                .unwrap();
-            rt.block_on(nc.execute());
+            let nc =
+                super::Synchronizer::new(&ncc, &SystemConfiguration::default(), filename).unwrap();
+            let res = rt.block_on(nc.execute());
+            tx.send(res);
         });
 
         let timeout = time::Duration::from_millis(1000000);

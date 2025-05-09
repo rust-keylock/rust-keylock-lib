@@ -894,24 +894,6 @@ impl ToString for MessageSeverity {
     }
 }
 
-// Not need for boxing... The largest variant is the most frequent one.
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug)]
-pub(crate) enum UiCommand {
-    ShowPasswordEnter,
-    ShowChangePassword,
-    ShowMenu(Menu),
-    ShowEntries(Vec<Entry>, String),
-    ShowEntry(Entry, usize, EntryPresentationType),
-    ShowConfiguration(
-        NextcloudConfiguration,
-        DropboxConfiguration,
-        GeneralConfiguration,
-    ),
-    Exit(bool),
-    ShowMessage(String, Vec<UserOption>, MessageSeverity),
-}
-
 #[async_trait]
 pub(crate) trait PasswordChecker {
     async fn is_unsafe(&self, password: &str) -> errors::Result<bool>;

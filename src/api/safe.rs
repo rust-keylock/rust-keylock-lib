@@ -26,7 +26,7 @@ use super::Entry;
 ///
 /// This includes the password entries and a Cryptor that is used to encrypt the passwords of the entries when they are stored in memory
 /// and decrypt them when needed (to be presented to the User)
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct Safe {
     pub(crate) entries: Vec<Entry>,
     filtered_entries: Vec<Entry>,
