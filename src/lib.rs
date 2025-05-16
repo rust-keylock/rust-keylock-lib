@@ -41,6 +41,7 @@ extern crate toml;
 extern crate xml;
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 pub use api::GeneralConfiguration;
 use async_trait::async_trait;
@@ -50,6 +51,7 @@ use log::*;
 
 pub use file_handler::default_rustkeylock_location;
 use rest_server::RestService;
+use tokio::time::sleep;
 
 use crate::api::{EditorShowMessageWrapper, PasswordChecker, RklPasswordChecker};
 use crate::asynch::dropbox::DropboxConfiguration;
@@ -245,7 +247,6 @@ impl CoreLogicHandler {
         // Handle
         let user_selection_future = match s.user_selection {
             UserSelection::GoTo(Menu::TryPass(update_last_sync_version)) => {
-                // TODO: Cancel any pending background tasks
                 let (user_selection, cr) = handle_provided_password_for_init(
                     s.editor.show_password_enter().await,
                     FILENAME,
@@ -265,8 +266,6 @@ impl CoreLogicHandler {
                     let _ =
                         rkl_content.and_then(|c| file_handler::save(c, FILENAME, &s.cryptor, true));
                 }
-                // TODO: If a valid nextcloud configuration is in place, spawn the background async execution
-                // TODO: If a valid dropbox configuration is in place, spawn the background async execution
                 s.cryptor = cr;
                 Box::pin(future::ready(user_selection))
             }
@@ -347,15 +346,8 @@ impl CoreLogicHandler {
                         rkl_content.and_then(|c| file_handler::save(c, FILENAME, &s.cryptor, true));
                     match res {
                         Ok(_) => {
-                            // TODO: Cancel any pending background tasks
                             // Clean the flag for unsaved data
                             s.contents_changed = false;
-                            if s.configuration.nextcloud.is_filled() {
-                                // TODO: Start a new background async task for nextcloud
-                            }
-                            if s.configuration.dropbox.is_filled() {
-                                // TODO: Start a new background async task for dropbox
-                            }
                             if !update_last_sync_version {
                                 let _ = s.editor.show_message(
                                     "Encrypted and saved successfully!",
@@ -703,13 +695,11 @@ Warning: Saving will discard all the entries that could not be recovered.
                     if s.configuration.nextcloud.is_filled() {
                         debug!("A valid configuration for Nextcloud synchronization was found after being updated by the User. Spawning \
                             nextcloud sync task");
-                        // TODO: Spawn task
                         s.contents_changed = true;
                     }
                     if s.configuration.dropbox.is_filled() {
                         debug!("A valid configuration for dropbox synchronization was found after being updated by the User. Spawning \
                             dropbox sync task");
-                        // TODO: Spawn task
                         s.contents_changed = true;
                     }
                     Box::pin(future::ready(UserSelection::GoTo(Menu::Main)))
@@ -736,7 +726,7 @@ Warning: Saving will discard all the entries that could not be recovered.
             }
             UserSelection::GoTo(Menu::WaitForDbxTokenCallback(url)) => {
                 debug!("UserSelection::GoTo(Menu::WaitForDbxTokenCallback)");
-                match dropbox::retrieve_token(url) {
+                match dropbox::retrieve_token(url).await {
                     Ok(token) => {
                         if token.is_empty() {
                             let _ = s.editor.show_message(
@@ -834,7 +824,7 @@ Warning: Saving will discard all the entries that could not be recovered.
             &s.configuration.system,
                 FILENAME
             ).unwrap();
-            nc_synchronizer.init().await;
+        nc_synchronizer.init().await;
 
         let mut dbx_synchronizer = dropbox::Synchronizer::new(
             &s.configuration.dropbox, 
@@ -842,14 +832,13 @@ Warning: Saving will discard all the entries that could not be recovered.
                 FILENAME,
                 Box::new(ReqwestClientFactory::new())
             ).unwrap();
-            dbx_synchronizer.init().await;
+        dbx_synchronizer.init().await;
 
         // Prepare all the possible futures from which we expect possible user_selection
         let mut nc_future = nc_synchronizer.execute().fuse();
         let mut dbx_future = dbx_synchronizer.execute().fuse();
         let mut fused_user_selection_future = user_selection_future.fuse();
 
-        debug!("==============Entering loop");
         let mut loop_result;
         loop {
             // Get the first future that completes
@@ -877,7 +866,6 @@ Warning: Saving will discard all the entries that could not be recovered.
                 _ => break,
             }
         }
-        debug!("==============Exiting loop with {:?}", loop_result);
 
         std::mem::drop(fused_user_selection_future);
 
