@@ -301,77 +301,10 @@ impl RklHttpAsyncFactory for ReqwestClientFactory {
 mod async_tests {
     use std::fs::{self, File};
     use std::io::prelude::*;
-    use std::sync::mpsc::SyncSender;
-    use std::time::SystemTime;
 
     use crate::file_handler;
 
     use super::*;
-
-    // #[test]
-    // fn facade_show_change_password() {
-    //     let (user_selection_tx, user_selection_rx) = mpsc::channel();
-    //     let (command_tx, command_rx) = mpsc::channel();
-
-    //     let facade = super::AsyncEditorFacade::new(user_selection_rx, command_tx, super::Props::default());
-    //     assert!(user_selection_tx.send(UserSelection::Ack).is_ok());
-    //     let user_selection = facade.show_change_password();
-    //     assert!(user_selection == UserSelection::Ack);
-    //     let command_res = command_rx.recv();
-    //     assert!(command_res.is_ok());
-    //     match command_res.unwrap() {
-    //         UiCommand::ShowChangePassword => assert!(true),
-    //         _ => assert!(false),
-    //     };
-    // }
-
-    // #[test]
-    // fn facade_show_password_enter() {
-    //     let (user_selection_tx, user_selection_rx) = mpsc::channel();
-    //     let (command_tx, command_rx) = mpsc::channel();
-
-    //     let facade = super::AsyncEditorFacade::new(user_selection_rx, command_tx, super::Props::default());
-    //     assert!(user_selection_tx.send(UserSelection::Ack).is_ok());
-    //     let user_selection = facade.show_password_enter();
-    //     assert!(user_selection == UserSelection::Ack);
-    //     let command_res = command_rx.recv();
-    //     assert!(command_res.is_ok());
-    //     match command_res.unwrap() {
-    //         UiCommand::ShowPasswordEnter => assert!(true),
-    //         _ => assert!(false),
-    //     };
-    // }
-
-    // #[test]
-    // fn facade_show_message() {
-    //     let (user_selection_tx, user_selection_rx) = mpsc::channel();
-    //     let (command_tx, command_rx) = mpsc::channel();
-
-    //     let facade = super::AsyncEditorFacade::new(user_selection_rx, command_tx, super::Props::default());
-    //     assert!(user_selection_tx.send(UserSelection::UserOption(UserOption::ok())).is_ok());
-    //     let user_selection = facade.show_message("message", vec![UserOption::ok()], MessageSeverity::Info);
-    //     assert!(user_selection == UserSelection::UserOption(UserOption::ok()));
-    //     let command_res = command_rx.recv();
-    //     assert!(command_res.is_ok());
-    //     match command_res.unwrap() {
-    //         UiCommand::ShowMessage(_, _, _) => assert!(true),
-    //         _ => assert!(false),
-    //     };
-    // }
-
-    // #[test]
-    // fn facade_show_message_waits_only_for_user_options() {
-    //     let (user_selection_tx, user_selection_rx) = mpsc::channel();
-    //     let (command_tx, _) = mpsc::channel();
-
-    //     let facade = super::AsyncEditorFacade::new(user_selection_rx, command_tx, super::Props::default());
-    //     // Send a non-UserOption first. This should be ignored.
-    //     assert!(user_selection_tx.send(UserSelection::Ack).is_ok());
-    //     // Send a UserOption.
-    //     assert!(user_selection_tx.send(UserSelection::UserOption(UserOption::ok())).is_ok());
-    //     let user_selection = facade.show_message("message", vec![UserOption::ok()], MessageSeverity::Info);
-    //     assert!(user_selection == UserSelection::UserOption(UserOption::ok()));
-    // }
 
     // TODO: Test timeout mechanism
 

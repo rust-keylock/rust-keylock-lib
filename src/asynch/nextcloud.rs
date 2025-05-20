@@ -16,10 +16,12 @@
 
 use async_trait::async_trait;
 use reqwest::{Body, Client, Request, Response};
+use lazy_static::lazy_static;
 use tokio::time::sleep;
 use std::io::prelude::*;
 use std::time::Duration;
 use url::Url;
+use std::sync::Mutex;
 
 use http::{Method, StatusCode};
 use log::*;
@@ -34,6 +36,10 @@ use crate::errors::RustKeylockError;
 use crate::SystemConfiguration;
 use crate::{errors, file_handler};
 
+lazy_static! {
+    static ref STOP_SYNCHRONIZATION: Mutex<bool> = Mutex::new(false);
+}
+
 /// A (Next/Own)cloud synchronizer
 pub(crate) struct Synchronizer {
     /// The configuration needed for this synchronizer
@@ -46,6 +52,8 @@ pub(crate) struct Synchronizer {
     version_local: Option<i64>,
     /// The version that was set during the last sync
     last_sync_version: Option<i64>,
+    /// Never stop the synchronization if true
+    never_stop_synchronization: bool,
 }
 
 impl Synchronizer {
@@ -53,6 +61,15 @@ impl Synchronizer {
         ncc: &NextcloudConfiguration,
         sys_conf: &SystemConfiguration,
         f: &str,
+    ) -> errors::Result<Synchronizer> {
+        Self::new2(ncc, sys_conf, f, false)
+    }
+
+    pub(crate) fn new2(
+        ncc: &NextcloudConfiguration,
+        sys_conf: &SystemConfiguration,
+        f: &str,
+        never_stop_synchronization: bool,
     ) -> errors::Result<Synchronizer> {
         let ncc = NextcloudConfiguration::new(
             ncc.server_url.clone(),
@@ -66,8 +83,22 @@ impl Synchronizer {
             saved_at_local: sys_conf.saved_at,
             version_local: sys_conf.version,
             last_sync_version: sys_conf.last_sync_version,
+            never_stop_synchronization,
         };
         Ok(s)
+    }
+
+    fn is_synchronization_stopped(&self) -> errors::Result<bool> {
+        let s = STOP_SYNCHRONIZATION.lock()?;
+        Ok(*s)
+    }
+    
+    fn stop_synchronization(&self) -> errors::Result<()> {
+        if !self.never_stop_synchronization {
+            let mut stop_sync = STOP_SYNCHRONIZATION.lock()?;
+            *stop_sync = true;
+        }
+        Ok(())
     }
 
     /// Returns the password decrypted
@@ -512,7 +543,9 @@ impl super::AsyncTask for Synchronizer {
     async fn execute(&self) -> errors::Result<SyncStatus> {
         if self.conf.is_filled() {
             loop {
-                sleep(Duration::from_millis(10000)).await;
+                if self.is_synchronization_stopped()? {
+                    return Ok(SyncStatus::None);
+                }
                 let capsule = ArgsCapsule::new(
                     self.conf.server_url.clone(),
                     self.conf.username.clone(),
@@ -531,9 +564,11 @@ impl super::AsyncTask for Synchronizer {
                     Ok(SyncStatus::None) => {}
                     Ok(sync_status) => return Ok(sync_status),
                     Err(error) => {
+                        self.stop_synchronization()?;
                         return Err(error);
                     }
                 }
+                sleep(Duration::from_millis(10000)).await;
             }
         } else {
             return Ok(SyncStatus::None);
@@ -790,7 +825,7 @@ mod nextcloud_tests {
         )
         .unwrap();
         let nc =
-            super::Synchronizer::new(&ncc, &SystemConfiguration::default(), "filename").unwrap();
+            super::Synchronizer::new2(&ncc, &SystemConfiguration::default(), "filename", true).unwrap();
 
         assert!(nc.conf.decrypted_password().unwrap().as_str() == password)
     }
@@ -894,10 +929,10 @@ mod nextcloud_tests {
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let sys_config = SystemConfiguration::new(Some(123), Some(1), None);
-            let nc = super::Synchronizer::new(&ncc, &sys_config, filename).unwrap();
+            let nc = super::Synchronizer::new2(&ncc, &sys_config, filename, true).unwrap();
             let f = nc.execute();
             let res = rt.block_on(f);
-            tx.send(res);
+            let _ = tx.send(res);
         });
 
         let timeout = time::Duration::from_millis(10000000);
@@ -952,9 +987,9 @@ mod nextcloud_tests {
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let nc =
-                super::Synchronizer::new(&ncc, &SystemConfiguration::default(), filename).unwrap();
+                super::Synchronizer::new2(&ncc, &SystemConfiguration::default(), filename, true).unwrap();
             let res = rt.block_on(nc.execute());
-            tx.send(res);
+            let _ = tx.send(res);
         });
 
         let timeout = time::Duration::from_millis(10000);
@@ -1008,9 +1043,9 @@ mod nextcloud_tests {
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let nc =
-                super::Synchronizer::new(&ncc, &SystemConfiguration::default(), filename).unwrap();
+                super::Synchronizer::new2(&ncc, &SystemConfiguration::default(), filename, true).unwrap();
             let res = rt.block_on(nc.execute());
-            tx.send(res);
+            let _ = tx.send(res);
         });
 
         let timeout = time::Duration::from_millis(10000);
@@ -1056,9 +1091,9 @@ mod nextcloud_tests {
 
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            let nc = super::Synchronizer::new(&ncc, &sys_config, filename).unwrap();
+            let nc = super::Synchronizer::new2(&ncc, &sys_config, filename, true).unwrap();
             let res = rt.block_on(nc.execute());
-            tx.send(res);
+            let _ = tx.send(res);
         });
 
         let timeout = time::Duration::from_millis(10000);
@@ -1106,9 +1141,9 @@ mod nextcloud_tests {
 
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            let nc = super::Synchronizer::new(&ncc, &sys_config, filename).unwrap();
+            let nc = super::Synchronizer::new2(&ncc, &sys_config, filename, true).unwrap();
             let res = rt.block_on(nc.execute());
-            tx.send(res);
+            let _ = tx.send(res);
         });
 
         let timeout = time::Duration::from_millis(10000);
@@ -1157,9 +1192,9 @@ mod nextcloud_tests {
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let nc =
-                super::Synchronizer::new(&ncc, &SystemConfiguration::default(), filename).unwrap();
+                super::Synchronizer::new2(&ncc, &SystemConfiguration::default(), filename, true).unwrap();
             let res = rt.block_on(nc.execute());
-            tx.send(res);
+            let _ = tx.send(res);
         });
 
         let timeout = time::Duration::from_millis(10000);
@@ -1198,9 +1233,9 @@ mod nextcloud_tests {
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let nc =
-                super::Synchronizer::new(&ncc, &SystemConfiguration::default(), filename).unwrap();
+                super::Synchronizer::new2(&ncc, &SystemConfiguration::default(), filename, true).unwrap();
             let res = rt.block_on(nc.execute());
-            tx.send(res);
+            let _ = tx.send(res);
         });
 
         let timeout = time::Duration::from_millis(1000000);

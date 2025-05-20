@@ -16,21 +16,22 @@
 
 use std::io::Read;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::mpsc::{self, SyncSender};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time;
+use std::time::{self, Duration};
 
 use async_trait::async_trait;
 use http::{StatusCode, Uri};
 use http_body_util::BodyExt;
 use reqwest::Body;
+use tokio::time::sleep;
 use std::convert::Infallible;
 
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Request, Response};
 use hyper_util::rt::{TokioIo, TokioTimer};
+use lazy_static::lazy_static;
 use log::*;
 use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 use serde::{Deserialize, Serialize};
@@ -72,6 +73,10 @@ const HTTP_GET_RESPONSE_BODY: &str = r#"
 </body>
 </html>
 "#;
+
+lazy_static! {
+    static ref STOP_SYNCHRONIZATION: Mutex<bool> = Mutex::new(false);
+}
 
 /// A Dropbox synchronizer
 pub(crate) struct Synchronizer {
@@ -284,25 +289,6 @@ impl Synchronizer {
         debug!("DBX: Uploaded all");
         Ok(())
     }
-
-    fn send_to_channel(
-        res: errors::Result<SyncStatus>,
-        tx: SyncSender<errors::Result<SyncStatus>>,
-    ) {
-        match res {
-            Ok(ref r) => debug!("Dropbox Async Task sends to the channel {:?}", r),
-            Err(ref error) => error!("Dropbox Async Tasks reported error: {:?}", error),
-        };
-
-        match tx.send(res) {
-            Ok(_) => {
-                // ignore
-            }
-            Err(error) => {
-                error!("Error while the Dropbox synchronizer attempted to send the status to the channel: {:?}.", error);
-            }
-        }
-    }
 }
 
 #[async_trait]
@@ -325,6 +311,14 @@ impl super::AsyncTask for Synchronizer {
     async fn execute(&self) -> errors::Result<SyncStatus> {
         if self.conf.is_filled() {
             loop {
+                let stop_sync = {
+                    let s = STOP_SYNCHRONIZATION.lock()?;
+                    *s
+                };
+                if stop_sync {
+                    return Ok(SyncStatus::None);
+                }
+                sleep(Duration::from_millis(10000)).await;
                 match self.do_execute().await {
                     Ok(SyncStatus::None) => {
 
@@ -333,6 +327,8 @@ impl super::AsyncTask for Synchronizer {
                         return Ok(sync_status)
                     }
                     Err(error) => {
+                        let mut stop_sync = STOP_SYNCHRONIZATION.lock()?;
+                        *stop_sync = true;
                         return Err(error);
                     }
                 }
@@ -455,88 +451,92 @@ impl Default for DropboxConfiguration {
     }
 }
 
-pub(crate) fn retrieve_token(url_string: String) -> errors::Result<Zeroizing<String>> {
+pub(crate) async fn retrieve_token(url_string: String) -> errors::Result<Zeroizing<String>> {
     debug!("Retrieving a token for dropbox");
     // Define the channel that will be used by the server to send the retrieved token
     let (tx, rx) = mpsc::channel();
 
-    // Spawn the server in a different thread
-    thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new().expect(
-            "Cannot create tokio runtime to start the server for handling the dropbox token",
-        );
-        let f = async {
-            // Get the port and state from the URL
-            let (port, code_challenge) = parse_url(url_string).unwrap();
-            // The tx to be shared between threads (used by the server function).
-            let tx_arc = Arc::new(Mutex::new(tx));
-            // The state to be shared between threads (used by the server function).
-            let code_challenge_arc = Arc::new(code_challenge);
-            // The server function
-            let make_svc = service_fn(move |req: Request<hyper::body::Incoming>| {
-                let shared_tx = tx_arc.clone();
-                let shared_code_challenge = code_challenge_arc.clone();
-                async move {
-                    let shared_tx = shared_tx.clone();
-                    let shared_code_challenge = shared_code_challenge.clone();
-                    Ok::<_, Infallible>({
-                        let resp_builder = Response::builder();
+    // Get the port and state from the URL
+    let (port, code_challenge) = parse_url(url_string).unwrap();
+    // The server will run on the localhost
+    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
+    let listener = TcpListener::bind(addr)
+        .await
+        .expect("Cannot bind TcpListener to retrive the dropbox token");
+    debug!("Server started. Serving connections at {}", addr.to_string());
 
-                        if req.method() == &hyper::Method::GET {
-                            let code = parse_get_uri(req.uri()).unwrap();
-                            let reqwest_client_factory = Box::new(ReqwestClientFactory::new());
-                            let mut client = reqwest_client_factory.create();
-                            handle_get(&code, &shared_code_challenge, &mut client, port).await
-                        } else if req.method() == &hyper::Method::POST {
-                            let error_message = format!("Could not get the body of the request to {}. Using an empty body instead.", req.uri());
-                            let v = req_to_body(req).await.unwrap_or_else(move |error| {
-                                error!("{} {}", error_message, error);
-                                Vec::new()
-                            });
-                            let found_token = String::from_utf8(v).unwrap();
-                            let tx = shared_tx.lock().unwrap();
-                            let _ = tx.send(Ok(Zeroizing::new(found_token)));
+    // Spawn the server loop
+    let handle = tokio::task::spawn(async move {
+        // The tx to be shared between threads (used by the server function).
+        let tx_arc = Arc::new(Mutex::new(tx));
+        // The state to be shared between threads (used by the server function).
+        let code_challenge_arc = Arc::new(code_challenge);
+        // The server function
+        let make_svc = service_fn(move |req: Request<hyper::body::Incoming>| {
+            let shared_tx = tx_arc.clone();
+            let shared_code_challenge = code_challenge_arc.clone();
+            async move {
+                let shared_tx = shared_tx.clone();
+                let shared_code_challenge = shared_code_challenge.clone();
+                Ok::<_, Infallible>({
+                    let resp_builder = Response::builder();
 
-                            resp_builder
-                                .status(StatusCode::OK)
-                                .body(reqwest::Body::from(Vec::new()))
-                                .unwrap()
-                        } else {
-                            let tx = shared_tx.lock().unwrap();
-                            let _ =
-                                tx.send(Err(RustKeylockError::GeneralError("error".to_string())));
-                            resp_builder
-                                .status(StatusCode::BAD_REQUEST)
-                                .body(reqwest::Body::from(Vec::new()))
-                                .unwrap()
-                        }
-                    })
-                }
-            });
+                    if req.method() == &hyper::Method::GET {
+                        let code = parse_get_uri(req.uri()).unwrap();
+                        let reqwest_client_factory = Box::new(ReqwestClientFactory::new());
+                        let mut client = reqwest_client_factory.create();
+                        handle_get(&code, &shared_code_challenge, &mut client, port).await
+                    } else if req.method() == &hyper::Method::POST {
+                        let error_message = format!("Could not get the body of the request to {}. Using an empty body instead.", req.uri());
+                        let v = req_to_body(req).await.unwrap_or_else(move |error| {
+                            error!("{} {}", error_message, error);
+                            Vec::new()
+                        });
+                        let found_token = String::from_utf8(v).unwrap();
+                        let tx = shared_tx.lock().unwrap();
+                        let _ = tx.send(Ok(Zeroizing::new(found_token)));
 
-            // The server will run on the localhost
-            let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
-            let listener = TcpListener::bind(addr)
-                .await
-                .expect("Cannot bind TcpListener to retrive the dropbox token");
+                        resp_builder
+                            .status(StatusCode::OK)
+                            .body(reqwest::Body::from(Vec::new()))
+                            .unwrap()
+                    } else {
+                        let tx = shared_tx.lock().unwrap();
+                        let _ =
+                            tx.send(Err(RustKeylockError::GeneralError("error".to_string())));
+                        resp_builder
+                            .status(StatusCode::BAD_REQUEST)
+                            .body(reqwest::Body::from(Vec::new()))
+                            .unwrap()
+                    }
+                })
+            }
+        });
+
+        // Serve requests
+        loop {
+            let svc = make_svc.clone();
             let (tcp, _) = listener
                 .accept()
                 .await
                 .expect("Cannot accept TcpStream for listener");
-            let io = TokioIo::new(tcp);
-            if let Err(error) = http1::Builder::new()
-                .timer(TokioTimer::new())
-                .serve_connection(io, make_svc)
-                .await
-            {
-                error!(
-                    "HTTP Server Error during retrieving Dropbox token: {}",
-                    error
-                )
-            }
-        };
-        rt.block_on(f);
-        debug!("Temporary server stopped!");
+            debug!("Serving incoming request...");
+
+            tokio::task::spawn(async move {
+                let io = TokioIo::new(tcp);
+                if let Err(error) = http1::Builder::new()
+                    .timer(TokioTimer::new())
+                    .serve_connection(io, svc)
+                    .await
+                {
+                    error!(
+                        "HTTP Server Error during retrieving Dropbox token: {}",
+                        error
+                    )
+                }
+            });
+            
+        }
     });
 
     debug!("Waiting for Dropbox Token...");
@@ -544,7 +544,9 @@ pub(crate) fn retrieve_token(url_string: String) -> errors::Result<Zeroizing<Str
         .recv_timeout(time::Duration::from_millis(600000))
         .map_err(|error| RustKeylockError::from(error))
         .and_then(|rec_res| rec_res);
+
     debug!("Dropbox Token retrieved. Stopping temporary server...");
+    handle.abort();
 
     rec
 }
@@ -694,17 +696,18 @@ mod dropbox_tests {
 
     #[test]
     fn token_retrieval_success() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
         let (tx, rx) = mpsc::channel();
         // The code_challenge
         let code_challenge = "AAO6fShhDBAAAAAAAAABPuYM0gnquccZyc1c9LfQI3Y";
         // The redirect URI that is included in the request to dropbox
         let redirect_uri = format!("http://localhost:8899&code_challenge={}", code_challenge);
         thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
             let url_string = format!("https://www.dropbox.com/oauth2/authorize?client_id={}&response_type=code&code_challenge={}&code_challenge_method=plain&token_access_type=offline",
                                      APP_KEY,
                                      redirect_uri);
-            let token_res = retrieve_token(url_string);
+            let f = retrieve_token(url_string);
+            let token_res = rt.block_on(f);
             let _ = tx.send(token_res);
         });
         // Sleep to give time to the server to start
@@ -717,6 +720,7 @@ mod dropbox_tests {
         let mut client = reqwest_client_factory.create();
         let f = client.post(uri, &[], refresh_token.clone().into_bytes());
 
+        let rt = tokio::runtime::Runtime::new().unwrap();
         let response = rt.block_on(f);
 
         if response.is_ok() {

@@ -500,7 +500,7 @@ impl CoreLogicHandler {
                     "The password entries are corrupted.\n\nPress Enter to attempt recovery...",
                     vec![UserOption::ok()],
                     MessageSeverity::Error,
-                );
+                ).await;
                 let mut rec_entries = match file_handler::recover(FILENAME, &s.cryptor) {
                     Ok(recovered_entries) => {
                         let message = r#"
@@ -515,7 +515,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                             message,
                             vec![UserOption::ok()],
                             MessageSeverity::default(),
-                        );
+                        ).await;
                         s.contents_changed = true;
                         s.safe.entries.clear();
                         recovered_entries
@@ -527,7 +527,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                             "Recovery failed...",
                             vec![UserOption::ok()],
                             MessageSeverity::Error,
-                        );
+                        ).await;
                         s.safe.entries.clone()
                     }
                 };
@@ -571,7 +571,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                                     "Export completed successfully!",
                                     vec![UserOption::ok()],
                                     MessageSeverity::default(),
-                                );
+                                ).await;
                             }
                             Err(error) => {
                                 error!("Could not export... {:?}", error);
@@ -579,7 +579,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                                     "Could not export...",
                                     vec![UserOption::ok()],
                                     MessageSeverity::Error,
-                                );
+                                ).await;
                             }
                         },
                         Err(error) => {
@@ -588,7 +588,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                                 "Could not export...",
                                 vec![UserOption::ok()],
                                 MessageSeverity::Error,
-                            );
+                            ).await;
                         }
                     };
                     Box::pin(future::ready(UserSelection::GoTo(Menu::Main)))
@@ -792,7 +792,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                     Ok(mr) => {
                         let _ = s
                             .editor
-                            .show_message(&mr.message, mr.user_options, mr.severity);
+                            .show_message(&mr.message, mr.user_options, mr.severity).await;
                         Box::pin(future::ready(UserSelection::GoTo(Menu::EntriesList("".to_string()))))
                     }
                     Err(error) => {
@@ -800,7 +800,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                             error.to_string().as_str(),
                             vec![UserOption::ok()],
                             MessageSeverity::Error,
-                        );
+                        ).await;
                         Box::pin(future::ready(UserSelection::GoTo(Menu::EntriesList("".to_string()))))
                     }
                 }
@@ -838,6 +838,7 @@ Warning: Saving will discard all the entries that could not be recovered.
         let mut nc_future = nc_synchronizer.execute().fuse();
         let mut dbx_future = dbx_synchronizer.execute().fuse();
         let mut fused_user_selection_future = user_selection_future.fuse();
+        let mut inactivity_timeout_future = Box::pin(sleep(Duration::from_secs(s.props.idle_timeout_seconds() as u64))).fuse();
 
         let mut loop_result;
         loop {
@@ -860,6 +861,9 @@ Warning: Saving will discard all the entries that could not be recovered.
                         LoopResult::LoopSyncStatus(sync_status_res, "dropbox")
                     }
                 },
+                _ = inactivity_timeout_future => {
+                    LoopResult::Timeout
+                },
             };
             match loop_result {
                 LoopResult::Ignore(_) => {/* Ignore this. Continue the loop */},
@@ -877,6 +881,12 @@ Warning: Saving will discard all the entries that could not be recovered.
                 let selection = handle_sync_status(&s.editor, sync_status_res, FILENAME, synchronizer_name).await;
                 s.user_selection = selection;
             },
+            LoopResult::Timeout => {
+                warn!("Idle time of {} seconds elapsed! Locking...", s.props.idle_timeout_seconds());
+                let message = format!("Idle time of {} seconds elapsed! Locking...", s.props.idle_timeout_seconds());
+                let _ = s.editor.show_message(&message, vec![UserOption::ok()], MessageSeverity::default()).await;
+                s.user_selection = UserSelection::GoTo(Menu::TryPass(false))
+            }
             LoopResult::Ignore(synchronizer_name) => {
                 let selection = handle_sync_status(&s.editor, Ok(SyncStatus::None), FILENAME, synchronizer_name).await;
                 s.user_selection = selection;
@@ -891,13 +901,14 @@ Warning: Saving will discard all the entries that could not be recovered.
 enum LoopResult {
     LoopUserSelection(UserSelection),
     LoopSyncStatus(errors::Result<SyncStatus>, &'static str),
+    Timeout,
     Ignore(&'static str),
 }
 
 async fn handle_sync_status(editor: &Box<dyn AsyncEditor>, sync_status_res: errors::Result<SyncStatus>, filename: &str, synchronizer_name: &str) -> UserSelection {
     if sync_status_res.is_err() {
         error!("Error during {synchronizer_name} sync: {:?}", sync_status_res);
-        let _ = editor.show_message(&format!("Synchronization error occured. Please see the logs for more dsetails."), vec![UserOption::ok()], MessageSeverity::Error).await;
+        let _ = editor.show_message(&format!("Synchronization error occured. Please see the logs for more details."), vec![UserOption::ok()], MessageSeverity::Error).await;
         UserSelection::GoTo(Menu::Current)
     } else {
         match sync_status_res.unwrap() {

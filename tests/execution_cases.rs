@@ -5,7 +5,7 @@ use std::time::SystemTime;
 use async_trait::async_trait;
 use terminal_clipboard;
 
-use rust_keylock::{execute, AllConfigurations, AsyncEditor, Editor, Entry, EntryMeta, EntryPresentationType, GeneralConfiguration, Menu, MessageSeverity, UserOption, UserSelection};
+use rust_keylock::{execute, AllConfigurations, AsyncEditor, Entry, EntryMeta, EntryPresentationType, GeneralConfiguration, Menu, MessageSeverity, UserOption, UserSelection};
 use rust_keylock::dropbox::DropboxConfiguration;
 use rust_keylock::nextcloud::NextcloudConfiguration;
 use std::path::PathBuf;
@@ -367,12 +367,12 @@ fn execute_import_entries() {
     let (tx, rx) = mpsc::channel();
     let mut loc = PathBuf::from(INTEGRATION_TESTS_TMP_PATH_STR);
     let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).expect("Cannot create the duration for the execute_export_entries").as_secs();
-    loc.push(format!("exported{:?}", now));
+    loc.push(format!("toimport{:?}", now));
     let loc_str = loc.into_os_string().into_string().unwrap();
     let editor = Box::new(TestEditor::new(vec![
         // Login
         UserSelection::new_provided_password("123".to_string(), 0),
-        // Export entries
+        // Export entries first so that the file exists and there is the ability to import for the test
         UserSelection::GoTo(Menu::ImportEntries),
         UserSelection::ExportTo(loc_str.clone()),
         // Ack message
@@ -407,7 +407,9 @@ fn execute_update_configuration() {
 
     let gen_conf = GeneralConfiguration::default();
 
-    let new_conf = AllConfigurations::new(nc_conf, dbx_conf, gen_conf);
+    let new_conf = AllConfigurations::new(nc_conf, dbx_conf.clone(), gen_conf.clone());
+
+    let default_conf = AllConfigurations::new(NextcloudConfiguration::default(), dbx_conf, gen_conf);
 
     let editor = Box::new(TestEditor::new(vec![
         // Login
@@ -415,6 +417,12 @@ fn execute_update_configuration() {
         // Update the configuration
         UserSelection::GoTo(Menu::ShowConfiguration),
         UserSelection::UpdateConfiguration(new_conf),
+        // Save
+        UserSelection::GoTo(Menu::Save(false)),
+        // Ack saved message
+        UserSelection::UserOption(UserOption::ok()),
+        // Reset to defaults
+        UserSelection::UpdateConfiguration(default_conf),
         // Save
         UserSelection::GoTo(Menu::Save(false)),
         // Ack saved message
