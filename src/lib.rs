@@ -82,18 +82,20 @@ const PROPS_FILENAME: &str = ".props";
 /// The `Editor` is responsible for the interaction with the user. Currently there are `Editor` implementations for __shell__ and for __Android__.
 pub async fn execute_async(editor: Box<dyn AsyncEditor>) {
 
-    let mut rest_server = RestService::new()
+    let mut rest_server = RestService::new(editor.start_rest_server())
         .await
         .expect("Could not start the rest server");
     let rest_server_clone = rest_server.clone();
 
-    tokio::task::spawn(async move {
-        loop {
-            if let Err(e) = rest_server.serve().await {
-                error!("Could not serve HTTP Rest servers: {e}");
+    if editor.start_rest_server() {
+        tokio::task::spawn(async move {
+            loop {
+                if let Err(e) = rest_server.serve().await {
+                    error!("Could not serve HTTP Rest servers: {e}");
+                }
             }
-        }
-    });
+        });
+    }
 
     unsafe {
         openssl_probe::init_openssl_env_vars();
@@ -130,38 +132,6 @@ pub async fn execute_async(editor: Box<dyn AsyncEditor>) {
             break;
         }
     }
-
-    info!("Exiting rust-keylock...");
-}
-
-pub fn execute(editor: Box<dyn AsyncEditor>) {
-    unsafe {
-        openssl_probe::init_openssl_env_vars();
-    }
-    info!("Starting rust-keylock...");
-
-    tokio::runtime::Runtime::new().unwrap().block_on(async {
-        let props = match file_handler::load_properties(PROPS_FILENAME) {
-            Ok(m) => m,
-            Err(error) => {
-                error!(
-                    "Could not load properties. Using defaults. The error was: {}",
-                    error
-                );
-                Props::default()
-            }
-        };
-
-        let mut executor = CoreLogicHandler::new(editor, props).await;
-
-        loop {
-            let (new_executor, stop) = executor.handle().await.unwrap();
-            executor = new_executor;
-            if stop {
-                break;
-            }
-        }
-    });
 
     info!("Exiting rust-keylock...");
 }
@@ -1272,6 +1242,9 @@ pub trait AsyncEditor {
     fn sort_entries(&self, entries: &mut [Entry]) {
         entries.sort_by(|a, b| a.name.to_uppercase().cmp(&b.name.to_uppercase()));
     }
+
+    /// Denotes if the rest_server should be start or nor
+    fn start_rest_server(&self) -> bool;
 }
 
 #[cfg(test)]

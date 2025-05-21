@@ -5,7 +5,7 @@ use std::time::SystemTime;
 use async_trait::async_trait;
 use terminal_clipboard;
 
-use rust_keylock::{execute, AllConfigurations, AsyncEditor, Entry, EntryMeta, EntryPresentationType, GeneralConfiguration, Menu, MessageSeverity, UserOption, UserSelection};
+use rust_keylock::{execute_async, AllConfigurations, AsyncEditor, Entry, EntryMeta, EntryPresentationType, GeneralConfiguration, Menu, MessageSeverity, UserOption, UserSelection};
 use rust_keylock::dropbox::DropboxConfiguration;
 use rust_keylock::nextcloud::NextcloudConfiguration;
 use std::path::PathBuf;
@@ -13,36 +13,35 @@ use std::fs::DirBuilder;
 
 const INTEGRATION_TESTS_TMP_PATH_STR: &str = "./target/integration_tests_tmp";
 
-#[test]
+#[tokio::test]
 // WARNING: Running this, will mess with the passwords that are stored in the $HOME/.rust-keylock directory
-fn execution_cases() {
+async fn execution_cases() {
     // Create the tmp directory
     DirBuilder::new()
         .recursive(true)
         .create(INTEGRATION_TESTS_TMP_PATH_STR).unwrap();
     // Proceed with the tests
-    execute_login_success();
-    execute_exit_without_login();
-    execute_show_entry();
-    execute_add_entry();
-    execute_add_entry_with_leaked_password();
-    execute_add_entry_with_leaked_password_and_fix_it();
-    execute_edit_entry();
-    execute_edit_entry_define_leaked_password();
-    execute_edit_entry_define_leaked_password_and_fix_it();
-    execute_delete_entry();
-    execute_change_pass();
-    execute_export_entries();
-    execute_import_entries();
-    execute_update_configuration();
-    execute_add_to_clipboard();
-    execute_file_recovery();
-    execute_check_passwords();
-    // This should be after setting nextcloud or dropbox in order to include testing with the configurations filled
-    execute_login_fail_and_then_sucess();
+    execute_login_success().await;
+    execute_exit_without_login().await;
+    execute_show_entry().await;
+    execute_add_entry().await;
+    execute_add_entry_with_leaked_password().await;
+    execute_add_entry_with_leaked_password_and_fix_it().await;
+    execute_edit_entry().await;
+    execute_edit_entry_define_leaked_password().await;
+    execute_edit_entry_define_leaked_password_and_fix_it().await;
+    execute_delete_entry().await;
+    execute_change_pass().await;
+    execute_export_entries().await;
+    execute_import_entries().await;
+    execute_update_configuration().await;
+    execute_add_to_clipboard().await;
+    execute_file_recovery().await;
+    execute_check_passwords().await;
+    execute_login_fail_and_then_sucess().await;
 }
 
-fn execute_login_success() {
+async fn execute_login_success() {
     println!("===========execute_login_success");
     let (tx, rx) = mpsc::channel();
     let editor = Box::new(TestEditor::new(vec![
@@ -56,12 +55,12 @@ fn execute_login_success() {
         UserSelection::GoTo(Menu::Exit),
         UserSelection::GoTo(Menu::ForceExit)], tx));
 
-    execute(editor);
+    execute_async(editor).await;
     let res = rx.recv();
     assert!(res.is_ok() && res.unwrap());
 }
 
-fn execute_exit_without_login() {
+async fn execute_exit_without_login() {
     println!("===========execute_exit_without_login");
     let (tx, rx) = mpsc::channel();
     let editor = Box::new(TestEditor::new(vec![
@@ -71,13 +70,12 @@ fn execute_exit_without_login() {
         UserSelection::UserOption(UserOption::ok()),
         // Exit
         UserSelection::GoTo(Menu::Exit)], tx));
-
-    execute(editor);
+    execute_async(editor).await;
     let res = rx.recv();
     assert!(res.is_ok() && res.unwrap());
 }
 
-fn execute_login_fail_and_then_sucess() {
+async fn execute_login_fail_and_then_sucess() {
     println!("===========execute_login_fail_and_then_sucess");
     let (tx, rx) = mpsc::channel();
     let editor = Box::new(TestEditor::new(vec![
@@ -95,12 +93,12 @@ fn execute_login_fail_and_then_sucess() {
         UserSelection::GoTo(Menu::Exit),
         UserSelection::GoTo(Menu::ForceExit)], tx));
 
-    execute(editor);
+    execute_async(editor).await;
     let res = rx.recv();
     assert!(res.is_ok() && res.unwrap());
 }
 
-fn execute_show_entry() {
+async fn execute_show_entry() {
     println!("===========execute_show_entry");
     let (tx, rx) = mpsc::channel();
     let editor = Box::new(TestEditor::new(vec![
@@ -113,12 +111,12 @@ fn execute_show_entry() {
         // Exit
         UserSelection::GoTo(Menu::ForceExit)], tx));
 
-    execute(editor);
+    execute_async(editor).await;
     let res = rx.recv();
     assert!(res.is_ok() && res.unwrap());
 }
 
-fn execute_edit_entry() {
+async fn execute_edit_entry() {
     println!("===========execute_edit_entry");
     let (tx, rx) = mpsc::channel();
     let pass = rs_password_utils::dice::generate(6);
@@ -131,12 +129,12 @@ fn execute_edit_entry() {
         // Exit
         UserSelection::GoTo(Menu::ForceExit)], tx));
 
-    execute(editor);
+    execute_async(editor).await;
     let res = rx.recv();
     assert!(res.is_ok() && res.unwrap());
 }
 
-fn execute_edit_entry_define_leaked_password() {
+async fn execute_edit_entry_define_leaked_password() {
     println!("===========execute_edit_entry_define_leaked_password");
     let (tx, rx) = mpsc::channel();
     let editor = Box::new(TestEditor::new(vec![
@@ -150,12 +148,12 @@ fn execute_edit_entry_define_leaked_password() {
         // Exit
         UserSelection::GoTo(Menu::ForceExit)], tx));
 
-    execute(editor);
+    execute_async(editor).await;
     let res = rx.recv();
     assert!(res.is_ok() && res.unwrap());
 }
 
-fn execute_edit_entry_define_leaked_password_and_fix_it() {
+async fn execute_edit_entry_define_leaked_password_and_fix_it() {
     println!("===========execute_edit_entry_define_leaked_password_and_fix_it");
     let (tx, rx) = mpsc::channel();
     let pass = rs_password_utils::dice::generate(6);
@@ -174,12 +172,12 @@ fn execute_edit_entry_define_leaked_password_and_fix_it() {
         // Exit
         UserSelection::GoTo(Menu::ForceExit)], tx));
 
-    execute(editor);
+    execute_async(editor).await;
     let res = rx.recv();
     assert!(res.is_ok() && res.unwrap());
 }
 
-fn execute_add_entry() {
+async fn execute_add_entry() {
     println!("===========execute_add_entry");
     let (tx, rx) = mpsc::channel();
     let pass = rs_password_utils::dice::generate(6);
@@ -196,12 +194,12 @@ fn execute_add_entry() {
         // Exit
         UserSelection::GoTo(Menu::ForceExit)], tx));
 
-    execute(editor);
+    execute_async(editor).await;
     let res = rx.recv();
     assert!(res.is_ok() && res.unwrap());
 }
 
-fn execute_add_entry_with_leaked_password() {
+async fn execute_add_entry_with_leaked_password() {
     println!("===========execute_add_entry_with_leaked_password");
     let (tx, rx) = mpsc::channel();
     let editor = Box::new(TestEditor::new(vec![
@@ -219,12 +217,12 @@ fn execute_add_entry_with_leaked_password() {
         // Exit
         UserSelection::GoTo(Menu::ForceExit)], tx));
 
-    execute(editor);
+    execute_async(editor).await;
     let res = rx.recv();
     assert!(res.is_ok() && res.unwrap());
 }
 
-fn execute_add_entry_with_leaked_password_and_fix_it() {
+async fn execute_add_entry_with_leaked_password_and_fix_it() {
     println!("===========execute_add_entry_with_leaked_password_and_fix_it");
     let pass = rs_password_utils::dice::generate(6);
     let (tx, rx) = mpsc::channel();
@@ -245,12 +243,12 @@ fn execute_add_entry_with_leaked_password_and_fix_it() {
         // Exit
         UserSelection::GoTo(Menu::ForceExit)], tx));
 
-    execute(editor);
+    execute_async(editor).await;
     let res = rx.recv();
     assert!(res.is_ok() && res.unwrap());
 }
 
-fn execute_delete_entry() {
+async fn execute_delete_entry() {
     println!("===========execute_delete_entry");
     let (tx, rx) = mpsc::channel();
     let editor = Box::new(TestEditor::new(vec![
@@ -268,12 +266,12 @@ fn execute_delete_entry() {
         // Exit
         UserSelection::GoTo(Menu::ForceExit)], tx));
 
-    execute(editor);
+    execute_async(editor).await;
     let res = rx.recv();
     assert!(res.is_ok() && res.unwrap());
 }
 
-fn execute_change_pass() {
+async fn execute_change_pass() {
     println!("===========execute_change_pass");
     let (tx, rx) = mpsc::channel();
     let editor1 = Box::new(TestEditor::new(vec![
@@ -290,7 +288,7 @@ fn execute_change_pass() {
         // Exit
         UserSelection::GoTo(Menu::ForceExit)], tx.clone()));
 
-    execute(editor1);
+    execute_async(editor1).await;
     let res = rx.recv();
     assert!(res.is_ok() && res.unwrap());
 
@@ -301,7 +299,7 @@ fn execute_change_pass() {
         // Exit
         UserSelection::GoTo(Menu::ForceExit)], tx.clone()));
 
-    execute(editor2);
+    execute_async(editor2).await;
     let res = rx.recv();
     assert!(res.is_ok() && res.unwrap());
 
@@ -320,12 +318,12 @@ fn execute_change_pass() {
         // Exit
         UserSelection::GoTo(Menu::ForceExit)], tx));
 
-    execute(editor3);
+    execute_async(editor3).await;
     let res = rx.recv();
     assert!(res.is_ok() && res.unwrap());
 }
 
-fn execute_export_entries() {
+async fn execute_export_entries() {
     println!("===========execute_export_entries");
     let (tx, rx) = mpsc::channel();
     let mut loc = PathBuf::from(INTEGRATION_TESTS_TMP_PATH_STR);
@@ -357,12 +355,12 @@ fn execute_export_entries() {
         // Exit
         UserSelection::GoTo(Menu::ForceExit)], tx));
 
-    execute(editor);
+    execute_async(editor).await;
     let res = rx.recv();
     assert!(res.is_ok() && res.unwrap());
 }
 
-fn execute_import_entries() {
+async fn execute_import_entries() {
     println!("===========execute_import_entries");
     let (tx, rx) = mpsc::channel();
     let mut loc = PathBuf::from(INTEGRATION_TESTS_TMP_PATH_STR);
@@ -388,12 +386,12 @@ fn execute_import_entries() {
         // Exit
         UserSelection::GoTo(Menu::ForceExit)], tx));
 
-    execute(editor);
+    execute_async(editor).await;
     let res = rx.recv();
     assert!(res.is_ok() && res.unwrap());
 }
 
-fn execute_update_configuration() {
+async fn execute_update_configuration() {
     println!("===========execute_update_configuration");
     let (tx, rx) = mpsc::channel();
 
@@ -430,12 +428,12 @@ fn execute_update_configuration() {
         // Exit
         UserSelection::GoTo(Menu::ForceExit)], tx));
 
-    execute(editor);
+    execute_async(editor).await;
     let res = rx.recv();
     assert!(res.is_ok() && res.unwrap());
 }
 
-fn execute_add_to_clipboard() {
+async fn execute_add_to_clipboard() {
     println!("===========execute_add_to_clipboard");
     let (tx, rx) = mpsc::channel();
     let a_string = "1string".to_string();
@@ -449,7 +447,7 @@ fn execute_add_to_clipboard() {
         // Exit
         UserSelection::GoTo(Menu::ForceExit)], tx));
 
-    execute(editor);
+    execute_async(editor).await;
 
     let clip_res = terminal_clipboard::get_string();
     assert!(clip_res.is_ok());
@@ -459,7 +457,7 @@ fn execute_add_to_clipboard() {
     assert!(res.is_ok() && res.unwrap());
 }
 
-fn execute_file_recovery() {
+async fn execute_file_recovery() {
     println!("===========execute_file_recovery");
     let (tx, rx) = mpsc::channel();
     let editor = Box::new(TestEditor::new(vec![
@@ -474,12 +472,12 @@ fn execute_file_recovery() {
         UserSelection::GoTo(Menu::Exit),
         UserSelection::GoTo(Menu::ForceExit)], tx));
 
-    execute(editor);
+    execute_async(editor).await;
     let res = rx.recv();
     assert!(res.is_ok() && res.unwrap());
 }
 
-fn execute_check_passwords() {
+async fn execute_check_passwords() {
     println!("===========execute_check_passwords");
     let (tx, rx) = mpsc::channel();
     let editor = Box::new(TestEditor::new(vec![
@@ -493,7 +491,7 @@ fn execute_check_passwords() {
         UserSelection::GoTo(Menu::Exit),
         UserSelection::GoTo(Menu::ForceExit)], tx));
 
-    execute(editor);
+    execute_async(editor).await;
     let res = rx.recv();
     assert!(res.is_ok() && res.unwrap());
 }
@@ -579,5 +577,9 @@ impl AsyncEditor for TestEditor {
         let to_ret = self.return_first_selection();
         println!("Returning {:?}", to_ret);
         to_ret
+    }
+
+    fn start_rest_server(&self) -> bool {
+        false
     }
 }

@@ -78,33 +78,45 @@ fn get_lost_counts() -> MutexGuard<'static, Vec<Counter>> {
 
 #[derive(Clone)]
 pub(crate) struct RestService {
-    listener: Arc<TcpListener>,
+    listener_opt: Arc<Option<TcpListener>>,
     safe: Arc<Mutex<Option<Safe>>>,
     token: Arc<Mutex<String>>,
 }
 
 impl RestService {
-    pub(crate) async fn new() -> errors::Result<Self> {
+    pub(crate) async fn new(start_server: bool) -> errors::Result<Self> {
+
         let addr: SocketAddr = ([127, 0, 0, 1], 9876).into();
-        let listener = TcpListener::bind(addr).await?;
-        info!("Listening on http://{}", addr);
+        let listener_opt = if start_server {
+            info!("Starting rest server");
+            let ret = Some(TcpListener::bind(addr).await?);
+            info!("Listening on http://{}", addr);
+            ret
+        } else {
+            info!("Rest server will not start");
+            None
+        };
 
         Ok(RestService {
-            listener: Arc::new(listener),
+            listener_opt: Arc::new(listener_opt),
             safe: Arc::new(Mutex::new(None)),
             token: Arc::new(Mutex::new("".to_string())),
         })
     }
 
     pub(crate) async fn serve(&mut self) -> errors::Result<JoinHandle<()>> {
-        let (stream, _) = self.listener.accept().await?;
-        let io = TokioIo::new(stream);
-        let svc_clone = self.clone();
-        Ok(tokio::task::spawn(async move {
-            if let Err(err) = http1::Builder::new().serve_connection(io, svc_clone).await {
-                println!("Failed to serve connection: {:?}", err);
-            }
-        }))
+        if let &Some(listener) = &self.listener_opt.as_ref() {
+            let (stream, _) = listener.accept().await?;
+            let io = TokioIo::new(stream);
+            let svc_clone = self.clone();
+            Ok(tokio::task::spawn(async move {
+                if let Err(err) = http1::Builder::new().serve_connection(io, svc_clone).await {
+                    println!("Failed to serve connection: {:?}", err);
+                }
+            }))
+        } else {
+            Err(errors::RustKeylockError::GeneralError(format!("Attempt to serve HTTP requests using a stopped server")))
+        }
     }
 
     pub(crate) fn update_safe(&self, safe: Safe) -> errors::Result<()> {
