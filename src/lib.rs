@@ -325,6 +325,23 @@ impl CoreLogicHandler {
                         .map_err(|error| error!("Cannot update system for save: {:?}", error));
                     // Reset the filter
                     s.safe.set_filter("".to_string());
+                    // Initialize the synchronizers
+                    let mut nc_synchronizer = nextcloud::Synchronizer::new(
+                       &s.configuration.nextcloud, 
+                       &s.configuration.system,
+                           FILENAME
+                       ).unwrap();
+                    nc_synchronizer.init().await;
+                    s.nc_synchronizer = nc_synchronizer;
+
+                    let mut dbx_synchronizer = dropbox::Synchronizer::new(
+                        &s.configuration.dropbox, 
+                        &s.configuration.system,
+                            FILENAME
+                        ).unwrap();
+                    dbx_synchronizer.init().await;
+                    s.dbx_synchronizer = dbx_synchronizer;
+
                     let rkl_content = RklContent::from((
                         &s.safe,
                         &s.configuration.nextcloud,
@@ -686,11 +703,26 @@ Warning: Saving will discard all the entries that could not be recovered.
                         debug!("A valid configuration for Nextcloud synchronization was found after being updated by the User. Spawning \
                             nextcloud sync task");
                         s.contents_changed = true;
+                        // Initialize the synchronizer
+                        let mut nc_synchronizer = nextcloud::Synchronizer::new(
+                            &s.configuration.nextcloud, 
+                            &s.configuration.system,
+                                FILENAME
+                            ).unwrap();
+                        nc_synchronizer.init().await;
+                        s.nc_synchronizer = nc_synchronizer;
                     }
                     if s.configuration.dropbox.is_filled() {
                         debug!("A valid configuration for dropbox synchronization was found after being updated by the User. Spawning \
                             dropbox sync task");
                         s.contents_changed = true;
+                        let mut dbx_synchronizer = dropbox::Synchronizer::new(
+                            &s.configuration.dropbox, 
+                            &s.configuration.system,
+                                FILENAME
+                            ).unwrap();
+                        dbx_synchronizer.init().await;
+                        s.dbx_synchronizer = dbx_synchronizer;
                     }
                     Box::pin(future::ready(UserSelection::GoTo(Menu::Main)))
                 }

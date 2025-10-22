@@ -524,58 +524,58 @@ impl TestEditor {
 #[async_trait]
 impl AsyncEditor for TestEditor {
     async fn show_password_enter(&self) -> UserSelection {
-        println!("TestEditor::show_password_enter");
+        println!("====== TestEditor::show_password_enter");
         let to_ret = self.return_first_selection();
-        println!("Returning {:?}", to_ret);
+        println!("====== Returning {:?}", to_ret);
         to_ret
     }
 
     async fn show_change_password(&self) -> UserSelection {
-        println!("TestEditor::show_change_password");
+        println!("====== TestEditor::show_change_password");
         let to_ret = self.return_first_selection();
-        println!("Returning {:?}", to_ret);
+        println!("====== Returning {:?}", to_ret);
         to_ret
     }
 
     async fn show_menu(&self, m: Menu) -> UserSelection {
-        println!("TestEditor::show_menu {:?}", m);
+        println!("====== TestEditor::show_menu {:?}", m);
         let to_ret = self.return_first_selection();
-        println!("Returning {:?}", to_ret);
+        println!("====== Returning {:?}", to_ret);
         to_ret
     }
 
     async fn show_entries(&self, entries: Vec<Entry>, filter: String) -> UserSelection {
-        println!("TestEditor::show_entries {:?} with filter {}", entries, filter);
+        println!("====== TestEditor::show_entries {:?} with filter {}", entries, filter);
         let to_ret = self.return_first_selection();
-        println!("Returning {:?}", to_ret);
+        println!("====== Returning {:?}", to_ret);
         to_ret
     }
 
     async fn show_entry(&self, entry: Entry, index: usize, presentation_type: EntryPresentationType) -> UserSelection {
-        println!("TestEditor::show_entry {:?} with index {} and presentation_type {:?}", entry, index, presentation_type);
+        println!("====== TestEditor::show_entry {:?} with index {} and presentation_type {:?}", entry, index, presentation_type);
         let to_ret = self.return_first_selection();
-        println!("Returning {:?}", to_ret);
+        println!("====== Returning {:?}", to_ret);
         to_ret
     }
 
     async fn exit(&self, force: bool) -> UserSelection {
-        println!("TestEditor::exit {}", force);
+        println!("====== TestEditor::exit {}", force);
         let to_ret = self.return_first_selection();
-        println!("Returning {:?}", to_ret);
+        println!("====== Returning {:?}", to_ret);
         to_ret
     }
 
     async fn show_configuration(&self, nextcloud: NextcloudConfiguration, dropbox: DropboxConfiguration, gen: GeneralConfiguration) -> UserSelection {
-        println!("TestEditor::show_configuration with {:?}, {:?} and {:?}", nextcloud, dropbox, gen);
+        println!("====== TestEditor::show_configuration with {:?}, {:?} and {:?}", nextcloud, dropbox, gen);
         let to_ret = self.return_first_selection();
-        println!("Returning {:?}", to_ret);
+        println!("====== Returning {:?}", to_ret);
         to_ret
     }
 
     async fn show_message(&self, m: &str, _: Vec<UserOption>, _: MessageSeverity) -> UserSelection {
-        println!("TestEditor::show_message {}", m);
+        println!("====== TestEditor::show_message {}", m);
         let to_ret = self.return_first_selection();
-        println!("Returning {:?}", to_ret);
+        println!("====== Returning {:?}", to_ret);
         to_ret
     }
 
