@@ -45,7 +45,7 @@ use std::time::Duration;
 
 pub use api::GeneralConfiguration;
 use async_trait::async_trait;
-use asynch::{AsyncTask, ReqwestClientFactory, SyncStatus};
+use asynch::{AsyncTask, SyncStatus};
 use futures::{future, select, FutureExt};
 use log::*;
 
@@ -143,6 +143,8 @@ struct CoreLogicHandler {
     // Keeps the sensitive data
     safe: Safe,
     configuration: RklConfiguration,
+    dbx_synchronizer: dropbox::Synchronizer,
+    nc_synchronizer: nextcloud::Synchronizer,
     // Signals changes that are not saved
     contents_changed: bool,
     cryptor: datacrypt::BcryptAes,
@@ -187,12 +189,30 @@ impl CoreLogicHandler {
             user_selection = us;
             cr
         };
+
+        // Initialize the synchronizers
+        let mut nc_synchronizer = nextcloud::Synchronizer::new(
+            &configuration.nextcloud, 
+            &configuration.system,
+                FILENAME
+            ).unwrap();
+        nc_synchronizer.init().await;
+
+        let mut dbx_synchronizer = dropbox::Synchronizer::new(
+            &configuration.dropbox, 
+            &configuration.system,
+                FILENAME
+            ).unwrap();
+        dbx_synchronizer.init().await;
+        
         CoreLogicHandler {
             editor,
             props: props,
             user_selection,
             safe,
             configuration,
+            dbx_synchronizer,
+            nc_synchronizer,
             contents_changed,
             cryptor,
         }
@@ -788,25 +808,11 @@ Warning: Saving will discard all the entries that could not be recovered.
             }
         };
         
-        // Initialize the synchronizers
-        let mut nc_synchronizer = nextcloud::Synchronizer::new(
-            &s.configuration.nextcloud, 
-            &s.configuration.system,
-                FILENAME
-            ).unwrap();
-        nc_synchronizer.init().await;
-
-        let mut dbx_synchronizer = dropbox::Synchronizer::new(
-            &s.configuration.dropbox, 
-            &s.configuration.system,
-                FILENAME,
-                Box::new(ReqwestClientFactory::new())
-            ).unwrap();
-        dbx_synchronizer.init().await;
-
         // Prepare all the possible futures from which we expect possible user_selection
-        let mut nc_future = nc_synchronizer.execute().fuse();
-        let mut dbx_future = dbx_synchronizer.execute().fuse();
+        let nc_synchronizer_clonne = s.nc_synchronizer.clone();
+        let dbx_synchronizer_clone = s.dbx_synchronizer.clone();
+        let mut nc_future = nc_synchronizer_clonne.execute().fuse();
+        let mut dbx_future = dbx_synchronizer_clone.execute().fuse();
         let mut fused_user_selection_future = user_selection_future.fuse();
         let mut inactivity_timeout_future = Box::pin(sleep(Duration::from_secs(s.props.idle_timeout_seconds() as u64))).fuse();
 

@@ -41,6 +41,7 @@ lazy_static! {
 }
 
 /// A (Next/Own)cloud synchronizer
+#[derive(Clone)]
 pub(crate) struct Synchronizer {
     /// The configuration needed for this synchronizer
     conf: NextcloudConfiguration,

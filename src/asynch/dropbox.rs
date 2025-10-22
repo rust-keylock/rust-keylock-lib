@@ -79,6 +79,7 @@ lazy_static! {
 }
 
 /// A Dropbox synchronizer
+#[derive(Clone)]
 pub(crate) struct Synchronizer {
     /// The configuration needed for this synchronizer
     conf: DropboxConfiguration,
@@ -90,8 +91,6 @@ pub(crate) struct Synchronizer {
     version_local: Option<i64>,
     /// The version that was set during the last sync
     last_sync_version: Option<i64>,
-    /// The factory that creates HTTP clients
-    client_factory: Box<dyn RklHttpAsyncFactory<ClientResType = Vec<u8>>>,
 }
 
 impl Synchronizer {
@@ -99,7 +98,7 @@ impl Synchronizer {
         dbc: &DropboxConfiguration,
         sys_conf: &SystemConfiguration,
         f: &str,
-        client_factory: Box<dyn RklHttpAsyncFactory<ClientResType = Vec<u8>>>,
+        //client_factory: Box<dyn RklHttpAsyncFactory<ClientResType = Vec<u8>>>,
     ) -> errors::Result<Synchronizer> {
         let s = Synchronizer {
             conf: dbc.clone(),
@@ -107,7 +106,6 @@ impl Synchronizer {
             saved_at_local: sys_conf.saved_at,
             version_local: sys_conf.version,
             last_sync_version: sys_conf.last_sync_version,
-            client_factory,
         };
         Ok(s)
     }
@@ -127,7 +125,8 @@ impl Synchronizer {
         let saved_at_local = self.saved_at_local.clone();
         let version_local = self.version_local.clone();
         let last_sync_version = self.last_sync_version.clone();
-        let mut client = self.client_factory.create();
+        let client_factory = Box::new(ReqwestClientFactory::new());
+        let mut client = client_factory.create();
         client.header(
             "Authorization",
             &format!("Bearer {}", self.use_short_lived_token()?.as_str()),
@@ -151,7 +150,8 @@ impl Synchronizer {
     }
 
     async fn get_short_lived_token(&self) -> errors::Result<Zeroizing<String>> {
-        let mut client = self.client_factory.create();
+        let client_factory = Box::new(ReqwestClientFactory::new());
+        let mut client = client_factory.create();
         debug!("DBX: Retrieving a short-lived token");
 
         let post_body: Vec<u8> = format!(
