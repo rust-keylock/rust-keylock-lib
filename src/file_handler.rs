@@ -349,22 +349,6 @@ pub fn default_rustkeylock_location() -> PathBuf {
     home_dir
 }
 
-#[cfg(target_os = "android")]
-pub(crate) fn create_certs_path() -> errors::Result<PathBuf> {
-    let mut rust_keylock_home = default_rustkeylock_location();
-    rust_keylock_home.push("/sdcard/Download/rust-keylock/etc/ssl/certs");
-    let _ = fs::create_dir_all(rust_keylock_home.clone())?;
-    Ok(rust_keylock_home)
-}
-
-#[cfg(not(target_os = "android"))]
-pub(crate) fn create_certs_path() -> errors::Result<PathBuf> {
-    let mut rust_keylock_home = default_rustkeylock_location();
-    rust_keylock_home.push("etc/ssl/certs");
-    fs::create_dir_all(rust_keylock_home.clone())?;
-    Ok(rust_keylock_home)
-}
-
 /// Transforms properties toml to Props dto
 fn transform_to_props(table: &Table) -> Result<Props, RustKeylockError> {
     Props::from_table(table)
@@ -480,9 +464,7 @@ fn load_existing_file(file_path: &PathBuf, cryptor_opt: Option<&dyn Cryptor>) ->
                 debug!("Encrypted file does not exist. Initializing...");
                 // Create the rust-keylock home
                 fs::create_dir_all(default_rustkeylock_location())?;
-                // Create the directory for the self signed certificates
-                let _ = create_certs_path()?;
-                debug!("Directories for home and certs created successfully");
+                debug!("Directories for home created successfully");
                 Vec::new()
             }
         }

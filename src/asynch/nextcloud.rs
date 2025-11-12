@@ -586,9 +586,7 @@ pub struct NextcloudConfiguration {
     password: String,
     password_cryptor: EntryPasswordCryptor,
     /// If a self-signed certificate is needed in order to communicate with the Nextcloud server over HTTPS,
-    /// this boolean should be true. In that case, the application will use the certificate __cacert.pem__ located in
-    /// `$HOME/.rust-keylock/etc/ssl/certs` and in `/sdcard/Download/rust-keylock/etc/ssl/certs` for Android devices.
-    /// The user is responsible to place the self-signed .pem file into this location with this exact name.
+    /// this boolean should be true.
     pub use_self_signed_certificate: bool,
 }
 
