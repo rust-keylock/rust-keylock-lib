@@ -25,7 +25,6 @@ use hyper::server::conn::http1;
 use hyper::service::Service;
 use hyper::{body::Incoming as IncomingBody, Request, Response};
 use hyper_util::rt::TokioIo;
-use lazy_static::lazy_static;
 use log::{debug, info, warn};
 use rand::{thread_rng, Rng};
 use spake2::{Ed25519Group, Identity, Password, Spake2};
@@ -33,7 +32,7 @@ use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use url::form_urlencoded;
 
-use std::future::Future;
+use std::{future::Future, sync::LazyLock};
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -47,11 +46,9 @@ use crate::{
     Entry, Safe,
 };
 
-lazy_static! {
-    static ref SESSION_KEY: Mutex<Option<Vec<u8>>> = Mutex::new(None);
-    static ref COUNTER: Mutex<Counter> = Mutex::new(0);
-    static ref LOST_COUNTS: Mutex<Vec<Counter>> = Mutex::new(Vec::new());
-}
+static SESSION_KEY: LazyLock<Mutex<Option<Vec<u8>>>> = LazyLock::new(|| { Mutex::new(None) });
+static COUNTER: LazyLock<Mutex<Counter>> = LazyLock::new(|| { Mutex::new(0) });
+static LOST_COUNTS: LazyLock<Mutex<Vec<Counter>>> = LazyLock::new(|| { Mutex::new(Vec::new()) });
 
 fn get_session_key_opt() -> Option<Vec<u8>> {
     SESSION_KEY.lock().expect("Session Key is poisoned").clone()
@@ -356,9 +353,7 @@ fn decrypt_base_64(key: &[u8], product: &str) -> errors::Result<Vec<u8>> {
 mod rest_server_tests {
     use super::*;
 
-    lazy_static! {
-        static ref SYNC_GUARD: Mutex<()> = Mutex::new(());
-    }
+    static SYNC_GUARD: LazyLock<Mutex<()>> = LazyLock::new(|| { Mutex::new(()) });
 
     fn init_tests() {
         let _guard = SYNC_GUARD.lock().unwrap();

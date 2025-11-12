@@ -16,12 +16,11 @@
 
 use async_trait::async_trait;
 use reqwest::{Body, Client, Request, Response};
-use lazy_static::lazy_static;
 use tokio::time::sleep;
 use std::io::prelude::*;
 use std::time::Duration;
 use url::Url;
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 
 use http::{Method, StatusCode};
 use log::*;
@@ -36,9 +35,7 @@ use crate::errors::RustKeylockError;
 use crate::SystemConfiguration;
 use crate::{errors, file_handler};
 
-lazy_static! {
-    static ref STOP_SYNCHRONIZATION: Mutex<bool> = Mutex::new(false);
-}
+static STOP_SYNCHRONIZATION: LazyLock<Mutex<bool>> = LazyLock::new(|| { Mutex::new(false) });
 
 /// A (Next/Own)cloud synchronizer
 #[derive(Clone)]
@@ -781,7 +778,7 @@ mod nextcloud_tests {
     use std::io::prelude::*;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::sync::mpsc::{self, Receiver, SyncSender};
-    use std::sync::Mutex;
+    use std::sync::{LazyLock, Mutex};
     use std::thread;
     use std::time;
 
@@ -789,7 +786,6 @@ mod nextcloud_tests {
     use hyper::service::service_fn;
     use hyper::{Request, Response};
     use hyper_util::rt::{TokioIo, TokioTimer};
-    use lazy_static::lazy_static;
     use std::convert::Infallible;
     use tokio;
     use toml;
@@ -800,9 +796,7 @@ mod nextcloud_tests {
     use super::super::super::{errors, file_handler, SystemConfiguration};
     use super::super::AsyncTask;
 
-    lazy_static! {
-        static ref TXMAP: Mutex<HashMap<String, SyncSender<bool>>> = Mutex::new(HashMap::new());
-    }
+    static TXMAP: LazyLock<Mutex<HashMap<String, SyncSender<bool>>>> = LazyLock::new(|| { Mutex::new(HashMap::new()) });
 
     fn get_tx_for(command: &str) -> SyncSender<bool> {
         let map = TXMAP.lock().unwrap();

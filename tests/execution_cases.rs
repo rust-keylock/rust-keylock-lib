@@ -415,6 +415,8 @@ async fn execute_update_configuration() {
         // Update the configuration
         UserSelection::GoTo(Menu::ShowConfiguration),
         UserSelection::UpdateConfiguration(new_conf),
+        // Ack sync error message
+        UserSelection::UserOption(UserOption::ok()),
         // Save
         UserSelection::GoTo(Menu::Save(false)),
         // Ack saved message

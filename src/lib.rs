@@ -27,8 +27,6 @@ extern crate futures;
 extern crate http;
 extern crate hyper;
 extern crate hyper_tls;
-#[cfg(test)]
-extern crate lazy_static;
 extern crate log;
 extern crate native_tls;
 extern crate openssl_probe;

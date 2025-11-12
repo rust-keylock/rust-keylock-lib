@@ -54,12 +54,8 @@ async-trait = "0.1"
 zeroize = {version = "1.8", features = ["zeroize_derive"] }
 serde = { version = "1.0", features = ["derive"] }
 bytes = "1.10"
-lazy_static = "1.5"
 
 [dependencies.toml]
 version = "0.8"
 default-features = false
 features = ["preserve_order", "display", "parse"]
-
-[dev-dependencies]
-lazy_static = "1.5"
