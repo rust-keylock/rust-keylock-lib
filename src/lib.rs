@@ -194,14 +194,14 @@ impl CoreLogicHandler {
             &configuration.system,
                 FILENAME
             ).unwrap();
-        nc_synchronizer.init().await;
+            let _ = nc_synchronizer.init().await;
 
         let mut dbx_synchronizer = dropbox::Synchronizer::new(
             &configuration.dropbox, 
             &configuration.system,
                 FILENAME
             ).unwrap();
-        dbx_synchronizer.init().await;
+        let _ = dbx_synchronizer.init().await;
         
         CoreLogicHandler {
             editor,
@@ -329,7 +329,14 @@ impl CoreLogicHandler {
                        &s.configuration.system,
                            FILENAME
                        ).unwrap();
-                    nc_synchronizer.init().await;
+                    let started = nc_synchronizer.init().await;
+                    if started.is_err() {
+                        let _ = s.editor.show_message(
+                            "Could not start the Nextcloud synchronizer",
+                            vec![UserOption::ok()],
+                            MessageSeverity::Error,
+                        ).await;
+                    }
                     s.nc_synchronizer = nc_synchronizer;
 
                     let mut dbx_synchronizer = dropbox::Synchronizer::new(
@@ -337,7 +344,14 @@ impl CoreLogicHandler {
                         &s.configuration.system,
                             FILENAME
                         ).unwrap();
-                    dbx_synchronizer.init().await;
+                    let started = dbx_synchronizer.init().await;
+                    if started.is_err() {
+                        let _ = s.editor.show_message(
+                            "Could not start the Dropbox synchronizer",
+                            vec![UserOption::ok()],
+                            MessageSeverity::Error,
+                        ).await;
+                    }
                     s.dbx_synchronizer = dbx_synchronizer;
 
                     let rkl_content = RklContent::from((
@@ -701,26 +715,21 @@ Warning: Saving will discard all the entries that could not be recovered.
                         debug!("A valid configuration for Nextcloud synchronization was found after being updated by the User. Spawning \
                             nextcloud sync task");
                         s.contents_changed = true;
-                        // Initialize the synchronizer
-                        let mut nc_synchronizer = nextcloud::Synchronizer::new(
-                            &s.configuration.nextcloud, 
-                            &s.configuration.system,
-                                FILENAME
-                            ).unwrap();
-                        nc_synchronizer.init().await;
-                        s.nc_synchronizer = nc_synchronizer;
+                        // Stop the synchronizer if running
+                        let stopped = s.nc_synchronizer.stop();
+                        if stopped.is_err() {
+                            s.editor.show_message("Could not stop the nextcloud synchronizer.", vec![UserOption::ok()], MessageSeverity::Error).await;
+                        }
                     }
                     if s.configuration.dropbox.is_filled() {
                         debug!("A valid configuration for dropbox synchronization was found after being updated by the User. Spawning \
                             dropbox sync task");
                         s.contents_changed = true;
-                        let mut dbx_synchronizer = dropbox::Synchronizer::new(
-                            &s.configuration.dropbox, 
-                            &s.configuration.system,
-                                FILENAME
-                            ).unwrap();
-                        dbx_synchronizer.init().await;
-                        s.dbx_synchronizer = dbx_synchronizer;
+                        // Stop the synchronizer if running
+                        let stopped = s.dbx_synchronizer.stop();
+                        if stopped.is_err() {
+                            s.editor.show_message("Could not stop the Dropbox synchronizer.", vec![UserOption::ok()], MessageSeverity::Error).await;
+                        }
                     }
                     Box::pin(future::ready(UserSelection::GoTo(Menu::Main)))
                 }
@@ -884,8 +893,12 @@ Warning: Saving will discard all the entries that could not be recovered.
                 s.user_selection = selection;
             },
             LoopResult::LoopSyncStatus(sync_status_res, synchronizer_name) => {
-                let selection = handle_sync_status(&s.editor, sync_status_res, FILENAME, synchronizer_name).await;
+                let (selection, stop_synchronizers) = handle_sync_status(&s.editor, sync_status_res, FILENAME, synchronizer_name).await;
                 s.user_selection = selection;
+                if stop_synchronizers {
+                    let _ = s.nc_synchronizer.stop();
+                    let _ = s.dbx_synchronizer.stop();
+                }
             },
             LoopResult::Timeout => {
                 warn!("Idle time of {} seconds elapsed! Locking...", s.props.idle_timeout_seconds());
@@ -894,8 +907,12 @@ Warning: Saving will discard all the entries that could not be recovered.
                 s.user_selection = UserSelection::GoTo(Menu::TryPass(false))
             }
             LoopResult::Ignore(synchronizer_name) => {
-                let selection = handle_sync_status(&s.editor, Ok(SyncStatus::None), FILENAME, synchronizer_name).await;
+                let (selection, stop_synchronizers) = handle_sync_status(&s.editor, Ok(SyncStatus::None), FILENAME, synchronizer_name).await;
                 s.user_selection = selection;
+                if stop_synchronizers {
+                    let _ = s.nc_synchronizer.stop();
+                    let _ = s.dbx_synchronizer.stop();
+                }
             },
         }
 
@@ -911,17 +928,17 @@ enum LoopResult {
     Ignore(&'static str),
 }
 
-async fn handle_sync_status(editor: &Box<dyn AsyncEditor>, sync_status_res: errors::Result<SyncStatus>, filename: &str, synchronizer_name: &str) -> UserSelection {
+async fn handle_sync_status(editor: &Box<dyn AsyncEditor>, sync_status_res: errors::Result<SyncStatus>, filename: &str, synchronizer_name: &str) -> (UserSelection, bool) {
     if sync_status_res.is_err() {
         error!("Error during {synchronizer_name} sync: {:?}", sync_status_res);
         let _ = editor.show_message(&format!("Synchronization error occured. Please see the logs for more details."), vec![UserOption::ok()], MessageSeverity::Error).await;
-        UserSelection::GoTo(Menu::Current)
+        (UserSelection::GoTo(Menu::Current), true)
     } else {
         match sync_status_res.unwrap() {
             SyncStatus::UploadSuccess(who) => {
                 debug!("The {} server was updated with the local data", who);
                 let _ = editor.show_message(&format!("The {} server was updated with the local data", who), vec![UserOption::ok()], MessageSeverity::Info).await;
-                UserSelection::GoTo(Menu::Save(true))
+                (UserSelection::GoTo(Menu::Save(true)), false)
             }
             SyncStatus::NewAvailable(who, downloaded_filename) => {
                 debug!("Downloaded new data from the {} server.", who);
@@ -933,9 +950,9 @@ async fn handle_sync_status(editor: &Box<dyn AsyncEditor>, sync_status_res: erro
                 if selection == UserSelection::UserOption(UserOption::yes()) {
                     debug!("Replacing the local file with the one downloaded from the server");
                     let _ = file_handler::replace(&downloaded_filename, filename);
-                    UserSelection::GoTo(Menu::TryPass(true))
+                    (UserSelection::GoTo(Menu::TryPass(true)), true)
                 } else {
-                    UserSelection::GoTo(Menu::Current)
+                    (UserSelection::GoTo(Menu::Current), true)
                 }
             }
             SyncStatus::NewToMerge(who, downloaded_filename) => {
@@ -953,7 +970,7 @@ async fn handle_sync_status(editor: &Box<dyn AsyncEditor>, sync_status_res: erro
 
                     match editor.show_password_enter().await {
                         UserSelection::ProvidedPassword(pwd, salt_pos) => {
-                            UserSelection::ImportFromDefaultLocation(downloaded_filename, pwd, salt_pos)
+                            (UserSelection::ImportFromDefaultLocation(downloaded_filename, pwd, salt_pos), true)
                         }
                         other => {
                             let message = format!("Expected a ProvidedPassword but received '{:?}'. Please, consider opening a bug to the \
@@ -965,82 +982,20 @@ async fn handle_sync_status(editor: &Box<dyn AsyncEditor>, sync_status_res: erro
                                                 consider opening a bug to the developers.",
                                                 vec![UserOption::ok()],
                                                 MessageSeverity::Error).await;
-                            UserSelection::GoTo(Menu::TryPass(false))
+                            (UserSelection::GoTo(Menu::TryPass(false)), true)
                         }
                     }
                 } else {
-                    UserSelection::GoTo(Menu::Current)
+                    (UserSelection::GoTo(Menu::Current), true)
                 }
             }
             SyncStatus::None => {
                 let _ = editor.show_message(&format!("{synchronizer_name} synchronization got into unexpected Status. This should never happen theoretically. Please consider opening a bug to the developers."), vec![UserOption::ok()], MessageSeverity::Error).await;
-                UserSelection::GoTo(Menu::Current)
+                (UserSelection::GoTo(Menu::Current), true)
             }
         }
     }
 }
-
-// fn handle_sync_status_success(&self, sync_status: SyncStatus, filename: &str) -> Option<UserSelection> {
-//     match sync_status {
-//         SyncStatus::UploadSuccess(who) => {
-//             debug!("The {} server was updated with the local data", who);
-//             let _ = self.show_message(&format!("The {} server was updated with the local data", who), vec![UserOption::ok()], MessageSeverity::Info);
-//             Some(UserSelection::GoTo(Menu::Save(true)))
-//         }
-//         SyncStatus::NewAvailable(who, downloaded_filename) => {
-//             debug!("Downloaded new data from the {} server.", who);
-//             let selection = self.show_message(&format!("Downloaded new data from the {} server. Do you want to apply them locally now?", who),
-//                                               vec![UserOption::yes(), UserOption::no()],
-//                                               MessageSeverity::Info);
-
-//             debug!("The user selected {:?} as an answer for applying the downloaded data locally", &selection);
-//             if selection == UserSelection::UserOption(UserOption::yes()) {
-//                 debug!("Replacing the local file with the one downloaded from the server");
-//                 let _ = super::file_handler::replace(&downloaded_filename, filename);
-//                 Some(UserSelection::GoTo(Menu::TryPass(true)))
-//             } else {
-//                 Some(UserSelection::GoTo(Menu::Current))
-//             }
-//         }
-//         SyncStatus::NewToMerge(who, downloaded_filename) => {
-//             debug!("Downloaded data from the {} server, but conflicts were identified. The contents will be merged.", who);
-//             let selection =
-//                 self.show_message(&format!("Downloaded data from the {} server, but conflicts were identified. The contents will be merged \
-//                                but nothing will be saved. You will need to explicitly save after reviewing the merged data. Do you \
-//                                want to do the merge now?", who),
-//                                   vec![UserOption::yes(), UserOption::no()],
-//                                   MessageSeverity::Info);
-
-//             if selection == UserSelection::UserOption(UserOption::yes()) {
-//                 debug!("The user selected {:?} as an answer for applying the downloaded data locally", &selection);
-//                 debug!("Merging the local data with the downloaded from the server");
-
-//                 match self.show_password_enter() {
-//                     UserSelection::ProvidedPassword(pwd, salt_pos) => {
-//                         Some(UserSelection::ImportFromDefaultLocation(downloaded_filename, pwd, salt_pos))
-//                     }
-//                     other => {
-//                         let message = format!("Expected a ProvidedPassword but received '{:?}'. Please, consider opening a bug to the \
-//                                            developers.",
-//                                               &other);
-//                         error!("{}", message);
-//                         let _ =
-//                             self.show_message("Unexpected result when waiting for password. See the logs for more details. Please \
-//                                              consider opening a bug to the developers.",
-//                                               vec![UserOption::ok()],
-//                                               MessageSeverity::Error);
-//                         Some(UserSelection::GoTo(Menu::TryPass(false)))
-//                     }
-//                 }
-//             } else {
-//                 Some(UserSelection::GoTo(Menu::Current))
-//             }
-//         }
-//         SyncStatus::None => {
-//             None
-//         }
-//     }
-// }
 
 async fn handle_check_passwords<T>(
     safe: &mut Safe,

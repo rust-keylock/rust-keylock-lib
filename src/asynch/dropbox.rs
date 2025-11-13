@@ -16,7 +16,7 @@
 
 use std::io::Read;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::{LazyLock, mpsc};
+use std::sync::{mpsc, LazyLock};
 use std::sync::{Arc, Mutex};
 use std::time::{self, Duration};
 
@@ -24,8 +24,8 @@ use async_trait::async_trait;
 use http::{StatusCode, Uri};
 use http_body_util::BodyExt;
 use reqwest::Body;
-use tokio::time::sleep;
 use std::convert::Infallible;
+use tokio::time::sleep;
 
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
@@ -73,7 +73,7 @@ const HTTP_GET_RESPONSE_BODY: &str = r#"
 </html>
 "#;
 
-static STOP_SYNCHRONIZATION: LazyLock<Mutex<bool>> = LazyLock::new(|| { Mutex::new(false) });
+static STOP_SYNCHRONIZATION: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
 
 /// A Dropbox synchronizer
 #[derive(Clone)]
@@ -286,12 +286,25 @@ impl Synchronizer {
         debug!("DBX: Uploaded all");
         Ok(())
     }
+
+    fn mark_stop_synchronization() -> errors::Result<()> {
+        let mut s = STOP_SYNCHRONIZATION.lock()?;
+        *s = true;
+        Ok(())
+    }
+
+    fn mark_start_synchronization() -> errors::Result<()> {
+        let mut s = STOP_SYNCHRONIZATION.lock()?;
+        *s = false;
+        Ok(())
+    }
 }
 
 #[async_trait]
 impl super::AsyncTask for Synchronizer {
-    async fn init(&mut self) {
+    async fn init(&mut self) -> errors::Result<()> {
         if self.conf.is_filled() {
+            Self::mark_start_synchronization()?;
             match self.get_short_lived_token().await {
                 Ok(short_lived_token) => {
                     if let Err(error) = self.conf.set_short_lived_token(short_lived_token) {
@@ -303,6 +316,7 @@ impl super::AsyncTask for Synchronizer {
                 }
             }
         }
+        Ok(())
     }
 
     async fn execute(&self) -> errors::Result<SyncStatus> {
@@ -317,15 +331,10 @@ impl super::AsyncTask for Synchronizer {
                 }
                 sleep(Duration::from_millis(10000)).await;
                 match self.do_execute().await {
-                    Ok(SyncStatus::None) => {
-
-                    },
-                    Ok(sync_status) => {
-                        return Ok(sync_status)
-                    }
+                    Ok(SyncStatus::None) => {}
+                    Ok(sync_status) => return Ok(sync_status),
                     Err(error) => {
-                        let mut stop_sync = STOP_SYNCHRONIZATION.lock()?;
-                        *stop_sync = true;
+                        Self::mark_stop_synchronization()?;
                         return Err(error);
                     }
                 }
@@ -333,6 +342,10 @@ impl super::AsyncTask for Synchronizer {
         } else {
             return Ok(SyncStatus::None);
         }
+    }
+
+    fn stop(&mut self) -> errors::Result<()> {
+        return Self::mark_stop_synchronization()
     }
 }
 
@@ -460,7 +473,10 @@ pub(crate) async fn retrieve_token(url_string: String) -> errors::Result<Zeroizi
     let listener = TcpListener::bind(addr)
         .await
         .expect("Cannot bind TcpListener to retrive the dropbox token");
-    debug!("Server started. Serving connections at {}", addr.to_string());
+    debug!(
+        "Server started. Serving connections at {}",
+        addr.to_string()
+    );
 
     // Spawn the server loop
     let handle = tokio::task::spawn(async move {
@@ -499,8 +515,7 @@ pub(crate) async fn retrieve_token(url_string: String) -> errors::Result<Zeroizi
                             .unwrap()
                     } else {
                         let tx = shared_tx.lock().unwrap();
-                        let _ =
-                            tx.send(Err(RustKeylockError::GeneralError("error".to_string())));
+                        let _ = tx.send(Err(RustKeylockError::GeneralError("error".to_string())));
                         resp_builder
                             .status(StatusCode::BAD_REQUEST)
                             .body(reqwest::Body::from(Vec::new()))
@@ -532,7 +547,6 @@ pub(crate) async fn retrieve_token(url_string: String) -> errors::Result<Zeroizi
                     )
                 }
             });
-            
         }
     });
 

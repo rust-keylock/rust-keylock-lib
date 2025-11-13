@@ -34,9 +34,11 @@ pub(crate) type BoxedRklHttpAsyncClient = Box<dyn RklHttpAsyncClient<ResType=Vec
 #[async_trait]
 pub trait AsyncTask: Send {
     /// Initializes a task
-    async fn init(&mut self);
+    async fn init(&mut self) -> errors::Result<()>;
     /// Executes the task
     async fn execute(&self) -> errors::Result<SyncStatus>;
+    /// Stops a task
+    fn stop(&mut self) -> errors::Result<()>;
 }
 
 #[derive(PartialEq, Debug)]

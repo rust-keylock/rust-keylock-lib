@@ -16,11 +16,11 @@
 
 use async_trait::async_trait;
 use reqwest::{Body, Client, Request, Response};
-use tokio::time::sleep;
 use std::io::prelude::*;
-use std::time::Duration;
-use url::Url;
 use std::sync::{LazyLock, Mutex};
+use std::time::Duration;
+use tokio::time::sleep;
+use url::Url;
 
 use http::{Method, StatusCode};
 use log::*;
@@ -35,7 +35,7 @@ use crate::errors::RustKeylockError;
 use crate::SystemConfiguration;
 use crate::{errors, file_handler};
 
-static STOP_SYNCHRONIZATION: LazyLock<Mutex<bool>> = LazyLock::new(|| { Mutex::new(false) });
+static STOP_SYNCHRONIZATION: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
 
 /// A (Next/Own)cloud synchronizer
 #[derive(Clone)]
@@ -90,7 +90,7 @@ impl Synchronizer {
         let s = STOP_SYNCHRONIZATION.lock()?;
         Ok(*s)
     }
-    
+
     fn stop_synchronization(&self) -> errors::Result<()> {
         if !self.never_stop_synchronization {
             let mut stop_sync = STOP_SYNCHRONIZATION.lock()?;
@@ -532,11 +532,26 @@ impl Synchronizer {
 
         res
     }
+
+    fn mark_stop_synchronization() -> errors::Result<()> {
+        let mut s = STOP_SYNCHRONIZATION.lock()?;
+        *s = true;
+        Ok(())
+    }
+
+    fn mark_start_synchronization() -> errors::Result<()> {
+        let mut s = STOP_SYNCHRONIZATION.lock()?;
+        *s = false;
+        Ok(())
+    }
 }
 
 #[async_trait]
 impl super::AsyncTask for Synchronizer {
-    async fn init(&mut self) {}
+    async fn init(&mut self) -> errors::Result<()> {
+        Self::mark_start_synchronization()?;
+        Ok(())
+    }
 
     async fn execute(&self) -> errors::Result<SyncStatus> {
         if self.conf.is_filled() {
@@ -571,6 +586,10 @@ impl super::AsyncTask for Synchronizer {
         } else {
             return Ok(SyncStatus::None);
         }
+    }
+
+    fn stop(&mut self) -> errors::Result<()> {
+        return Self::mark_stop_synchronization();
     }
 }
 
@@ -794,7 +813,8 @@ mod nextcloud_tests {
     use super::super::super::{errors, file_handler, SystemConfiguration};
     use super::super::AsyncTask;
 
-    static TXMAP: LazyLock<Mutex<HashMap<String, SyncSender<bool>>>> = LazyLock::new(|| { Mutex::new(HashMap::new()) });
+    static TXMAP: LazyLock<Mutex<HashMap<String, SyncSender<bool>>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
 
     fn get_tx_for(command: &str) -> SyncSender<bool> {
         let map = TXMAP.lock().unwrap();
@@ -817,8 +837,8 @@ mod nextcloud_tests {
             false,
         )
         .unwrap();
-        let nc =
-            super::Synchronizer::new2(&ncc, &SystemConfiguration::default(), "filename", true).unwrap();
+        let nc = super::Synchronizer::new2(&ncc, &SystemConfiguration::default(), "filename", true)
+            .unwrap();
 
         assert!(nc.conf.decrypted_password().unwrap().as_str() == password)
     }
@@ -980,7 +1000,8 @@ mod nextcloud_tests {
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let nc =
-                super::Synchronizer::new2(&ncc, &SystemConfiguration::default(), filename, true).unwrap();
+                super::Synchronizer::new2(&ncc, &SystemConfiguration::default(), filename, true)
+                    .unwrap();
             let res = rt.block_on(nc.execute());
             let _ = tx.send(res);
         });
@@ -1036,7 +1057,8 @@ mod nextcloud_tests {
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let nc =
-                super::Synchronizer::new2(&ncc, &SystemConfiguration::default(), filename, true).unwrap();
+                super::Synchronizer::new2(&ncc, &SystemConfiguration::default(), filename, true)
+                    .unwrap();
             let res = rt.block_on(nc.execute());
             let _ = tx.send(res);
         });
@@ -1185,7 +1207,8 @@ mod nextcloud_tests {
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let nc =
-                super::Synchronizer::new2(&ncc, &SystemConfiguration::default(), filename, true).unwrap();
+                super::Synchronizer::new2(&ncc, &SystemConfiguration::default(), filename, true)
+                    .unwrap();
             let res = rt.block_on(nc.execute());
             let _ = tx.send(res);
         });
@@ -1226,7 +1249,8 @@ mod nextcloud_tests {
         thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let nc =
-                super::Synchronizer::new2(&ncc, &SystemConfiguration::default(), filename, true).unwrap();
+                super::Synchronizer::new2(&ncc, &SystemConfiguration::default(), filename, true)
+                    .unwrap();
             let res = rt.block_on(nc.execute());
             let _ = tx.send(res);
         });
