@@ -540,8 +540,8 @@ pub enum Menu {
     ChangePass,
     /// The User should be presented with the main menu.
     Main,
-    /// The User should be presented with a list of all the saved password `Entries`, filtered by the string provided as argument
-    EntriesList(String),
+    /// The User should be presented with a list of all the saved password `Entries`, optiolally filtered by the string provided as argument.
+    EntriesList(Option<String>),
     /// The User should create a new `Entry`. The optional Entry argument is an initial entry from which the User could start.
     /// It may contain a system-generated passphrase etc.
     NewEntry(Option<Entry>),

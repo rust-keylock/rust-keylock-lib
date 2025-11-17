@@ -273,12 +273,22 @@ impl CoreLogicHandler {
                         .unwrap();
                     Box::pin(future::ready(UserSelection::GoTo(Menu::Main)))
             }
-            UserSelection::GoTo(Menu::EntriesList(filter)) => {
-                debug!(
-                    "UserSelection::GoTo(Menu::EntriesList) with filter '{}'",
-                    &filter
-                );
-                s.safe.set_filter(filter.clone());
+            UserSelection::GoTo(Menu::EntriesList(filter_opt)) => {
+                match filter_opt {
+                    Some(filter) => {
+                        debug!(
+                            "UserSelection::GoTo(Menu::EntriesList) with filter '{}'",
+                            &filter
+                        );
+                        s.safe.set_filter(filter.clone());
+                    },
+                    None => {
+                        debug!(
+                            "UserSelection::GoTo(Menu::EntriesList) with existing filter '{}'",
+                            &s.safe.get_filter()
+                        );
+                    }
+                }
                 s.editor.show_entries(s.safe.get_entries().to_vec(), s.safe.get_filter())
             }
             UserSelection::GoTo(Menu::NewEntry(opt)) => {
@@ -442,7 +452,7 @@ impl CoreLogicHandler {
                 if let Some(entry) = entry_to_replace_opt {
                     s.safe.add_entry(entry);
                     s.contents_changed = true;
-                    Box::pin(future::ready(UserSelection::GoTo(Menu::EntriesList("".to_string()))))
+                    Box::pin(future::ready(UserSelection::GoTo(Menu::EntriesList(Some("".to_string())))))
                 } else {
                     Box::pin(future::ready(UserSelection::GoTo(Menu::Current)))
                 }
@@ -495,7 +505,7 @@ impl CoreLogicHandler {
                             let _ = s.editor.show_message("Could not replace the password entry. Please see the logs for more details.", vec![UserOption::ok()], MessageSeverity::Error).await;
                         }
                     }
-                    Box::pin(future::ready(UserSelection::GoTo(Menu::EntriesList(s.safe.get_filter()))))
+                    Box::pin(future::ready(UserSelection::GoTo(Menu::EntriesList(None))))
                 } else {
                     Box::pin(future::ready(UserSelection::GoTo(Menu::Current)))
                 }
@@ -511,7 +521,7 @@ impl CoreLogicHandler {
                     );
                 });
                 s.contents_changed = true;
-                Box::pin(future::ready(UserSelection::GoTo(Menu::EntriesList("".to_string()))))
+                Box::pin(future::ready(UserSelection::GoTo(Menu::EntriesList(None))))
             }
             UserSelection::GoTo(Menu::TryFileRecovery) => {
                 debug!("UserSelection::GoTo(Menu::TryFileRecovery)");
@@ -552,7 +562,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                 };
                 s.safe.entries.append(&mut rec_entries);
 
-                Box::pin(future::ready(UserSelection::GoTo(Menu::EntriesList("".to_string()))))
+                Box::pin(future::ready(UserSelection::GoTo(Menu::EntriesList(Some("".to_string())))))
             }
             UserSelection::GoTo(Menu::ExportEntries) => {
                 debug!("UserSelection::GoTo(Menu::ExportEntries)");
@@ -823,7 +833,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                         let _ = s
                             .editor
                             .show_message(&mr.message, mr.user_options, mr.severity).await;
-                        Box::pin(future::ready(UserSelection::GoTo(Menu::EntriesList("".to_string()))))
+                        Box::pin(future::ready(UserSelection::GoTo(Menu::EntriesList(Some("".to_string())))))
                     }
                     Err(error) => {
                         let _ = s.editor.show_message(
@@ -831,7 +841,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                             vec![UserOption::ok()],
                             MessageSeverity::Error,
                         ).await;
-                        Box::pin(future::ready(UserSelection::GoTo(Menu::EntriesList("".to_string()))))
+                        Box::pin(future::ready(UserSelection::GoTo(Menu::EntriesList(Some("".to_string())))))
                     }
                 }
             }
@@ -1086,7 +1096,7 @@ async fn handle_provided_password_for_init(
             let retrieved_entries = match file_handler::load(filename, &cr, true) {
                 // Success, go to the List of entries
                 Ok(rkl_content) => {
-                    user_selection = UserSelection::GoTo(Menu::EntriesList("".to_string()));
+                    user_selection = UserSelection::GoTo(Menu::EntriesList(Some("".to_string())));
                     // Set the retrieved configuration
                     let new_rkl_conf = RklConfiguration::from((
                         rkl_content.nextcloud_conf,
