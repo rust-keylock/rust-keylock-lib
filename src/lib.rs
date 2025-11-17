@@ -803,8 +803,9 @@ Warning: Saving will discard all the entries that could not be recovered.
             }
             UserSelection::GeneratePassphrase(index_opt, mut entry) => {
                 debug!("UserSelection::GoTo(Menu::GeneratePassphrase)");
-                entry.pass = rs_password_utils::dice::generate(
+                entry.pass = rs_password_utils::dice::generate_with_separator(
                     s.props.generated_passphrases_words_count() as usize,
+                    "_"
                 );
                 match index_opt {
                     Some(index) => s
