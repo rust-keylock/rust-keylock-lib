@@ -34,11 +34,11 @@ async fn execution_cases() {
     execute_change_pass().await;
     execute_export_entries().await;
     execute_import_entries().await;
-    execute_update_configuration().await;
     execute_add_to_clipboard().await;
     execute_file_recovery().await;
     execute_check_passwords().await;
     execute_login_fail_and_then_sucess().await;
+    execute_update_configuration().await;
 }
 
 async fn execute_login_success() {
@@ -395,19 +395,10 @@ async fn execute_update_configuration() {
     println!("===========execute_update_configuration");
     let (tx, rx) = mpsc::channel();
 
-    let nc_conf = NextcloudConfiguration::new(
-        "u".to_string(),
-        "un".to_string(),
-        "pw".to_string(),
-        false).unwrap();
-
+    let nc_conf = NextcloudConfiguration::default();
     let dbx_conf = DropboxConfiguration::default();
-
     let gen_conf = GeneralConfiguration::default();
-
     let new_conf = AllConfigurations::new(nc_conf, dbx_conf.clone(), gen_conf.clone());
-
-    let default_conf = AllConfigurations::new(NextcloudConfiguration::default(), dbx_conf, gen_conf);
 
     let editor = Box::new(TestEditor::new(vec![
         // Login
@@ -415,12 +406,6 @@ async fn execute_update_configuration() {
         // Update the configuration
         UserSelection::GoTo(Menu::ShowConfiguration),
         UserSelection::UpdateConfiguration(new_conf),
-        // Save
-        UserSelection::GoTo(Menu::Save(false)),
-        // Ack saved message
-        UserSelection::UserOption(UserOption::ok()),
-        // Reset to defaults
-        UserSelection::UpdateConfiguration(default_conf),
         // Save
         UserSelection::GoTo(Menu::Save(false)),
         // Ack saved message

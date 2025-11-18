@@ -18,9 +18,6 @@
 use std::cmp::PartialEq;
 use std::fmt::Debug;
 use std::iter::repeat;
-use std::thread;
-use std::thread::JoinHandle;
-
 use aes::Aes256;
 use base64::{Engine as _, engine::general_purpose};
 use bcrypt::bcrypt;
@@ -34,9 +31,7 @@ use zeroize::Zeroize;
 use super::errors::{self, RustKeylockError};
 use super::protected::RklSecret;
 
-const NUMBER_OF_SALT_KEY_PAIRS: usize = 10;
 type AesCtr = ctr::Ctr64BE<Aes256>;
-pub(crate) const BCRYPT_COST: u32 = 7;
 
 pub trait Cryptor {
     /// Decrypts a given array of bytes
@@ -58,11 +53,8 @@ pub struct BcryptAes {
     iv: Vec<u8>,
     /// The position of the salt inside the file
     salt_position: usize,
-    /// A list of pairs of salt - bcrypt key.
-    ///
-    /// Each encryption process includes the creation of a new pseudo-random iv and the usage of one of the provided salt-key pairs.
-    /// With these, the data is encrypted and the encrypted bytes are returned.
-    salt_key_pairs: Vec<(Vec<u8>, RklSecret)>,
+    /// The salt
+    salt: Vec<u8>,
     /// A Hasher to be used to guarantee data integrity
     hasher: Sha3Keccak512,
     /// The hash that is retrieved by parsing the passwords file, during the application startup.
@@ -95,53 +87,31 @@ impl BcryptAes {
     /// * The position of the salt
     /// * hash for Sha3Keccak512 hashing
     pub fn new(mut password: String,
-               mut salt: Vec<u8>,
+               salt: Vec<u8>,
                iv: Vec<u8>,
                mut salt_position: usize,
-               hash_bytes: Vec<u8>, )
-               -> BcryptAes {
-        let mut salt_key_pairs = Vec::new();
-        let handles: Vec<JoinHandle<(Vec<u8>, RklSecret)>> = (0..NUMBER_OF_SALT_KEY_PAIRS + 1)
-            .map(|i| {
-                let cp = password.clone();
-                let cs = salt.clone();
-                let child = thread::spawn(move || {
-                    if i == 0 {
-                        // Create bcrypt password for the current encrypted data
-                        // Ask for 64 bytes bcrypt key. Use 32 bytes for data encryption and 32 bytes for hash encryption.
-                        let key = BcryptAes::create_key(cp.as_bytes(), &cs, BCRYPT_COST, 64);
-                        (cs, RklSecret::new(key))
-                    } else {
-                        // Create some new salt-key pairs to use them for encryption
-                        // Ask for 64 bytes bcrypt key. Use 32 bytes for data encryption and 32 bytes for hash encryption.
-                        let s = create_random(16);
-                        let k = BcryptAes::create_key(cp.as_bytes(), &s, BCRYPT_COST, 64);
-                        (s, RklSecret::new(k))
-                    }
-                });
-                child
-            })
-            .collect();
-        for handle in handles {
-            salt_key_pairs.push(handle.join().unwrap());
-        }
+               hash_bytes: Vec<u8>,
+               bcrypt_cost: u32,
+            ) -> BcryptAes {
 
         // Create the SHA3 hasher
         let hasher = Sha3Keccak512::new();
 
+        // Create bcrypt password for the current encrypted data
+        // Ask for 64 bytes bcrypt key. Use 32 bytes for data encryption and 32 bytes for hash encryption.
+        let key = BcryptAes::create_key(password.as_bytes(), &salt, bcrypt_cost, 64);
 
         let to_ret = BcryptAes {
-            key: salt_key_pairs.remove(0).1.clone(),
+            key: RklSecret::new(key),
             iv,
             salt_position,
-            salt_key_pairs,
+            salt,
             hasher,
             hash: RklSecret::new(hash_bytes),
         };
 
         // Zeroize what's not moved
         password.zeroize();
-        salt.zeroize();
         salt_position.zeroize();
 
         to_ret
@@ -172,19 +142,7 @@ impl Cryptor for BcryptAes {
     fn decrypt(&self, input: &[u8]) -> Result<Vec<u8>, RustKeylockError> {
         let bytes_to_decrypt = extract_bytes_to_decrypt(input, self.salt_position);
 
-        // The key should be 64 bytes long (including 2 32-byte keys). If it is bigger than that, there is the legacy key in the start.
-        let legacy_handling = self.key.borrow().len() > 64;
-
-        let (final_result, integrity_check_ok) = if legacy_handling {
-            let key: Vec<u8> = self.key.borrow().iter()
-                .take(32)
-                .cloned()
-                .collect();
-            let integrity_check_ok = self.hasher.validate_hash(&bytes_to_decrypt, self.hash.borrow());
-            let final_result = self.decrypt_bytes(&bytes_to_decrypt, &key)?;
-
-            (final_result, integrity_check_ok)
-        } else {
+        let (final_result, integrity_check_ok) = {
             // The first 32 bytes of the key is for hash decryption.
             let hash_decryption_key: Vec<u8> = self.key.borrow().iter()
                 .take(32)
@@ -216,20 +174,14 @@ impl Cryptor for BcryptAes {
     fn encrypt(&self, input: &[u8]) -> Result<Vec<u8>, RustKeylockError> {
         // Create a new iv
         let iv = create_random(16);
-        let mut rng = thread_rng();
-        // Choose randomly one of the salt-key pairs
-        let idx = {
-            rng.gen_range(0.. NUMBER_OF_SALT_KEY_PAIRS)
-        };
-        let salt_key_pair = &self.salt_key_pairs[idx];
 
         // The first 32 bytes is the key for hash encryption.
-        let hash_encryption_key: Vec<u8> = salt_key_pair.1.borrow().iter()
+        let hash_encryption_key: Vec<u8> = self.key.borrow().iter()
             .take(32)
             .cloned()
             .collect();
         // The second 32 bytes is the key for data encryption.
-        let data_encryption_key: Vec<u8> = salt_key_pair.1.borrow().iter()
+        let data_encryption_key: Vec<u8> = self.key.borrow().iter()
             .skip(32)
             .take(32)
             .cloned()
@@ -242,7 +194,7 @@ impl Cryptor for BcryptAes {
         let encrypted_hash_bytes = self.encrypt_bytes(&hash_bytes, &hash_encryption_key, &iv)?;
 
         // Compose the encrypted bytes with the iv and salt
-        Ok(compose_bytes_to_save(&encrypted_data_bytes, self.salt_position, &salt_key_pair.0, &iv, &encrypted_hash_bytes))
+        Ok(compose_bytes_to_save(&encrypted_data_bytes, self.salt_position, &self.salt, &iv, &encrypted_hash_bytes))
     }
 }
 
@@ -480,6 +432,7 @@ fn compose_bytes_to_save(data: &[u8], salt_position: usize, salt: &[u8], iv: &[u
 #[cfg(test)]
 mod test_crypt {
     use super::{Cryptor, Hasher};
+    const BCRYPT_COST: u32 = 1;
 
     #[test]
     fn create_random() {
@@ -916,25 +869,12 @@ mod test_crypt {
         bytes.append(&mut tmp);
 
         // Create the cryptor
-        let cryptor = super::BcryptAes::new("password".to_string(), salt, iv, 1, hash);
+        let cryptor = super::BcryptAes::new("password".to_string(), salt, iv, 1, hash, BCRYPT_COST);
         let result = cryptor.decrypt(&bytes);
         assert!(result.is_err());
         match result.err() {
             Some(super::super::errors::RustKeylockError::DecryptionError(_)) => assert!(true),
             _ => assert!(false),
-        }
-    }
-
-    #[test]
-    fn new_bcryptor_checks() {
-        let iv = super::create_random(16);
-        let salt = super::create_random(16);
-        let hash = super::create_random(64);
-        let cryptor = super::BcryptAes::new("password".to_string(), salt.clone(), iv, 1, hash);
-        assert!(cryptor.salt_key_pairs.len() == super::NUMBER_OF_SALT_KEY_PAIRS);
-        for skp in cryptor.salt_key_pairs {
-            assert!(&skp.0 != &salt);
-            assert!(&skp.1 != &cryptor.key);
         }
     }
 

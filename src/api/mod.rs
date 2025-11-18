@@ -467,6 +467,8 @@ pub struct Props {
     idle_timeout_seconds: isize,
     /// The count of the words that comprise the generated passphraases
     generated_passphrases_words_count: isize,
+    /// The current version
+    version: String,
 }
 
 impl Default for Props {
@@ -474,6 +476,7 @@ impl Default for Props {
         Props {
             idle_timeout_seconds: 1800,
             generated_passphrases_words_count: 5,
+            version: "".to_string(),
         }
     }
 }
@@ -482,10 +485,13 @@ impl Props {
     pub(crate) fn new(
         idle_timeout_seconds: isize,
         generated_passphrases_words_count: isize,
+        version: &str,
     ) -> Props {
+        let version = version.to_string();
         Props {
             idle_timeout_seconds,
             generated_passphrases_words_count,
+            version,
         }
     }
 
@@ -498,10 +504,15 @@ impl Props {
             .get("generated_passphrases_words_count")
             .and_then(|value| value.as_integer().and_then(|v| Some(v as isize)))
             .unwrap_or_else(|| Props::default().generated_passphrases_words_count());
+        let version = table
+            .get("version")
+            .and_then(|value| value.as_str().and_then(|v| Some(v.to_string())))
+            .unwrap_or_else(|| Props::default().version().to_string());
 
         Ok(Self::new(
             idle_timeout_seconds,
             generated_passphrases_words_count,
+            &version,
         ))
     }
 
@@ -516,6 +527,10 @@ impl Props {
             "generated_passphrases_words_count".to_string(),
             toml::Value::Integer(self.generated_passphrases_words_count as i64),
         );
+        table.insert(
+            "version".to_string(),
+            toml::Value::String(self.version().to_string()),
+        );
 
         table
     }
@@ -527,6 +542,25 @@ impl Props {
     pub fn generated_passphrases_words_count(&self) -> isize {
         self.generated_passphrases_words_count
     }
+
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
+    #[allow(dead_code)]
+    pub fn set_idle_timeout_seconds(&mut self, new_timeout: isize) {
+        self.idle_timeout_seconds = new_timeout
+    }
+
+    #[allow(dead_code)]
+    pub fn set_generated_passphrases_words_count(&mut self, new_generated_passphrases_words_count: isize) {
+        self.generated_passphrases_words_count = new_generated_passphrases_words_count;
+    }
+
+    pub fn set_version(&mut self, new_version: &str) {
+        self.version = new_version.to_string();
+    }
+
 }
 
 /// Enumeration of the several different Menus that an `Editor` implementation should handle.
@@ -1064,6 +1098,7 @@ mod api_unit_tests {
         let toml = r#"
         idle_timeout_seconds = 33
         generated_passphrases_words_count = 5
+        version = "0.0.0"
         "#;
 
         let value = toml.parse::<toml::value::Value>().unwrap();
@@ -1073,6 +1108,7 @@ mod api_unit_tests {
         let props = props_opt.unwrap();
         assert!(props.idle_timeout_seconds() == 33);
         assert!(props.generated_passphrases_words_count() == 5);
+        assert!(props.version() == "0.0.0");
     }
 
     #[test]
@@ -1098,6 +1134,18 @@ mod api_unit_tests {
         let props2 = props_opt2.unwrap();
         assert!(props2.idle_timeout_seconds() == 1800);
         assert!(props2.generated_passphrases_words_count() == 5);
+
+        let toml3 = r#"
+        version = "0.0.0"
+        "#;
+        let value3 = toml3.parse::<toml::value::Value>().unwrap();
+        let table3 = value3.as_table().unwrap();
+        let props_opt3 = super::Props::from_table(&table3);
+        assert!(props_opt3.is_ok());
+        let props3 = props_opt3.unwrap();
+        assert!(props3.idle_timeout_seconds() == 1800);
+        assert!(props3.generated_passphrases_words_count() == 5);
+        assert!(props3.version() == "0.0.0");
     }
 
     #[test]
@@ -1125,6 +1173,7 @@ mod api_unit_tests {
         let toml = r#"
         idle_timeout_seconds = 33
         generated_passphrases_words_count = 5
+        version = "0.0.0"
         "#;
 
         let value = toml.parse::<toml::value::Value>().unwrap();
@@ -1134,6 +1183,29 @@ mod api_unit_tests {
         let props = props_opt.unwrap();
         let new_table = props.to_table();
         assert!(table == &new_table);
+    }
+
+    #[test]
+    fn props_mutate() {
+        let toml = r#"
+        idle_timeout_seconds = 3
+        generated_passphrases_words_count = 3
+        version = "0.0.0"
+        "#;
+
+        let value = toml.parse::<toml::value::Value>().unwrap();
+        let table = value.as_table().unwrap();
+        let props_opt = super::Props::from_table(&table);
+        assert!(props_opt.is_ok());
+        let mut props = props_opt.unwrap();
+
+        props.set_idle_timeout_seconds(33);
+        props.set_generated_passphrases_words_count(33);
+        props.set_version("0.0.1");
+
+        assert!(props.idle_timeout_seconds() == 33);
+        assert!(props.generated_passphrases_words_count() == 33);
+        assert!(props.version() == "0.0.1");
     }
 
     #[test]

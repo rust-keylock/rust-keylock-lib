@@ -40,6 +40,7 @@ use zeroize::Zeroize;
 
 pub(crate) fn create_bcryptor(filename: &str,
                               password: String,
+                              bcrypt_cost: u32,
                               mut salt_position: usize,
                               reinitialize_randoms: bool,
                               use_default_location: bool, )
@@ -113,7 +114,7 @@ pub(crate) fn create_bcryptor(filename: &str,
             }
         }
     };
-    let to_ret = Ok(BcryptAes::new(password, salt, iv, salt_position, hash_bytes));
+    let to_ret = Ok(BcryptAes::new(password, salt, iv, salt_position, hash_bytes, bcrypt_cost));
     salt_position.zeroize();
     to_ret
 }
@@ -566,6 +567,8 @@ mod test_file_handler {
     use super::super::datacrypt::NoCryptor;
     use crate::api::{EntryMeta, GeneralConfiguration};
 
+    const BCRYPT_COST: u32 = 1;
+
     #[test]
     fn use_existing_file() {
         let filename = "use_existing_file.toml";
@@ -661,12 +664,12 @@ mod test_file_handler {
 
         let opt = super::load_properties(filename);
         assert!(opt.is_ok());
-        assert!(super::save_props(&Props::new(60, 5), filename).is_ok());
+        assert!(super::save_props(&Props::new(60, 5, "0.3.0"), filename).is_ok());
 
         let new_opt = super::load_properties(filename);
         assert!(new_opt.is_ok());
         let new_props = new_opt.unwrap();
-        assert!(new_props == Props::new(60, 5));
+        assert!(new_props == Props::new(60, 5, "0.3.0"));
         delete_file(filename);
     }
 
@@ -774,9 +777,9 @@ mod test_file_handler {
         let sys_conf = SystemConfiguration::new(Some(0), Some(1), Some(2));
         let gen_conf = GeneralConfiguration::new(Some("aToken".to_string()));
 
-        let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
+        let mut cryptor = super::create_bcryptor(filename, password.clone(), BCRYPT_COST, salt_position, false, true).unwrap();
         assert!(super::save(super::RklContent::new(entries.clone(), nc_conf, dbx_conf, sys_conf, gen_conf), filename, &cryptor, true).is_ok());
-        cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
+        cryptor = super::create_bcryptor(filename, password.clone(), BCRYPT_COST, salt_position, false, true).unwrap();
 
         let m = super::load(filename, &cryptor, true);
         let rkl_content = m.unwrap();
@@ -823,9 +826,9 @@ mod test_file_handler {
         let sys_conf = SystemConfiguration::new(Some(0), Some(1), Some(2));
         let gen_conf = GeneralConfiguration::new(Some("aToken".to_string()));
 
-        let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
+        let mut cryptor = super::create_bcryptor(filename, password.clone(), BCRYPT_COST, salt_position, false, true).unwrap();
         assert!(super::save(super::RklContent::new(entries.clone(), nc_conf, dbx_conf, sys_conf, gen_conf), filename, &cryptor, true).is_ok());
-        cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
+        cryptor = super::create_bcryptor(filename, password.clone(), BCRYPT_COST, salt_position, false, true).unwrap();
         let m = super::load(filename, &cryptor, true);
         let rkl_content = m.unwrap();
         assert!(entries == rkl_content.entries);
@@ -879,7 +882,7 @@ mod test_file_handler {
         let gen_conf_import = GeneralConfiguration::new(Some("browser_extension_token_import".to_string()));
 
         let tmp_cryptor_import =
-            super::create_bcryptor(filename_import, password_import.clone(), salt_position_import, false, false).unwrap();
+            super::create_bcryptor(filename_import, password_import.clone(), BCRYPT_COST, salt_position_import, false, false).unwrap();
         let sys_conf_import = SystemConfiguration::new(Some(0), Some(1), Some(2));
         assert!(super::save(
             super::RklContent::new(entries_import, nc_conf_import, dbx_conf_import, sys_conf_import, gen_conf_import),
@@ -908,7 +911,7 @@ mod test_file_handler {
         let sys_conf = SystemConfiguration::new(Some(2), Some(3), Some(2));
         let gen_conf = GeneralConfiguration::new(Some("anothertoken".to_string()));
 
-        let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
+        let mut cryptor = super::create_bcryptor(filename, password.clone(), BCRYPT_COST, salt_position, false, true).unwrap();
         assert!(super::save(
             super::RklContent::new(entries, nc_conf, dbx_conf, sys_conf, gen_conf),
             filename,
@@ -916,11 +919,11 @@ mod test_file_handler {
             true,
         )
             .is_ok());
-        cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
+        cryptor = super::create_bcryptor(filename, password.clone(), BCRYPT_COST, salt_position, false, true).unwrap();
         assert!(super::load(filename, &cryptor, true).is_ok());
 
         // Import the file by creating a new cryptor
-        let cryptor_import = super::create_bcryptor(filename_import, password_import.clone(), salt_position_import, false, false)
+        let cryptor_import = super::create_bcryptor(filename_import, password_import.clone(), BCRYPT_COST, salt_position_import, false, false)
             .unwrap();
         assert!(super::load(filename_import, &cryptor_import, false).is_ok());
 
@@ -944,10 +947,10 @@ mod test_file_handler {
         let sys_conf = SystemConfiguration::default();
         let gen_conf = GeneralConfiguration::default();
 
-        let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
+        let mut cryptor = super::create_bcryptor(filename, password.clone(), BCRYPT_COST, salt_position, false, true).unwrap();
         assert!(super::save(super::RklContent::new(entries.clone(), nc_conf, dbx_conf, sys_conf, gen_conf), filename, &cryptor, true).is_ok());
 
-        cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
+        cryptor = super::create_bcryptor(filename, password.clone(), BCRYPT_COST, salt_position, false, true).unwrap();
 
         let m = super::load(filename, &cryptor, true);
         let rkl_content = m.unwrap();
@@ -988,10 +991,10 @@ mod test_file_handler {
         let sys_conf = SystemConfiguration::new(Some(0), Some(1), Some(2));
         let gen_conf = GeneralConfiguration::new(Some("anothertoken".to_string()));
 
-        let mut cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
+        let mut cryptor = super::create_bcryptor(filename, password.clone(), BCRYPT_COST, salt_position, false, true).unwrap();
         assert!(super::save(super::RklContent::new(entries.clone(), nc_conf, dbx_conf, sys_conf, gen_conf), filename, &cryptor, true).is_ok());
 
-        cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
+        cryptor = super::create_bcryptor(filename, password.clone(), BCRYPT_COST, salt_position, false, true).unwrap();
 
         let m = super::load(filename, &cryptor, true);
         let rkl_content = m.unwrap();
@@ -1041,7 +1044,7 @@ mod test_file_handler {
         let gen_conf = GeneralConfiguration::default();
 
         // Create a bcryptor
-        let cryptor = super::create_bcryptor(filename, password.clone(), salt_position, false, true).unwrap();
+        let cryptor = super::create_bcryptor(filename, password.clone(), BCRYPT_COST, salt_position, false, true).unwrap();
         // Saving will change the hash, so reading with the same cryptor should result to an integrity error
         assert!(super::save(
             super::RklContent::new(entries, nc_conf, dbx_conf, sys_conf, gen_conf),
