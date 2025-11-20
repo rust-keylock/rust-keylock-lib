@@ -159,7 +159,6 @@ struct CoreLogicHandler {
 impl CoreLogicHandler {
     async fn new(editor: Box<dyn AsyncEditor>, props: Props) -> CoreLogicHandler {
         let mut props = props;
-        let code_version = rkl_version();
         let editor = editor;
         // Holds the UserSelections
         let user_selection;
@@ -185,28 +184,22 @@ impl CoreLogicHandler {
                 editor.show_password_enter().await
             };
 
-            // The bcrypt cost changed in 0.17.0 from 7 to 12
-            let bcrypt_cost = if code_version == props.version() || file_handler::is_first_run(FILENAME) {
-                BCRYPT_COST
-            } else {
-                BCRYPT_COST_PRE_0_17_0
-            };
             // Take the provided password and do the initialization
             let (us, cr) = handle_provided_password_for_init(
                 provided_password,
-                bcrypt_cost,
                 FILENAME,
                 &mut safe,
                 &mut configuration,
                 &editor,
             ).await;
-            // If the password was not correct
+            // If the password was correct
             if us != UserSelection::GoTo(Menu::TryPass(false)) {
+                // Save the version
+                props.set_version(rkl_version());
+                let _ = file_handler::save_props(&props, PROPS_FILENAME);
                 // Set the UserSelection
                 user_selection = us;
                 cryptor = cr;
-                props.set_version(code_version);
-                let _ = file_handler::save_props(&props, PROPS_FILENAME);
                 break;
             }
         };
@@ -260,7 +253,6 @@ impl CoreLogicHandler {
             UserSelection::GoTo(Menu::TryPass(update_last_sync_version)) => {
                 let (user_selection, cr) = handle_provided_password_for_init(
                     s.editor.show_password_enter().await,
-                    BCRYPT_COST,
                     FILENAME,
                     &mut s.safe,
                     &mut s.configuration,
@@ -293,7 +285,7 @@ impl CoreLogicHandler {
             UserSelection::ProvidedPassword(pwd, salt_pos) => {
                 debug!("UserSelection::GoTo(Menu::ProvidedPassword)");
                 s.cryptor =
-                    file_handler::create_bcryptor(FILENAME, pwd.to_string(), BCRYPT_COST, *salt_pos, true, true)
+                    file_handler::create_bcryptor(FILENAME, pwd.to_string(), bcrypt_cost_from_file(), *salt_pos, true, true)
                         .unwrap();
                     Box::pin(future::ready(UserSelection::GoTo(Menu::Main)))
             }
@@ -666,7 +658,7 @@ Warning: Saving will discard all the entries that could not be recovered.
                         let cr = file_handler::create_bcryptor(
                             &path,
                             pwd.to_string(),
-                            BCRYPT_COST,
+                            bcrypt_cost_from_file(),
                             *salt_pos,
                             false,
                             import_from_default_location,
@@ -1103,9 +1095,19 @@ where
     }
 }
 
+fn bcrypt_cost_from_file() -> u32 {
+    let props = file_handler::load_properties(PROPS_FILENAME).unwrap_or_default();
+
+    // The bcrypt cost changed in 0.17.0 from 7 to 12
+    if rkl_version() == props.version() || file_handler::is_first_run(FILENAME) {
+        BCRYPT_COST
+    } else {
+        BCRYPT_COST_PRE_0_17_0
+    }
+}
+
 async fn handle_provided_password_for_init(
     provided_password: UserSelection,
-    bcrypt_cost: u32,
     filename: &str,
     safe: &mut Safe,
     configuration: &mut RklConfiguration,
@@ -1114,8 +1116,10 @@ async fn handle_provided_password_for_init(
     let user_selection: UserSelection;
     match provided_password {
         UserSelection::ProvidedPassword(pwd, salt_pos) => {
-            // New Cryptor here
-            let cr =
+            let bcrypt_cost = bcrypt_cost_from_file();
+            info!("Using bcrypt with cost {bcrypt_cost}");
+            // Create cryptor for decryption
+            let cr: BcryptAes =
                 file_handler::create_bcryptor(filename, pwd.to_string(), bcrypt_cost, *salt_pos, false, true)
                     .unwrap();
             // Try to decrypt and load the Entries
@@ -1169,6 +1173,13 @@ async fn handle_provided_password_for_init(
                 &user_selection,
                 safe.entries.len()
             );
+            // Return cryptor with the correct current bcrypt cost
+            let cr = if bcrypt_cost != BCRYPT_COST {
+                file_handler::create_bcryptor(filename, pwd.to_string(), BCRYPT_COST, *salt_pos, false, true)
+                    .unwrap()
+            } else {
+                cr
+            };
             (user_selection, cr)
         }
         UserSelection::GoTo(Menu::Exit) => {
