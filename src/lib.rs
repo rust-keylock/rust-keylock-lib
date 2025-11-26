@@ -930,6 +930,8 @@ Warning: Saving will discard all the entries that could not be recovered.
             },
             LoopResult::Timeout => {
                 warn!("Idle time of {} seconds elapsed! Locking...", s.props.idle_timeout_seconds());
+                // Remove the sensitive data from the memory
+                s.safe = Safe::default();
                 let message = format!("Idle time of {} seconds elapsed! Locking...", s.props.idle_timeout_seconds());
                 let _ = s.editor.show_message(&message, vec![UserOption::ok()], MessageSeverity::default()).await;
                 s.user_selection = UserSelection::GoTo(Menu::TryPass(false))
