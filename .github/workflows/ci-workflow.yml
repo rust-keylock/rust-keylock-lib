@@ -15,5 +15,4 @@ jobs:
       - name: Build crate
         run: cargo build --verbose
       - name: Test crate
-        run: cargo test --verbose
-        
+        run: cargo test --verbose          

@@ -1,8 +1,7 @@
-[![Build Status](https://app.travis-ci.com/rust-keylock/rust-keylock-lib.svg?branch=master)](https://app.travis-ci.com/rust-keylock/rust-keylock-lib)
+[![rust-keylock CI](https://github.com/rust-keylock/rust-keylock-lib/actions/workflows/ci-workflow.yml/badge.svg)](https://github.com/rust-keylock/rust-keylock-lib/actions/workflows/ci-workflow.yml)
 [![crates.io](https://img.shields.io/crates/v/rust_keylock.svg)](https://crates.io/crates/rust_keylock)
-[![codecov](https://codecov.io/gh/rust-keylock/rust-keylock-lib/branch/master/graph/badge.svg)](https://codecov.io/gh/rust-keylock/rust-keylock-lib)
 
-[![snapcraft](https://img.shields.io/f-droid/v/org.astonbitecode.rustkeylock.svg)](https://f-droid.org/en/packages/org.astonbitecode.rustkeylock/)
+[![f-droid](https://img.shields.io/f-droid/v/org.astonbitecode.rustkeylock.svg)](https://f-droid.org/en/packages/org.astonbitecode.rustkeylock/)
 [![rust-keylock-ui](https://snapcraft.io//rust-keylock-ui/badge.svg)](https://snapcraft.io/rust-keylock-ui)
 
 
@@ -26,11 +25,11 @@ The project has not yet received any formal / official security reviews. Use it 
 
 ### Security
 
- * The data is locked with a user-defined master password, using _bcrypt_ password hashing
- * Encryption using _AES_ with _CTR_ mode
+ * The data is encrypted using a user-defined master password, with _bcrypt_ password hashing
+ * Encryption using _AES 256_ in _CTR_ mode
  * Data integrity checks with SHA3 (Keccak)
  * During runtime, the passwords are kept encrypted in memory
- * During runtime, the encryption keys are stored in safe, non-swappable memory
+ * During runtime, encryption keys are stored in safe, non-swappable memory
  * Upon saving, the encryption keys change, even if the user master password remains the same. This results to different encrypted products, even if the data that is being encrypted is the same.
  * Passphrases generation using [Diceware](https://theworld.com/~reinhold/diceware.html).
  * Passwords health check against [pwned passwords list](https://www.troyhunt.com/ive-just-launched-pwned-passwords-version-2/), leveraging the [k-anonimity API](https://blog.cloudflare.com/validating-leaked-passwords-with-k-anonymity/).
