@@ -1,0 +1,19 @@
+name: rust-keylock CI
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+env:
+  CARGO_TERM_COLOR: always
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout code
+        uses: actions/checkout@v4
+      - name: Build crate
+        run: cargo build --verbose
+      - name: Test crate
+        run: cargo test --verbose
+        
