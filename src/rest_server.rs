@@ -26,6 +26,7 @@ use hyper::service::Service;
 use hyper::{body::Incoming as IncomingBody, Request, Response};
 use hyper_util::rt::TokioIo;
 use log::{debug, info, warn};
+use percent_encoding::percent_decode_str;
 use rand::{thread_rng, Rng};
 use spake2::{Ed25519Group, Identity, Password, Spake2};
 use tokio::net::TcpListener;
@@ -208,8 +209,9 @@ impl Service<Request<IncomingBody>> for RestService {
                                     .into_owned()
                                     .collect::<HashMap<String, String>>();
                                 if let Some(f) = params.get("filter") {
-                                    debug!("Using filter {f}");
-                                    safe.set_filter(f.to_string());
+                                    let filter = percent_decode_str(&f).decode_utf8()?;
+                                    debug!("Using filter {filter}");
+                                    safe.set_filter(filter.to_string());
                                 }
                             }
                             serde_json::to_string(&safe.get_entries())?
@@ -224,7 +226,9 @@ impl Service<Request<IncomingBody>> for RestService {
                         Some(mut safe) => {
                             safe.set_filter("".to_string());
                             let name_to_find = path.replace("/decrypted/", "");
+                            let name_to_find = percent_decode_str(&name_to_find).decode_utf8()?;
                             debug!("Searching for name: {name_to_find}");
+
                             let found_entries: Vec<Entry> = safe
                                 .get_entries()
                                 .iter()
