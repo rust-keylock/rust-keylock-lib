@@ -79,7 +79,7 @@ impl RklContent {
         let dropbox_conf = dropbox::DropboxConfiguration::new(tup.2.decrypted_token()?);
         let system_conf =
             SystemConfiguration::new(tup.3.saved_at, tup.3.version, tup.3.last_sync_version);
-        let general_configuration = GeneralConfiguration::new(tup.4.browser_extension_token.clone());
+        let general_configuration = GeneralConfiguration::new(tup.4.browser_extension_passphrase.clone());
 
         Ok(RklContent::new(
             entries,
@@ -221,30 +221,30 @@ impl Default for SystemConfiguration {
 /// General configuration
 #[derive(Debug, PartialEq, Clone)]
 pub struct GeneralConfiguration {
-    /// Token to be used for securing the communication with browser extensions
-    pub browser_extension_token: Option<String>,
+    /// Passphrase to be used for securing the communication with browser extensions
+    pub browser_extension_passphrase: Option<String>,
 }
 
 impl GeneralConfiguration {
-    pub fn new(browser_extension_token: Option<String>) -> GeneralConfiguration {
+    pub fn new(browser_extension_passphrase: Option<String>) -> GeneralConfiguration {
         GeneralConfiguration {
-            browser_extension_token,
+            browser_extension_passphrase,
         }
     }
 
     pub fn from_table(table: &Table) -> Result<GeneralConfiguration, errors::RustKeylockError> {
-        let browser_extension_token = table
-            .get("browser_extension_token")
+        let browser_extension_passphrase = table
+            .get("browser_extension_passphrase")
             .and_then(|value| value.as_str().and_then(|str_ref| Some(str_ref.to_string())));
-        Ok(GeneralConfiguration::new(browser_extension_token))
+        Ok(GeneralConfiguration::new(browser_extension_passphrase))
     }
 
     pub fn to_table(&self) -> errors::Result<Table> {
         let mut table = Table::new();
-        if self.browser_extension_token.is_some() {
+        if self.browser_extension_passphrase.is_some() {
             table.insert(
-                "browser_extension_token".to_string(),
-                toml::Value::String(self.browser_extension_token.clone().unwrap()),
+                "browser_extension_passphrase".to_string(),
+                toml::Value::String(self.browser_extension_passphrase.clone().unwrap()),
             );
         }
         Ok(table)
@@ -254,7 +254,7 @@ impl GeneralConfiguration {
 impl Default for GeneralConfiguration {
     fn default() -> GeneralConfiguration {
         GeneralConfiguration {
-            browser_extension_token: None,
+            browser_extension_passphrase: None,
         }
     }
 }
@@ -647,8 +647,8 @@ pub enum UserSelection {
     GeneratePassphrase(Option<usize>, Entry),
     /// The user wants to check the passwords status quality.
     CheckPasswords,
-    /// The user wants to generate a new Browser Extension token
-    GenerateBrowserExtensionToken,
+    /// The user wants to generate a new Browser Extension passphrase
+    GenerateBrowserExtensionPassphrase,
 }
 
 impl UserSelection {
@@ -698,7 +698,7 @@ impl UserSelection {
             UserSelection::AddToClipboard(_) => 12,
             UserSelection::GeneratePassphrase(_, _) => 13,
             UserSelection::CheckPasswords => 14,
-            UserSelection::GenerateBrowserExtensionToken => 15,
+            UserSelection::GenerateBrowserExtensionPassphrase => 15,
         }
     }
 }

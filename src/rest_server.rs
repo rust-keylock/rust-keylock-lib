@@ -78,7 +78,7 @@ fn get_lost_counts() -> MutexGuard<'static, Vec<Counter>> {
 pub(crate) struct RestService {
     listener_opt: Arc<Option<TcpListener>>,
     safe: Arc<Mutex<Option<Safe>>>,
-    token: Arc<Mutex<String>>,
+    passphrase: Arc<Mutex<String>>,
 }
 
 impl RestService {
@@ -98,7 +98,7 @@ impl RestService {
         Ok(RestService {
             listener_opt: Arc::new(listener_opt),
             safe: Arc::new(Mutex::new(None)),
-            token: Arc::new(Mutex::new("".to_string())),
+            passphrase: Arc::new(Mutex::new("".to_string())),
         })
     }
 
@@ -122,8 +122,8 @@ impl RestService {
         Ok(())
     }
 
-    pub(crate) fn update_token(&self, token: String) -> errors::Result<()> {
-        *self.token.lock()? = token;
+    pub(crate) fn update_passphrase(&self, passphrase: String) -> errors::Result<()> {
+        *self.passphrase.lock()? = passphrase;
         Ok(())
     }
 }
@@ -185,12 +185,12 @@ impl Service<Request<IncomingBody>> for RestService {
         }
 
         let safe_opt = self.safe.lock().expect("Safe poisoned").clone();
-        let token_clone = self.token.lock().expect("Token poisoned").clone();
+        let passphrase_clone = self.passphrase.lock().expect("Passphrase poisoned").clone();
         let res = async move {
             match (req.method(), req.uri().path(), req.uri().query()) {
                 (&Method::POST, "/pake", _) => {
                     debug!("Initializing pake...");
-                    let outbound_key = do_pake(req, &token_clone).await?;
+                    let outbound_key = do_pake(req, &passphrase_clone).await?;
 
                     let mut counter = get_counter();
                     let random_initial_counter = thread_rng().gen_range(0..100000);
@@ -310,11 +310,11 @@ fn handle_headers(
     Ok(())
 }
 
-async fn do_pake(req: Request<IncomingBody>, token: &str) -> errors::Result<Vec<u8>> {
+async fn do_pake(req: Request<IncomingBody>, passphrase: &str) -> errors::Result<Vec<u8>> {
     debug!("Executing PAKE");
     let inbound_msg = req.collect().await?.to_bytes();
     let (s1, outbound_msg) = Spake2::<Ed25519Group>::start_b(
-        &Password::new(token),
+        &Password::new(passphrase),
         &Identity::new(b"rust-keylock-browser-extension"),
         &Identity::new(b"rust-keylock-lib"),
     );

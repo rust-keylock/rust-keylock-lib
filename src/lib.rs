@@ -123,12 +123,12 @@ pub async fn execute_async(editor: Box<dyn AsyncEditor>) {
         if let Err(e) = rest_server_clone.update_safe(executor.get_safe()) {
             error!("Could not update the safe for the HTTP server: {e}");
         }
-        let token = executor
+        let passphrase = executor
             .get_configuration()
             .general
-            .browser_extension_token
+            .browser_extension_passphrase
             .unwrap_or_default();
-        if let Err(e) = rest_server_clone.update_token(token.to_string()) {
+        if let Err(e) = rest_server_clone.update_passphrase(passphrase.to_string()) {
             error!("Could not update the safe for the HTTP server: {e}");
         }
         let (new_executor, stop) = executor.handle().await.unwrap();
@@ -709,14 +709,14 @@ Warning: Saving will discard all the entries that could not be recovered.
                     s.configuration.general.clone(),
                 )
             }
-            UserSelection::GenerateBrowserExtensionToken => {
-                debug!("UserSelection::GenerateBrowserExtensionToken");
-                let new_token = rs_password_utils::dice::generate_with_separator(
+            UserSelection::GenerateBrowserExtensionPassphrase => {
+                debug!("UserSelection::GenerateBrowserExtensionPassphrase");
+                let new_passphrase = rs_password_utils::dice::generate_with_separator(
                     s.props.generated_passphrases_words_count() as usize,
                     "_",
                 );
                 let mut updated_gen_conf = s.configuration.general.clone();
-                updated_gen_conf.browser_extension_token = Some(new_token);
+                updated_gen_conf.browser_extension_passphrase = Some(new_passphrase);
                 s.editor.show_configuration(
                     s.configuration.nextcloud.clone(),
                     s.configuration.dropbox.clone(),
