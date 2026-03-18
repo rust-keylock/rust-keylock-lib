@@ -199,6 +199,10 @@ impl Service<Request<IncomingBody>> for RestService {
 
                     mk_response_bytes_with_ticket_header(outbound_key, *counter)
                 }
+                (&Method::GET, "/pake_status", _) => {
+                    debug!("Returning PAKE status request");
+                    mk_response_bytes("PAKE OK".as_bytes().into())
+                }
                 (&Method::GET, "/entries", query_opt) => {
                     debug!("Getting entries...");
                     let resp_string = match safe_opt {
