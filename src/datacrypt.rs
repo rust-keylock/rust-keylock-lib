@@ -23,7 +23,7 @@ use base64::{Engine as _, engine::general_purpose};
 use bcrypt::bcrypt;
 use aes::cipher::{KeyIvInit, StreamCipher, generic_array::GenericArray};
 use hkdf::Hkdf;
-use rand::{thread_rng, Rng, RngCore};
+use rand::prelude::*;
 use sha2::Sha256;
 use sha3::{Digest, Sha3_512};
 use zeroize::Zeroize;
@@ -347,14 +347,16 @@ impl Hasher for Sha3Keccak512 {
 /// Creates a pseudo-random array of bytes with the given size
 pub fn create_random(size: usize) -> Vec<u8> {
     let mut random: Vec<u8> = repeat(0u8).take(size).collect();
-    thread_rng().fill_bytes(&mut random);
+    let mut rng = rand::rng();
+    rng.fill_bytes(&mut random);
     random
 }
 
 /// Creates a random String with the given size
 pub fn create_random_utf_string(size: usize) -> String {
+    let mut rng = rand::rng();
     repeat(())
-        .map(|()| thread_rng().sample(rand::distributions::Alphanumeric))
+        .map(|()| rng.sample(rand::distr::Alphanumeric))
         .map(char::from)
         .take(size)
         .collect()

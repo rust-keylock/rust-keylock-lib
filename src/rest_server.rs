@@ -27,7 +27,6 @@ use hyper::{body::Incoming as IncomingBody, Request, Response};
 use hyper_util::rt::TokioIo;
 use log::{debug, info, warn};
 use percent_encoding::percent_decode_str;
-use rand::{thread_rng, Rng};
 use spake2::{Ed25519Group, Identity, Password, Spake2};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
@@ -193,7 +192,7 @@ impl Service<Request<IncomingBody>> for RestService {
                     let outbound_key = do_pake(req, &passphrase_clone).await?;
 
                     let mut counter = get_counter();
-                    let random_initial_counter = thread_rng().gen_range(0..100000);
+                    let random_initial_counter = rand::random_range(0..100000);
                     debug!("Initializing counter to {random_initial_counter}");
                     *counter = random_initial_counter;
 

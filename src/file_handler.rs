@@ -293,13 +293,8 @@ pub(crate) fn load_properties(filename: &str) -> Result<Props, RustKeylockError>
         save_props(&props, filename)?;
         Ok(props)
     } else {
-        let value = toml.as_str().parse::<Value>()?;
-        match value.as_table() {
-            Some(table) => transform_to_props(table),
-            None => Err(RustKeylockError::ParseError(
-                "No Table found in the toml while loading properties.".to_string(),
-            )),
-        }
+        let table = toml.as_str().parse::<Table>()?;
+        transform_to_props(&table)
     }
 }
 
@@ -690,9 +685,8 @@ mod test_file_handler {
 			desc = "other description"
 		"#;
 
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
-        let res = super::transform_to_dtos(table, false);
+        let table = toml.parse::<toml::Table>().unwrap();
+        let res = super::transform_to_dtos(&table, false);
         assert!(res.is_ok());
         let vec = res.unwrap();
         assert!(vec.len() == 2);
@@ -721,9 +715,8 @@ mod test_file_handler {
 			desc = "other description"
 		"#;
 
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
-        let res = super::transform_to_dtos(table, false);
+        let table = toml.parse::<toml::Table>().unwrap();
+        let res = super::transform_to_dtos(&table, false);
         assert!(res.is_err());
     }
 
@@ -743,9 +736,8 @@ mod test_file_handler {
 			desc = "other description"
 		"#;
 
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
-        let res = super::transform_to_dtos(table, true);
+        let table = toml.parse::<toml::Table>().unwrap();
+        let res = super::transform_to_dtos(&table, true);
         assert!(res.is_ok());
         let vec = res.unwrap();
         assert!(vec.len() == 1);

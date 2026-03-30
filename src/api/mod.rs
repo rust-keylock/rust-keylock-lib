@@ -968,8 +968,7 @@ mod api_unit_tests {
 			meta = { leaked_password = true }
 		"#;
 
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
+        let table = toml.parse::<toml::Table>().unwrap();
         let entry_opt = Entry::from_table(&table);
         assert!(entry_opt.is_ok());
         let entry = entry_opt.unwrap();
@@ -991,8 +990,7 @@ mod api_unit_tests {
 			desc = "some description"
 		"#;
 
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
+        let table = toml.parse::<toml::Table>().unwrap();
         let entry_opt = Entry::from_table(&table);
         assert!(entry_opt.is_ok());
         let entry = entry_opt.unwrap();
@@ -1014,8 +1012,7 @@ mod api_unit_tests {
 			desc = "some description"
 		"#;
 
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
+        let table = toml.parse::<toml::Table>().unwrap();
         let entry_opt = super::Entry::from_table(&table);
         assert!(entry_opt.is_err());
     }
@@ -1030,8 +1027,7 @@ mod api_unit_tests {
 			desc = "some description"
 		"#;
 
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
+        let table = toml.parse::<toml::Table>().unwrap();
         let entry_opt = super::Entry::from_table(&table);
         assert!(entry_opt.is_err());
     }
@@ -1047,14 +1043,13 @@ mod api_unit_tests {
 			meta = {leaked_password = false}
 		"#;
 
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
+        let table = toml.parse::<toml::Table>().unwrap();
         let entry_opt = super::Entry::from_table(&table);
         assert!(entry_opt.is_ok());
         let entry = entry_opt.unwrap();
         let new_table = entry.to_table();
         dbg!(&new_table);
-        assert!(table == &new_table);
+        assert!(table == new_table);
     }
 
     #[test]
@@ -1101,8 +1096,7 @@ mod api_unit_tests {
         version = "0.0.0"
         "#;
 
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
+        let table = toml.parse::<toml::Table>().unwrap();
         let props_opt = super::Props::from_table(&table);
         assert!(props_opt.is_ok());
         let props = props_opt.unwrap();
@@ -1116,8 +1110,7 @@ mod api_unit_tests {
         let toml1 = r#"
         idle_timeout_seconds = 33
         "#;
-        let value1 = toml1.parse::<toml::value::Value>().unwrap();
-        let table1 = value1.as_table().unwrap();
+        let table1 = toml1.parse::<toml::Table>().unwrap();
         let props_opt1 = super::Props::from_table(&table1);
         assert!(props_opt1.is_ok());
         let props1 = props_opt1.unwrap();
@@ -1127,8 +1120,7 @@ mod api_unit_tests {
         let toml2 = r#"
         generated_passphrases_words_count = 5
         "#;
-        let value2 = toml2.parse::<toml::value::Value>().unwrap();
-        let table2 = value2.as_table().unwrap();
+        let table2 = toml2.parse::<toml::Table>().unwrap();
         let props_opt2 = super::Props::from_table(&table2);
         assert!(props_opt2.is_ok());
         let props2 = props_opt2.unwrap();
@@ -1138,8 +1130,7 @@ mod api_unit_tests {
         let toml3 = r#"
         version = "0.0.0"
         "#;
-        let value3 = toml3.parse::<toml::value::Value>().unwrap();
-        let table3 = value3.as_table().unwrap();
+        let table3 = toml3.parse::<toml::Table>().unwrap();
         let props_opt3 = super::Props::from_table(&table3);
         assert!(props_opt3.is_ok());
         let props3 = props_opt3.unwrap();
@@ -1152,8 +1143,7 @@ mod api_unit_tests {
     fn props_from_table_failure_wrong_key() {
         let toml = r#"wrong_key = "alas""#;
 
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
+        let table = toml.parse::<toml::Table>().unwrap();
         let props_opt = super::Props::from_table(&table);
         assert!(props_opt.is_ok());
     }
@@ -1162,8 +1152,7 @@ mod api_unit_tests {
     fn props_from_table_failure_wrong_value() {
         let toml = r#"salt = 1"#;
 
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
+        let table = toml.parse::<toml::Table>().unwrap();
         let props_opt = super::Props::from_table(&table);
         assert!(props_opt.is_ok());
     }
@@ -1176,13 +1165,12 @@ mod api_unit_tests {
         version = "0.0.0"
         "#;
 
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
+        let table = toml.parse::<toml::Table>().unwrap();
         let props_opt = super::Props::from_table(&table);
         assert!(props_opt.is_ok());
         let props = props_opt.unwrap();
         let new_table = props.to_table();
-        assert!(table == &new_table);
+        assert!(table == new_table);
     }
 
     #[test]
@@ -1193,8 +1181,7 @@ mod api_unit_tests {
         version = "0.0.0"
         "#;
 
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
+        let table = toml.parse::<toml::Table>().unwrap();
         let props_opt = super::Props::from_table(&table);
         assert!(props_opt.is_ok());
         let mut props = props_opt.unwrap();
@@ -1272,13 +1259,12 @@ mod api_unit_tests {
 			version = 1
 		"#;
 
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
+        let table = toml.parse::<toml::Table>().unwrap();
         let res = super::SystemConfiguration::from_table(&table);
         assert!(res.is_ok());
         let conf = res.unwrap();
         let new_table = conf.to_table().unwrap();
-        assert!(table == &new_table);
+        assert!(table == new_table);
     }
 
     #[test]
@@ -1288,8 +1274,7 @@ mod api_unit_tests {
 			version = 1
 		"#;
 
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
+        let table = toml.parse::<toml::Table>().unwrap();
         let res = super::SystemConfiguration::from_table(&table);
         assert!(res.is_ok());
         let conf = res.unwrap();

@@ -828,13 +828,12 @@ mod dropbox_tests {
                         token = "thisisatoken"
                     "#;
 
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
+        let table = toml.parse::<toml::Table>().unwrap();
         let dbx_res = DropboxConfiguration::from_table(&table);
         assert!(dbx_res.is_ok());
         let dbx = dbx_res.unwrap();
         let new_table = dbx.to_table().unwrap();
-        assert!(table == &new_table);
+        assert!(table == new_table);
     }
 
     #[test]
@@ -843,8 +842,7 @@ mod dropbox_tests {
                         token = "thisisatoken"
                     "#;
 
-        let value = toml.parse::<toml::value::Value>().unwrap();
-        let table = value.as_table().unwrap();
+        let table = toml.parse::<toml::Table>().unwrap();
         let dbx_res = DropboxConfiguration::from_table(&table);
         assert!(dbx_res.is_ok());
         let dbx = dbx_res.unwrap();

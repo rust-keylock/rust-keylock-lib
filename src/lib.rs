@@ -103,7 +103,7 @@ pub async fn execute_async(editor: Box<dyn AsyncEditor>) {
     }
 
     unsafe {
-        openssl_probe::init_openssl_env_vars();
+        openssl_probe::try_init_openssl_env_vars();
     }
     info!("Starting rust-keylock...");
     let props = match file_handler::load_properties(PROPS_FILENAME) {
