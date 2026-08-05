@@ -1286,8 +1286,8 @@ mod nextcloud_tests {
                               <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/{}</d:href>
                               <d:propstat>
                                <d:prop>
-                                <rkl:rklsavedat>1234567</rkl:rklsavedat>
-                                <rkl:rklversion>1</rkl:rklversion>
+                                <x1:rklsavedat xmlns:x1="http://rust-keylock.github.io">1234567</x1:rklsavedat>
+                                <x1:rklversion xmlns:x1="http://rust-keylock.github.io">1</x1:rklversion>
                                </d:prop>
                                <d:status>HTTP/1.1 200 OK</d:status>
                               </d:propstat>
@@ -1437,13 +1437,16 @@ mod nextcloud_tests {
         if req.method() == &hyper::Method::from_bytes("PROPFIND".as_ref()).unwrap() {
             let _ = tx_assert.send(true);
             let xml = r#"<?xml version="1.0"?>
-                                <d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:rkl="http://rust-keylock.github.io" xmlns:nc="http://nextcloud.org/ns">
+                                <d:multistatus xmlns:d="DAV:" xmlns:d="DAV:"
+	                                xmlns:s="http://sabredav.org/ns"
+                                	xmlns:oc="http://owncloud.org/ns"
+	                                xmlns:nc="http://nextcloud.org/ns">
                                  <d:response>
                                   <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/download_a_file_from_the_server</d:href>
                                   <d:propstat>
                                    <d:prop>
-                                    <rkl:rklsavedat>4667760000</rkl:rklsavedat>
-                                    <rkl:rklversion>1</rkl:rklversion>
+                                    <x1:rklsavedat xmlns:x1="http://rust-keylock.github.io">4667760000</x1:rklsavedat>
+                                    <x1:rklversion xmlns:x1="http://rust-keylock.github.io">1000000</x1:rklversion>
                                    </d:prop>
                                    <d:status>HTTP/1.1 200 OK</d:status>
                                   </d:propstat>
@@ -1558,8 +1561,8 @@ mod nextcloud_tests {
                                   <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/http_error_response_on_get</d:href>
                                   <d:propstat>
                                    <d:prop>
-                                    <rkl:rklsavedat>4667760000</rkl:rklsavedat>
-                                    <rkl:rklversion>1</rkl:rklversion>
+                                    <x1:rklsavedat xmlns:x1="http://rust-keylock.github.io">4667760000</x1:rklsavedat>
+                                    <x1:rklversion xmlns:x1="http://rust-keylock.github.io">1</x1:rklversion>
                                    </d:prop>
                                    <d:status>HTTP/1.1 200 OK</d:status>
                                   </d:propstat>
