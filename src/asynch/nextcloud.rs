@@ -137,8 +137,8 @@ impl Synchronizer {
         )?;
         debug!("Syncing with {}", url);
 
-        // Set the body of the request so that it returns the oc:rklsavedat and oc:rklversion properties
-        let xml_body = r#"<d:propfind xmlns:d="DAV:"><d:prop xmlns:oc="http://owncloud.org/ns"><oc:rklsavedat/><oc:rklversion/></d:prop></d:propfind>"#;
+        // Set the body of the request so that it returns the rkl:rklsavedat and rkl:rklversion properties
+        let xml_body = r#"<d:propfind xmlns:d="DAV:"><d:prop xmlns:rkl="http://rust-keylock.github.io"><rkl:rklsavedat/><rkl:rklversion/></d:prop></d:propfind>"#;
 
         let req_builder = Client::new()
             .request(Method::from_bytes(b"PROPFIND")?, url)
@@ -310,6 +310,9 @@ impl Synchronizer {
             match elem {
                 Ok(XmlEvent::StartElement { name, .. }) => {
                     curr_elem_name = name.to_string();
+                    debug!(
+                        "-----------{}",curr_elem_name
+                    );
                 }
                 Ok(XmlEvent::Characters(string)) => {
                     debug!(
@@ -318,10 +321,10 @@ impl Synchronizer {
                     );
                     match curr_elem_name.as_ref() {
                         "{DAV:}d:href" => web_dav_resp.href = string,
-                        "{http://owncloud.org/ns}oc:rklsavedat" => {
+                        "{http://rust-keylock.github.io}x1:rklsavedat" => {
                             web_dav_resp.last_modified = string
                         }
-                        "{http://owncloud.org/ns}oc:rklversion" => web_dav_resp.version = string,
+                        "{http://rust-keylock.github.io}x1:rklversion" => web_dav_resp.version = string,
                         "{DAV:}d:status" => web_dav_resp.status = string,
                         _ => {
                             // ignore
@@ -330,6 +333,7 @@ impl Synchronizer {
                 }
                 Ok(XmlEvent::EndElement { name, .. }) => {
                     if name.to_string() == "{DAV:}d:response" {
+                        debug!("===={:?}", web_dav_resp);
                         // Check if the file is the one where the passwords are stored and that the gathered data are all present
                         if web_dav_resp.href.ends_with(filename)
                             && web_dav_resp.href != ""
@@ -345,6 +349,15 @@ impl Synchronizer {
                                                                                                       filename,
                                                                                                       web_dav_resp.status)));
                             }
+                            break;
+                        } else if web_dav_resp.href.ends_with(filename) && 
+                                web_dav_resp.status.contains("404 Not Found") {
+                            
+                            info!("Web Dav properties not found. Forcing a merge...");
+                            // Force a merge
+                            web_dav_resp.version = "0".to_string();
+                            web_dav_resp.last_modified = "0".to_string();
+                            web_dav_resp_result = Ok(web_dav_resp);
                             break;
                         }
                     }
@@ -446,11 +459,11 @@ impl Synchronizer {
         // PROPPATCH starts here
         let xml_body: String = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
-<d:propertyupdate xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">
+<d:propertyupdate xmlns:d="DAV:" xmlns:rkl="http://rust-keylock.github.io">
 <d:set>
 <d:prop>
-  <oc:rklsavedat>{}</oc:rklsavedat>
-  <oc:rklversion>{}</oc:rklversion>
+  <rkl:rklsavedat>{}</rkl:rklsavedat>
+  <rkl:rklversion>{}</rkl:rklversion>
 </d:prop>
 </d:set>
 </d:propertyupdate>"#,
@@ -701,7 +714,7 @@ impl Default for NextcloudConfiguration {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct WebDavResponse {
     href: String,
     last_modified: String,
@@ -1268,13 +1281,13 @@ mod nextcloud_tests {
         let filename = "afilename";
         let xml = format!(
             r#"<?xml version="1.0"?>
-                            <d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">
+                            <d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:rkl="http://rust-keylock.github.io" xmlns:nc="http://nextcloud.org/ns">
                              <d:response>
                               <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/{}</d:href>
                               <d:propstat>
                                <d:prop>
-                                <oc:rklsavedat>1234567</oc:rklsavedat>
-                                <oc:rklversion>1</oc:rklversion>
+                                <rkl:rklsavedat>1234567</rkl:rklsavedat>
+                                <rkl:rklversion>1</rkl:rklversion>
                                </d:prop>
                                <d:status>HTTP/1.1 200 OK</d:status>
                               </d:propstat>
@@ -1301,7 +1314,7 @@ mod nextcloud_tests {
         let filename = "afilename";
         // The file element is not present
         let xml = r#"<?xml version="1.0"?>
-                            <d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">
+                            <d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:rkl="http://rust-keylock.github.io" xmlns:nc="http://nextcloud.org/ns">
                              <d:response>
                               <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/</d:href>
                               <d:propstat>
@@ -1331,7 +1344,7 @@ mod nextcloud_tests {
         // The oc:rklsavedat element is not present
         let xml = format!(
             r#"<?xml version="1.0"?>
-                            <d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">
+                            <d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:rkl="http://rust-keylock.github.io" xmlns:nc="http://nextcloud.org/ns">
                              <d:response>
                               <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/{}</d:href>
                               <d:propstat>
@@ -1355,13 +1368,13 @@ mod nextcloud_tests {
         let filename = "afilename";
         let xml = format!(
             r#"<?xml version="1.0"?>
-                            <d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">
+                            <d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:rkl="http://rust-keylock.github.io" xmlns:nc="http://nextcloud.org/ns">
                              <d:response>
                               <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/{}</d:href>
                               <d:propstat>
                                <d:prop>
-                                <oc:rklsavedat>1234567</oc:rklsavedat>
-                                <oc:rklversion>1</oc:rklversion>
+                                <rkl:rklsavedat>1234567</rkl:rklsavedat>
+                                <rkl:rklversion>1</rkl:rklversion>
                                </d:prop>
                                <d:status>HTTP/1.1 400 Bad Request</d:status>
                               </d:propstat>
@@ -1424,13 +1437,13 @@ mod nextcloud_tests {
         if req.method() == &hyper::Method::from_bytes("PROPFIND".as_ref()).unwrap() {
             let _ = tx_assert.send(true);
             let xml = r#"<?xml version="1.0"?>
-                                <d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">
+                                <d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:rkl="http://rust-keylock.github.io" xmlns:nc="http://nextcloud.org/ns">
                                  <d:response>
                                   <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/download_a_file_from_the_server</d:href>
                                   <d:propstat>
                                    <d:prop>
-                                    <oc:rklsavedat>4667760000</oc:rklsavedat>
-                                    <oc:rklversion>1</oc:rklversion>
+                                    <rkl:rklsavedat>4667760000</rkl:rklsavedat>
+                                    <rkl:rklversion>1</rkl:rklversion>
                                    </d:prop>
                                    <d:status>HTTP/1.1 200 OK</d:status>
                                   </d:propstat>
@@ -1540,13 +1553,13 @@ mod nextcloud_tests {
         if req.method() == &hyper::Method::from_bytes("PROPFIND".as_ref()).unwrap() {
             let _ = tx_assert.send(true);
             let xml = r#"<?xml version="1.0"?>
-                                <d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">
+                                <d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:rkl="http://rust-keylock.github.io" xmlns:nc="http://nextcloud.org/ns">
                                  <d:response>
                                   <d:href>/nextcloud/remote.php/dav/files/user/.rust-keylock/http_error_response_on_get</d:href>
                                   <d:propstat>
                                    <d:prop>
-                                    <oc:rklsavedat>4667760000</oc:rklsavedat>
-                                    <oc:rklversion>1</oc:rklversion>
+                                    <rkl:rklsavedat>4667760000</rkl:rklsavedat>
+                                    <rkl:rklversion>1</rkl:rklversion>
                                    </d:prop>
                                    <d:status>HTTP/1.1 200 OK</d:status>
                                   </d:propstat>
